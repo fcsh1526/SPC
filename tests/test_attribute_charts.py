@@ -58,7 +58,9 @@ def test_np_chart_rejects_changing_sample_size():
 
 def test_small_sample_warning():
     chart = p_chart([1, 2, 1], 40)
-    assert any("50" in w for w in chart.warnings)
+    assert [w.code for w in chart.warnings] == ["small_sample"]
+    assert chart.warnings[0].params["limit"] == 50
+    assert "50" in str(chart.warnings[0])
 
 
 def test_c_chart_limits():

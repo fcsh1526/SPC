@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPC</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1 data-i18n="app.title">SPC</h1>
+    <p data-i18n="app.subtitle"></p>
+  </div>
+  <label class="lang">
+    <span data-i18n="app.language"></span>
+    <select id="lang">
+      <option value="zh-TW">繁體中文</option>
+      <option value="en">English</option>
+    </select>
+  </label>
+</header>
+
+<p class="notice" data-i18n="app.notice"></p>
+
+<nav class="tabs" role="tablist">
+  <button role="tab" data-tab="import" aria-selected="true" data-i18n="nav.import"></button>
+  <button role="tab" data-tab="data" aria-selected="false" aria-disabled="true" data-i18n="nav.data"></button>
+  <button role="tab" data-tab="analysis" aria-selected="false" aria-disabled="true" data-i18n="nav.analysis"></button>
+  <button role="tab" data-tab="tools" aria-selected="false" data-i18n="nav.tools"></button>
+</nav>
+
+<div id="errors" class="errors" role="alert" hidden></div>
+<div id="busy" class="busy" hidden data-i18n="app.loading"></div>
+
+<main>
+<!-- 1. import -->
+<section id="tab-import" class="panel">
+  <h2 data-i18n="import.title"></h2>
+  <p data-i18n="import.intro"></p>
+  <p>
+    <label class="filebtn">
+      <input type="file" id="file" accept=".csv,.txt,text/csv">
+      <span data-i18n="import.choose"></span>
+    </label>
+    <span id="file-name" class="muted" data-i18n="import.no_file"></span>
+  </p>
+  <div id="import-form" hidden>
+    <p id="detected" class="muted"></p>
+    <h3 data-i18n="import.preview"></h3>
+    <div class="scroll"><table id="preview" class="grid"></table></div>
+    <div class="form-grid">
+      <label><span data-i18n="import.col_value"></span><select id="col-value"></select></label>
+      <label><span data-i18n="import.col_subgroup"></span><select id="col-subgroup"></select></label>
+      <label><span data-i18n="import.col_timestamp"></span><select id="col-timestamp"></select></label>
+      <label><span data-i18n="import.decimal"></span>
+        <select id="decimal">
+          <option value="." data-i18n="import.decimal_point"></option>
+          <option value="," data-i18n="import.decimal_comma"></option>
+        </select></label>
+      <label><span data-i18n="import.missing"></span>
+        <select id="missing">
+          <option value="error" data-i18n="import.missing_error"></option>
+          <option value="skip" data-i18n="import.missing_skip"></option>
+        </select></label>
+    </div>
+    <fieldset>
+      <legend data-i18n="import.col_tags"></legend>
+      <div id="col-tags" class="checks"></div>
+    </fieldset>
+    <details>
+      <summary data-i18n="analysis.advanced"></summary>
+      <div class="form-grid">
+        <label><span data-i18n="import.col_valid"></span><select id="col-valid"></select></label>
+        <label><span data-i18n="import.col_reason"></span><select id="col-reason"></select></label>
+        <label><span data-i18n="import.col_by"></span><select id="col-by"></select></label>
+        <label><span data-i18n="import.col_at"></span><select id="col-at"></select></label>
+        <label><span data-i18n="import.col_source_row"></span><select id="col-source-row"></select></label>
+      </div>
+    </details>
+    <p><button id="import-btn" class="primary" data-i18n="import.submit"></button></p>
+  </div>
+</section>
+
+<!-- 2. data -->
+<section id="tab-data" class="panel" hidden>
+  <h2 data-i18n="data.title"></h2>
+  <p id="data-counts" class="strong"></p>
+  <p id="data-source" class="muted"></p>
+  <ul id="data-warnings" class="warnings"></ul>
+
+  <div class="card">
+    <h3 data-i18n="data.suspects_title"></h3>
+    <p class="note" data-i18n="data.suspects_note"></p>
+    <div class="row">
+      <label><span data-i18n="data.method"></span>
+        <select id="suspect-method">
+          <option value="mad" data-i18n="data.method_mad"></option>
+          <option value="tukey" data-i18n="data.method_tukey"></option>
+          <option value="grubbs" data-i18n="data.method_grubbs"></option>
+        </select></label>
+      <button id="suspect-btn" data-i18n="data.find"></button>
+      <button id="suspect-select" hidden data-i18n="data.select_suspects"></button>
+    </div>
+    <p id="suspect-msg" class="muted"></p>
+  </div>
+
+  <div class="card">
+    <h3 data-i18n="data.mark_title"></h3>
+    <p id="selected-count" class="muted"></p>
+    <div class="form-grid">
+      <label class="wide"><span data-i18n="data.reason"></span>
+        <input id="reason" type="text" maxlength="2000" data-i18n-placeholder="data.reason_hint"></label>
+      <label><span data-i18n="data.person"></span><input id="person" type="text" maxlength="200" autocomplete="name"></label>
+    </div>
+    <p class="row">
+      <button id="mark-btn" class="primary" data-i18n="data.mark"></button>
+      <button id="restore-btn" data-i18n="data.restore"></button>
+      <a id="export-link" class="button" download data-i18n="data.export"></a>
+    </p>
+  </div>
+
+  <div class="scroll"><table id="rows" class="grid"></table></div>
+  <p class="row">
+    <button id="prev" data-i18n="data.prev"></button>
+    <span id="page-info" class="muted"></span>
+    <button id="next" data-i18n="data.next"></button>
+  </p>
+
+  <details>
+    <summary data-i18n="data.log_title"></summary>
+    <ul id="log" class="log"></ul>
+  </details>
+  <p><button id="to-analysis" class="primary" data-i18n="data.next_step"></button></p>
+</section>
+
+<!-- 3. analysis -->
+<section id="tab-analysis" class="panel" hidden>
+  <h2 data-i18n="analysis.title"></h2>
+  <form id="analysis-form">
+    <div class="form-grid">
+      <label class="wide"><span data-i18n="analysis.stage"></span>
+        <select id="a-stage">
+          <option value="production" data-i18n="analysis.stage_production"></option>
+          <option value="preliminary" data-i18n="analysis.stage_preliminary"></option>
+          <option value="machine" data-i18n="analysis.stage_machine"></option>
+        </select></label>
+      <label><span data-i18n="analysis.lsl"></span><input id="a-lsl" type="number" step="any"></label>
+      <label><span data-i18n="analysis.usl"></span><input id="a-usl" type="number" step="any"></label>
+      <label><span data-i18n="analysis.class"></span>
+        <select id="a-class">
+          <option value="" data-i18n="analysis.class_none"></option>
+          <option value="critical" data-i18n="analysis.class_critical"></option>
+          <option value="major" data-i18n="analysis.class_major"></option>
+          <option value="minor" data-i18n="analysis.class_minor"></option>
+          <option value="others" data-i18n="analysis.class_others"></option>
+        </select></label>
+      <label id="a-size-wrap"><span data-i18n="analysis.subgroup_size"></span>
+        <input id="a-size" type="number" min="1" step="1">
+        <small class="muted" data-i18n="analysis.subgroup_size_hint"></small></label>
+    </div>
+
+    <fieldset>
+      <legend data-i18n="analysis.stability"></legend>
+      <div class="form-grid">
+        <label class="wide"><span data-i18n="analysis.model"></span>
+          <select id="a-model">
+            <option value="" data-i18n="analysis.model_none"></option>
+            <option value="A1" data-i18n="analysis.model_A1"></option>
+            <option value="A2" data-i18n="analysis.model_A2"></option>
+            <option value="B" data-i18n="analysis.model_B"></option>
+            <option value="C1" data-i18n="analysis.model_C1"></option>
+            <option value="C2" data-i18n="analysis.model_C2"></option>
+            <option value="C3" data-i18n="analysis.model_C3"></option>
+            <option value="C4" data-i18n="analysis.model_C4"></option>
+            <option value="D" data-i18n="analysis.model_D"></option>
+          </select>
+          <small class="muted" data-i18n="analysis.model_hint"></small></label>
+        <label class="check wide"><input id="a-controlled" type="checkbox"><span data-i18n="analysis.controlled_stable"></span></label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend data-i18n="analysis.rules"></legend>
+      <p class="note" data-i18n="analysis.rules_hint"></p>
+      <div class="rules">
+        <label class="check"><input id="r-beyond" type="checkbox" checked><span data-i18n="analysis.rule_beyond_limits"></span></label>
+        <label class="check"><input id="r-run" type="checkbox"><span data-i18n="analysis.rule_run"></span>
+          <input id="r-run-n" type="number" min="2" max="50" value="7" class="small"></label>
+        <label class="check"><input id="r-trend" type="checkbox"><span data-i18n="analysis.rule_trend"></span>
+          <input id="r-trend-n" type="number" min="2" max="50" value="7" class="small"></label>
+        <label class="check"><input id="r-middle" type="checkbox"><span data-i18n="analysis.rule_middle_third"></span></label>
+        <label class="check"><input id="r-2of3" type="checkbox"><span data-i18n="analysis.rule_two_of_three"></span></label>
+        <label class="check"><input id="r-4of5" type="checkbox"><span data-i18n="analysis.rule_four_of_five"></span></label>
+        <label class="check"><input id="r-15" type="checkbox"><span data-i18n="analysis.rule_fifteen"></span></label>
+      </div>
+    </fieldset>
+
+    <details>
+      <summary data-i18n="analysis.advanced"></summary>
+      <div class="form-grid">
+        <label><span data-i18n="analysis.chart"></span>
+          <select id="a-chart">
+            <option value="auto" data-i18n="analysis.chart_auto"></option>
+            <option value="xbar-s" data-i18n="analysis.chart_xbar-s"></option>
+            <option value="xbar-r" data-i18n="analysis.chart_xbar-r"></option>
+            <option value="imr" data-i18n="analysis.chart_imr"></option>
+          </select></label>
+        <label><span data-i18n="analysis.risk"></span>
+          <select id="a-alpha">
+            <option value="" data-i18n="analysis.risk_3sigma"></option>
+            <option value="0.01" data-i18n="analysis.risk_99"></option>
+          </select></label>
+        <label><span data-i18n="analysis.stability_mode"></span>
+          <select id="a-mode">
+            <option value="random_range" data-i18n="analysis.mode_random_range"></option>
+            <option value="strict" data-i18n="analysis.mode_strict"></option>
+          </select></label>
+        <label><span data-i18n="analysis.edition"></span>
+          <select id="a-edition">
+            <option value="draft" data-i18n="analysis.edition_draft"></option>
+            <option value="final" data-i18n="analysis.edition_final"></option>
+          </select></label>
+        <label><span data-i18n="analysis.incomplete"></span>
+          <select id="a-incomplete">
+            <option value="drop" data-i18n="analysis.incomplete_drop"></option>
+            <option value="error" data-i18n="analysis.incomplete_error"></option>
+          </select></label>
+        <label><span data-i18n="analysis.customer"></span><input id="a-customer" type="text" maxlength="200"></label>
+      </div>
+    </details>
+    <p><button id="run-btn" class="primary" type="submit" data-i18n="analysis.run"></button></p>
+  </form>
+
+  <div id="result" hidden>
+    <h2 data-i18n="result.title"></h2>
+    <ul id="r-warnings" class="warnings"></ul>
+    <p id="r-counts" class="strong"></p>
+    <div class="cards">
+      <div class="card"><h3 data-i18n="result.names_title"></h3><p id="r-names" class="big"></p><p id="r-names-reason" class="muted"></p></div>
+      <div class="card"><h3 data-i18n="result.stability_title"></h3><p id="r-stability" class="strong"></p><p id="r-alarm-points" class="muted"></p></div>
+    </div>
+    <h3 id="r-loc-title"></h3>
+    <div id="chart-loc" class="chart"></div>
+    <ul id="r-loc-alarms" class="alarms"></ul>
+    <h3 id="r-var-title"></h3>
+    <div id="chart-var" class="chart"></div>
+    <ul id="r-var-alarms" class="alarms"></ul>
+    <p class="muted" data-i18n="result.no_spec_on_chart"></p>
+
+    <div id="r-indices-block">
+      <h3 data-i18n="result.indices_title"></h3>
+      <div class="scroll"><table id="r-indices" class="grid"></table></div>
+      <p id="r-stats" class="muted"></p>
+      <p id="r-ppm" class="strong"></p>
+      <p id="r-normality" class="muted"></p>
+    </div>
+    <div id="r-targets-block" hidden>
+      <h3 data-i18n="result.targets_title"></h3>
+      <div class="scroll"><table id="r-targets" class="grid"></table></div>
+      <p id="r-target-note" class="muted"></p>
+    </div>
+    <div id="r-diagnosis-block" class="card" hidden>
+      <h3 data-i18n="result.diagnosis_title"></h3>
+      <p id="r-diagnosis" class="strong"></p>
+      <p class="note" data-i18n="result.diagnosis_note"></p>
+    </div>
+    <div class="card">
+      <h3 data-i18n="result.params_title"></h3>
+      <p id="r-params" class="muted"></p>
+      <p id="r-fingerprint" class="muted"></p>
+      <p id="r-hash" class="muted"></p>
+    </div>
+  </div>
+</section>
+
+<!-- tools -->
+<section id="tab-tools" class="panel" hidden>
+  <h2 data-i18n="tools.title"></h2>
+  <div class="card">
+    <h3 data-i18n="tools.targets_title"></h3>
+    <div class="form-grid">
+      <label><span data-i18n="tools.stage"></span>
+        <select id="t-stage">
+          <option value="machine" data-i18n="analysis.stage_machine"></option>
+          <option value="preliminary" data-i18n="analysis.stage_preliminary"></option>
+          <option value="production" data-i18n="analysis.stage_production"></option>
+        </select></label>
+      <label><span data-i18n="tools.class"></span>
+        <select id="t-class">
+          <option value="critical" data-i18n="analysis.class_critical"></option>
+          <option value="major" selected data-i18n="analysis.class_major"></option>
+          <option value="minor" data-i18n="analysis.class_minor"></option>
+          <option value="others" data-i18n="analysis.class_others"></option>
+        </select></label>
+      <label><span data-i18n="tools.n"></span><input id="t-n" type="number" min="2" step="1" value="30"></label>
+      <label><span data-i18n="tools.confidence"></span>
+        <select id="t-conf">
+          <option value="0.95">95 %</option>
+          <option value="0.99">99 %</option>
+          <option value="0.999">99.9 %</option>
+          <option value="0.9999" selected>99.99 %</option>
+        </select></label>
+    </div>
+    <p><button id="t-btn" class="primary" data-i18n="tools.calculate"></button></p>
+    <p id="t-out" class="strong"></p>
+  </div>
+  <div class="card">
+    <h3 data-i18n="tools.arl_title"></h3>
+    <div class="form-grid">
+      <label><span data-i18n="tools.arl_shift"></span><input id="l-shift" type="number" step="any" min="0.01" value="0.75"></label>
+      <label><span data-i18n="tools.arl_n"></span><input id="l-n" type="number" min="1" step="1" value="5"></label>
+      <label><span data-i18n="tools.arl_max"></span><input id="l-max" type="number" min="1" step="any" value="10"></label>
+    </div>
+    <p><button id="l-btn" class="primary" data-i18n="tools.calculate"></button></p>
+    <div id="l-out"></div>
+  </div>
+</section>
+</main>
+<script src="/static/app.js" defer></script>
+</body>
+</html>

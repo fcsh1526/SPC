@@ -6,6 +6,7 @@ from spc.data.csv_io import (
     ImportIssue,
     export_columns,
     load_csv,
+    preview_csv,
     to_csv,
 )
 from spc.data.dataset import (
@@ -29,6 +30,7 @@ __all__ = [
     "Suspect",
     "export_columns",
     "load_csv",
+    "preview_csv",
     "suspects",
     "to_csv",
 ]

@@ -45,17 +45,21 @@ def assess_analysis_chart(
     n_alarm_points: int,
     k: int,
     alpha_total: float,
-    mode: str = "strict",
+    mode: str = "random_range",
     confidence: float = 0.99,
 ) -> ChartStability:
     """Decide whether the alarms on an analysis chart still allow a stable process.
 
-    mode "strict"        : any alarm means unstable (conservative, default)
-    mode "random_range"  : unstable only when the alarms exceed what k subgroups produce by chance
-                           at the given confidence. This follows the draft's wording, which does not
+    mode "random_range"  : unstable only when the alarms exceed what k checked points produce by chance
+                           at the given confidence (default). This follows the draft (10.3.2.3): an
+                           analysis chart must account for the expected false alarms. The draft does not
                            fix the confidence. The expected number is alpha_total * k.
+    mode "strict"        : any alarm means unstable. Use it only with few points. A perfectly stable
+                           process gets flagged in about 10 % of runs with 25 subgroups on two charts,
+                           and in about 46 % with 125 subgroups.
 
-    `alpha_total` is the false-alarm probability per subgroup for all enabled criteria together.
+    `k` is the number of points that were checked, and `alpha_total` the false-alarm probability per
+    point for all enabled criteria together.
     """
     if k < 1 or n_alarm_points < 0:
         raise ValueError("k must be >= 1 and the alarm count must be >= 0")

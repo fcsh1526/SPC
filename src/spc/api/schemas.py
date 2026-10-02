@@ -1,0 +1,70 @@
+"""Request bodies. Field limits reject nonsense early, with a field name in the error."""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from spc.core.constants import ALPHA_3SIGMA
+from spc.service import AnalysisRequest
+
+
+class Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SuspectsBody(Strict):
+    method: Literal["mad", "tukey", "grubbs"] = "mad"
+    threshold: float | None = Field(default=None, gt=0)
+
+
+class MarkBody(Strict):
+    positions: list[int] = Field(min_length=1, max_length=100_000)
+    reason: str = Field(max_length=2000)
+    by: str = Field(max_length=200)
+
+
+class AnalyzeBody(Strict):
+    stage: Literal["machine", "preliminary", "production"] = "production"
+    chart: Literal["auto", "xbar-s", "xbar-r", "imr"] = "auto"
+    subgroup_size: int | None = Field(default=None, ge=1, le=1000)
+    lsl: float | None = None
+    usl: float | None = None
+    alpha: float = Field(default=ALPHA_3SIGMA, gt=0, lt=1)
+    rules: dict[str, Any] = Field(default_factory=dict)
+    stability_mode: Literal["strict", "random_range"] = "random_range"
+    stability_confidence: float = Field(default=0.99, gt=0, lt=1)
+    model: Literal["A1", "A2", "B", "C1", "C2", "C3", "C4", "D"] | None = None
+    controlled_stable: bool = False
+    characteristic_class: Literal["critical", "major", "minor", "others"] | None = None
+    edition: Literal["draft", "final"] = "draft"
+    estimate_confidence: float = Field(default=0.95, gt=0, lt=1)
+    target_confidence: float = Field(default=0.9999, gt=0, lt=1)
+    incomplete: Literal["error", "drop"] = "drop"
+    customer: str | None = Field(default=None, max_length=200)
+
+    def to_request(self) -> AnalysisRequest:
+        return AnalysisRequest(**self.model_dump())
+
+
+class TargetBody(Strict):
+    stage: Literal["machine", "preliminary", "production"]
+    characteristic_class: Literal["critical", "major", "minor", "others"]
+    n: int = Field(ge=2, le=1_000_000)
+    confidence: float = Field(default=0.9999, gt=0, lt=1)
+    edition: Literal["draft", "final"] = "draft"
+
+
+class ArlBody(Strict):
+    shift: float = Field(gt=0, le=10)
+    n: int = Field(ge=1, le=1000)
+    alpha: float = Field(default=ALPHA_3SIGMA, gt=0, lt=1)
+    max_arl: float | None = Field(default=None, ge=1)
+
+
+class AttributeBody(Strict):
+    kind: Literal["p", "np", "c", "u"]
+    counts: list[float] = Field(min_length=2, max_length=100_000)
+    sizes: list[float] | float | None = None
+    alpha: float = Field(default=ALPHA_3SIGMA, gt=0, lt=1)

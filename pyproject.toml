@@ -14,10 +14,25 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+web = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+]
+
+[project.scripts]
+spc-serve = "spc.api.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"spc.web" = ["static/*", "static/i18n/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

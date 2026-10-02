@@ -19,6 +19,7 @@ import numpy as np
 from scipy.stats import binom, poisson
 
 from spc.core.constants import ALPHA_3SIGMA, check_alpha
+from spc.core.notes import Note
 
 MIN_SUBGROUP_SIZE = 50  # "should be above 50" (draft 10.3.6.2)
 
@@ -32,7 +33,7 @@ class AttributeChart:
     ucl: np.ndarray
     values: np.ndarray
     sizes: np.ndarray
-    warnings: tuple[str, ...] = ()
+    warnings: tuple[Note, ...] = ()
 
     def alarms(self) -> np.ndarray:
         return (self.values > self.ucl) | (self.values < self.lcl)
@@ -54,15 +55,15 @@ def _sizes(n, k: int) -> np.ndarray:
     return a
 
 
-def _warnings(sizes: np.ndarray, constant_required: bool) -> tuple[str, ...]:
-    out: list[str] = []
+def _warnings(sizes: np.ndarray, constant_required: bool) -> tuple[Note, ...]:
+    out: list[Note] = []
     if np.any(sizes <= MIN_SUBGROUP_SIZE):
-        out.append(f"sample size at or below {MIN_SUBGROUP_SIZE}: small changes may stay unseen")
+        out.append(Note("small_sample", {"limit": MIN_SUBGROUP_SIZE}))
     spread = (sizes.max() - sizes.min()) / sizes.mean()
     if constant_required and spread > 0:
         raise ValueError("this chart needs a constant sample size; use the proportion / per-unit chart instead")
     if spread >= 0.25:
-        out.append("sample size varies by 25 % or more: limits change point by point")
+        out.append(Note("size_varies"))
     return tuple(out)
 
 

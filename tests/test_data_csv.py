@@ -88,7 +88,8 @@ def test_skip_missing_values_is_noted():
     raw = b"v,lot\n1,a\n\n,a\n2,a\n,b\n3,b\n"
     d = load_csv(raw, ColumnMap(value="v", subgroup="lot"), missing="skip")
     assert d.values.tolist() == [1.0, 2.0, 3.0]
-    assert d.warnings == ("2 row(s) with an empty value were skipped",)
+    assert [(w.code, dict(w.params)) for w in d.warnings] == [("rows_skipped", {"count": 2})]
+    assert str(d.warnings[0]) == "2 row(s) with an empty value were skipped"
     assert d.source_rows.tolist() == [2, 5, 7]  # line numbers still point at the original file
     with pytest.raises(DataImportError) as err:
         load_csv(raw, ColumnMap(value="v", subgroup="lot"))  # the default is to stop
@@ -116,8 +117,8 @@ def test_non_contiguous_subgroup_and_unordered_time_give_warnings():
         "2026-10-02 10:00:00,3,a\n"
     ).encode()
     d = load_csv(raw, ColumnMap(value="v", subgroup="lot", timestamp="t"))
-    assert any("not contiguous" in w for w in d.warnings)
-    assert any("time order" in w for w in d.warnings)
+    assert any(w.code == "subgroup_not_contiguous" and w.params["label"] == "a" for w in d.warnings)
+    assert any(w.code == "time_not_ordered" for w in d.warnings)
 
 
 def test_invalid_flag_creates_marks_and_needs_a_reason():

@@ -24,7 +24,7 @@ class AnalysisParams:
     target_confidence: float = 0.9999
     edition: str = "draft"
     rules: RuleSet = field(default_factory=RuleSet)
-    stability_mode: str = "strict"
+    stability_mode: str = "random_range"
     stability_confidence: float = 0.99
     customer: str | None = None
 

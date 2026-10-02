@@ -73,8 +73,25 @@ def test_per_point_limits():
 
 
 def test_strict_stability_mode():
-    assert assess_analysis_chart(0, 25, 0.0027).stable
-    assert not assess_analysis_chart(1, 25, 0.0027).stable
+    assert assess_analysis_chart(0, 25, 0.0027, mode="strict").stable
+    assert not assess_analysis_chart(1, 25, 0.0027, mode="strict").stable
+
+
+def test_default_mode_follows_the_draft_and_tolerates_chance_alarms():
+    # Draft 10.3.2.3: an analysis chart must account for the expected false alarms.
+    assert assess_analysis_chart(1, 250, 0.0027).stable  # expected 0.675 false alarms
+    assert assess_analysis_chart(1, 250, 0.0027).mode == "random_range"
+    assert not assess_analysis_chart(6, 250, 0.0027).stable
+
+
+def test_a_stable_process_is_rarely_called_unstable_in_the_default_mode():
+    rng = np.random.default_rng(99)
+    k, runs, flagged = 250, 4000, 0
+    threshold = assess_analysis_chart(0, k, 0.0027).threshold
+    for _ in range(runs):
+        alarms = int(rng.binomial(k, 0.0027))
+        flagged += alarms > threshold
+    assert flagged / runs < 0.02  # confidence 0.99 means about 1 % false "unstable"
 
 
 def test_random_range_mode_tolerates_chance_alarms():

@@ -20,6 +20,8 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
+from spc.core.notes import Note
+
 
 @dataclass(frozen=True)
 class SourceInfo:
@@ -90,7 +92,7 @@ class Dataset:
     tags: Mapping[str, np.ndarray] = field(default_factory=dict)
     source: SourceInfo | None = None
     log: tuple[LogEntry, ...] = ()
-    warnings: tuple[str, ...] = ()
+    warnings: tuple[Note, ...] = ()
 
     # ------------------------------------------------------------------ construction
 

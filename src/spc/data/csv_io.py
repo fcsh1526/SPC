@@ -22,6 +22,7 @@ from typing import Sequence
 
 import numpy as np
 
+from spc.core.notes import Note
 from spc.data.dataset import Dataset, LogEntry, SourceInfo
 
 DELIMITERS = ",;\t|"
@@ -190,7 +191,7 @@ def load_csv(
     values, lines, subs, times = [], [], [], []
     tag_cols: dict[str, list[str]] = {t: [] for t in columns.tags}
     marks: list[tuple[int, str, str, str]] = []  # position, reason, by, at
-    notes: list[str] = []
+    notes: list[Note] = []
     skipped = 0
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -252,7 +253,7 @@ def load_csv(
         raise DataImportError(issues)
 
     if skipped:
-        notes.append(f"{skipped} row(s) with an empty value were skipped")
+        notes.append(Note("rows_skipped", {"count": skipped}))
     if columns.subgroup:
         seen, closed, last = set(), set(), None
         for lab in subs:
@@ -260,14 +261,14 @@ def load_csv(
                 if last is not None:
                     closed.add(last)
                 if lab in closed:
-                    notes.append(f"subgroup {lab!r} is not contiguous in the file")
+                    notes.append(Note("subgroup_not_contiguous", {"label": lab}))
                     break
                 last = lab
             seen.add(lab)
     if columns.timestamp:
         t_arr = np.array(times, dtype="datetime64[s]")
         if np.any(np.diff(t_arr).astype("int64") < 0):
-            notes.append("timestamps are not in time order; subgroup order follows the file order")
+            notes.append(Note("time_not_ordered"))
 
     data = Dataset(
         values=np.array(values, dtype=float),
@@ -283,6 +284,32 @@ def load_csv(
         grouped.setdefault((reason, by, at), []).append(pos)
     log = tuple(LogEntry("mark_invalid", tuple(p), r, b, a) for (r, b, a), p in grouped.items())
     return replace(data, log=log)
+
+
+def preview_csv(
+    source,
+    *,
+    delimiter: str | None = None,
+    encoding: str = "auto",
+    n_rows: int = 8,
+) -> dict:
+    """Header and first rows of a file, so the user can choose the columns before importing."""
+    raw = bytes(source) if isinstance(source, (bytes, bytearray)) else Path(source).read_bytes()
+    text, used_encoding = _decode(raw, encoding)
+    delim = delimiter or _sniff_delimiter(text)
+    reader = csv.reader(io.StringIO(text), delimiter=delim)
+    try:
+        header = [h.strip() for h in next(reader)]
+    except StopIteration:
+        raise DataImportError([ImportIssue(None, None, "empty", "the file is empty")])
+    rows = []
+    for row in reader:
+        if not any(c.strip() for c in row):
+            continue
+        rows.append([c.strip() for c in row])
+        if len(rows) >= n_rows:
+            break
+    return {"encoding": used_encoding, "delimiter": delim, "header": header, "rows": rows}
 
 
 def export_columns(data: Dataset) -> ColumnMap:

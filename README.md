@@ -3,14 +3,18 @@
 SPC statistics engine following the AIAG-VDA SPC Manual (2026), ISO 7870 and ISO 22514.
 依 AIAG-VDA SPC 手冊（2026）、ISO 7870、ISO 22514 實作的 SPC 統計核心。
 
-Status: phase 1 core library. No UI or API yet. See `docs/ARCHITECTURE.md` for the plan, sources and open questions.
+Status: phase 1 core library, CSV import, web API and a bilingual (繁體中文 / English) web interface. See `docs/ARCHITECTURE.md` for the plan, sources and open questions.
 
-## Install and test
+## Install, test, run
 
 ```
 pip install -e ".[dev]"
-pytest
+pytest                      # the browser tests are skipped when Playwright or Chromium is missing
+python -m spc.api           # or: spc-serve   -> http://127.0.0.1:8000
 ```
+
+The server listens on 127.0.0.1 only. There is no login yet, so do not expose it to a network.
+Data is kept in memory and is lost when the server stops. Use the CSV export to keep marked data.
 
 ## What is in phase 1
 
@@ -27,6 +31,17 @@ pytest
 | `spc.data.csv_io` | CSV import and export: Big5 / UTF-8, delimiter and decimal comma, all errors reported with line numbers, SHA-256 of the source file |
 | `spc.data.dataset` | `Dataset` with traceable invalid marks, subgroup building (`subgroups()`), counts for the report |
 | `spc.data.outliers` | Hints for suspect values (MAD, Tukey, Grubbs). Hints never mark anything |
+| `spc.service.analysis` | One analysis run: chart, criteria, stability, index names, indices, targets. Returns plain JSON data with message codes |
+| `spc.api` | FastAPI app (`/api/...`) and the web interface (`spc/web/static`) |
+
+## Web interface
+
+Steps: import a CSV (Big5 / UTF-8, columns chosen on a preview) → check data and mark outliers with a reason → run the analysis → read charts, index names, confidence intervals and targets. A tools tab holds the small-sample target calculator and the ARL / OC calculator.
+
+- Texts live in `spc/web/static/i18n/zh-TW.json` and `en.json`. `tests/test_i18n.py` fails when the two files differ, or when a message code in the backend has no text.
+- The API sends message codes with parameters, never translated sentences.
+- No build step and no external libraries. User text is shown with `textContent` only.
+- API documentation: `/api/docs` while the server runs.
 
 ## Data flow
 
