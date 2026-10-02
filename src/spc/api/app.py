@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import Literal
 
 import json
 import secrets
@@ -37,7 +38,7 @@ from spc.core.capability import Stage, TargetAdjustmentNotAllowed, required_targ
 from spc.core.charts import attribute as attr
 from spc.db import Database, DatasetNotFound, DatasetStore, ReportNotFound, ReportStore
 from spc.data import ColumnMap, DataImportError, Dataset, IncompleteSubgroupsError, load_csv, preview_csv, suspects, to_csv
-from spc.report import ReportError, generate, reproduce
+from spc.report import ReportError, generate, report_xlsx, reproduce
 from spc.service import analyze
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "web" / "static"
@@ -370,6 +371,15 @@ def create_app(
 
         return _restarted(key, "dataset_restart_removed", body, user, change)
 
+    @app.get("/api/datasets/{key}/export.xlsx")
+    def export_xlsx(key: str, lang: Literal["zh-TW", "en"] = "en"):
+        from spc.report.xlsx import XLSX_TYPE, dataset_xlsx
+
+        return Response(
+            dataset_xlsx(store.get(key), lang), media_type=XLSX_TYPE,
+            headers={"Content-Disposition": 'attachment; filename="spc-data.xlsx"'},
+        )
+
     @app.get("/api/datasets/{key}/export.csv")
     def export_csv(key: str):
         text = to_csv(store.get(key))
@@ -416,6 +426,16 @@ def create_app(
             text.encode("utf-8"),
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="spc-archive-{report_id}.json"'},
+        )
+
+    @app.get("/api/reports/{rid}/report.xlsx")
+    def get_report_xlsx(rid: str):
+        from spc.report.xlsx import XLSX_TYPE
+
+        report_id, _, _, archive = reports.get(rid)
+        return Response(
+            report_xlsx(archive), media_type=XLSX_TYPE,
+            headers={"Content-Disposition": f'attachment; filename="spc-report-{report_id}.xlsx"', "Cache-Control": "no-store"},
         )
 
     @app.post("/api/archive/check")

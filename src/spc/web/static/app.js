@@ -260,6 +260,7 @@
     $("#a-size-wrap").hidden = ds.has_subgroup;
     $("#a-moving-wrap").hidden = ds.has_subgroup;  // a moving sample belongs to the individuals chart
     $("#export-link").href = `/api/datasets/${ds.id}/export.csv`;
+    setExcelLink();
     unlockTabs();
     await loadRows();
     renderData();
@@ -670,6 +671,7 @@
     $("#rp-open").href = out.urls.html;
     $("#rp-download").href = out.urls.download;
     $("#rp-archive").href = out.urls.archive;
+    $("#rp-excel").href = `${out.urls.html}/report.xlsx`;
     $("#rp-digest").textContent = `${t("report.digest")}: ${out.digest}`;
   }
   async function checkArchive() {
@@ -838,6 +840,7 @@
         actions.appendChild(linkButton(t("saved.report_open"), base, true));
         actions.appendChild(linkButton(t("saved.report_download"), `${base}?download=1`));
         actions.appendChild(linkButton(t("saved.report_archive"), `${base}/archive.json`));
+        actions.appendChild(linkButton(t("saved.report_excel"), `${base}/report.xlsx`));
         rt.appendChild(tr);
       });
     });
@@ -921,7 +924,11 @@
     if (d === "empirical") $("#a-method").value = "G";
     $("#a-method option[value=Z]").disabled = d === "empirical";
   }
+  function setExcelLink() {  // the sheets of the data workbook follow the language of the page
+    if (state.dataset) $("#export-xlsx-link").href = `/api/datasets/${state.dataset.id}/export.xlsx?lang=${state.lang}`;
+  }
   function rerender() {
+    setExcelLink();
     applyStatic();
     if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); refreshImportForm(); }
     if (state.dataset) renderData();

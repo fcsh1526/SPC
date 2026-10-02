@@ -226,7 +226,7 @@ def load_csv(
             label = cell(row, "subgroup")
             if label == "":
                 issues.append(ImportIssue(line, columns.subgroup, "missing_subgroup", "subgroup label is empty"))
-            subs.append(label)
+            subs.append(unsafe_to_plain(label))
         if columns.timestamp:
             t = _parse_time(cell(row, "timestamp"), timestamp_formats)
             if t is None:
@@ -236,15 +236,15 @@ def load_csv(
                 t = np.datetime64("NaT")
             times.append(t)
         for tag in columns.tags:
-            tag_cols[tag].append(cell(row, f"tag:{tag}"))
+            tag_cols[tag].append(unsafe_to_plain(cell(row, f"tag:{tag}")))
         if columns.valid:
             flag = cell(row, "valid").lower()
             if flag in FALSE_TOKENS:
-                reason = cell(row, "invalid_reason")
+                reason = unsafe_to_plain(cell(row, "invalid_reason"))
                 if not reason:
                     issues.append(ImportIssue(line, columns.valid, "invalid_without_reason", "an invalid value needs a reason"))
                 else:
-                    marks.append((pos, reason, cell(row, "invalid_by") or "import", cell(row, "invalid_at") or now))
+                    marks.append((pos, reason, unsafe_to_plain(cell(row, "invalid_by")) or "import", cell(row, "invalid_at") or now))
             elif flag not in TRUE_TOKENS:
                 issues.append(ImportIssue(line, columns.valid, "bad_flag", f"{cell(row, 'valid')!r} is not a valid/invalid flag"))
     if not values and not issues:
@@ -327,6 +327,27 @@ def export_columns(data: Dataset) -> ColumnMap:
     )
 
 
+FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def spreadsheet_safe(text: str) -> str:
+    """A cell that starts with = + - @ is run as a formula by Excel. Text from people (reasons, names,
+    labels) gets a leading apostrophe so it stays text. `load_csv` takes that apostrophe off again."""
+    return "'" + text if text.startswith(FORMULA_STARTS) and not _is_plain_number(text) else text
+
+
+def _is_plain_number(text: str) -> bool:
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False
+
+
+def unsafe_to_plain(text: str) -> str:
+    return text[1:] if text.startswith("'") and text[1:].startswith(FORMULA_STARTS) else text
+
+
 def to_csv(data: Dataset, path=None, delimiter: str = ",", encoding: str = "utf-8-sig") -> str:
     """Write the dataset with its invalid marks. Returns the text, and writes the file if `path` is given.
 
@@ -346,12 +367,12 @@ def to_csv(data: Dataset, path=None, delimiter: str = ",", encoding: str = "utf-
     for i in range(data.n_total):
         row = [int(data.source_rows[i]), repr(float(data.values[i]))]
         if data.subgroup is not None:
-            row.append(str(data.subgroup[i]))
+            row.append(spreadsheet_safe(str(data.subgroup[i])))
         if data.timestamp is not None:
             row.append(str(data.timestamp[i]).replace("T", " "))
-        row += [str(data.tags[t][i]) for t in data.tags]
+        row += [spreadsheet_safe(str(data.tags[t][i])) for t in data.tags]
         reason, by, at = info.get(i, ("", "", ""))
-        row += [0 if i in info else 1, reason, by, at]
+        row += [0 if i in info else 1, spreadsheet_safe(reason), spreadsheet_safe(by), at]
         writer.writerow(row)
     text = buffer.getvalue()
     if path is not None:

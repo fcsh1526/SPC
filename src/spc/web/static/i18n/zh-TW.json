@@ -458,5 +458,8 @@
   "data.status_phase": "此起使用新界限",
   "data.log_restart_phase": "管制圖重啟，使用新界限",
   "data.restart_item_phase": "{n}（新界限）",
-  "result.phase_line": "第 {k} 階段，自檔案第 {from} 列起：{n} 筆，中心線 {mu}，σ̂ {sigma}"
+  "result.phase_line": "第 {k} 階段，自檔案第 {from} 列起：{n} 筆，中心線 {mu}，σ̂ {sigma}",
+  "data.export_xlsx": "匯出 Excel",
+  "report.excel": "Excel 活頁簿（.xlsx）",
+  "saved.report_excel": "Excel 檔"
 }

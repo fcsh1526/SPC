@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from spc.data import Dataset
+from spc.data.serialize import dataset_from_dict
 from spc.report.archive import Reproduction, build_archive, reproduce, verify_archive
 from spc.report.builder import Report, ReportError, build_report
 from spc.report.meta import ReportMeta
@@ -50,7 +51,21 @@ def generate(
     return GeneratedReport(rid, language, render_html(report), archive)
 
 
+def report_xlsx(archive: dict) -> bytes:
+    """The Excel workbook of a stored report, made again from its archive (data, parameters and inputs).
+    The analysis runs once more from the stored data and parameters, so the numbers equal the stored ones
+    to the tolerance that `reproduce` checks."""
+    from spc.report.xlsx import render_xlsx
+
+    dataset = dataset_from_dict(archive["dataset"])
+    rep = build_report(
+        dataset, AnalysisRequest(**archive["request"]), ReportMeta(**archive["report_meta"]), archive["language"],
+        generated_at=archive["created_at"], report_id=archive["report_id"], archive_digest=archive["integrity"]["digest"],
+    )
+    return render_xlsx(rep, dataset)
+
+
 __all__ = [
-    "GeneratedReport", "Report", "ReportError", "ReportMeta", "Reproduction", "build_archive", "build_report",
+    "report_xlsx", "GeneratedReport", "Report", "ReportError", "ReportMeta", "Reproduction", "build_archive", "build_report",
     "generate", "render_html", "reproduce", "verify_archive",
 ]

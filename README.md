@@ -69,6 +69,13 @@ In the analysis form, choose a distribution (or "choose automatically") and a me
 - Few values (under 50) make the tail quantiles uncertain. The result warns about it. The empirical method needs 2000 values and supports only `.G`.
 - Through the API: `distribution`, `method`, `bootstrap_n` and `seed` in the analysis body. Results for a normal distribution (`distribution: "normal"`, the default) are unchanged.
 
+## Excel output
+
+- Report: "Excel workbook" next to the HTML report (also in the Saved tab). Sheets: Summary, Report elements (the 20+2 elements as rows), Data (every value with status, marks and restarts), Control charts (plotted values and limits, with native charts), Check, Annex, Log. The language is the one of the report.
+- The Check sheet recalculates n, mean, s, Cp/Cpk, their intervals and the ppm with Excel formulas from the Data sheet and compares them with the program's numbers. Change a value on the Data sheet and the check shows it. It covers the normal distribution only and says so when the report used a fitted distribution. Excel calculates the formulas when it opens the file. A viewer that does not calculate (mail preview, phone) shows the program's numbers in the Program column.
+- Data: "Export Excel" in the Data tab gives the data with marks and the log. Texts typed by people are always stored as text, never as formulas. The CSV export guards them with a leading apostrophe, and the import takes it off.
+- `pip install -e ".[excel]"` (or `web`, `dev`) brings openpyxl.
+
 ## Report
 
 - Elements 1–10 and 20–22 take author input (process, machine, people, conditions, deviations, recommendations, measurement uncertainty). Everything else comes from the data and the same analysis run that the screen shows.

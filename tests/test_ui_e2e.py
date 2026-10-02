@@ -476,3 +476,47 @@ def test_new_limits_for_a_phase_in_the_browser(server, browser, tmp_path):
     expect(page.locator("#r-loc-alarms li")).to_have_count(0)  # the new level raises no alarm against its own limits
     assert problems == [], problems
     ctx.close()
+
+
+def test_excel_downloads_in_the_browser(server, browser, tmp_path):
+    from openpyxl import load_workbook
+
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1200, "height": 900}, locale="en")
+    page = ctx.new_page()
+    page.goto(server)
+    sign_in(page)
+    page.set_input_files("#file", str(sample(tmp_path)))
+    page.select_option("#col-value", "直徑")
+    page.select_option("#col-subgroup", "批號")
+    page.click("#import-btn")
+
+    with page.expect_download() as info:
+        page.click("#export-xlsx-link")
+    info.value.save_as(tmp_path / "data.xlsx")
+    wb = load_workbook(tmp_path / "data.xlsx")
+    assert wb.sheetnames == ["Data", "Log"] and wb["Data"].max_row == 126
+
+    page.click("#suspect-btn")
+    page.click("#suspect-select")
+    page.fill("#reason", "typing error")
+    page.click("#mark-btn")
+    page.click("#to-analysis")
+    page.fill("#a-lsl", "9.5")
+    page.fill("#a-usl", "10.5")
+    page.select_option("#a-model", "A1")
+    page.select_option("#a-class", "major")
+    page.click("#run-btn")
+    page.fill("#rp-process", "turning")
+    page.click("#rp-create")
+    expect(page.locator("#rp-created")).to_contain_text("was created")
+    with page.expect_download() as info:
+        page.click("#rp-excel")
+    info.value.save_as(tmp_path / "report.xlsx")
+    report = load_workbook(tmp_path / "report.xlsx")
+    assert report.sheetnames[0] == "Summary" and report["Summary"]["A9"].value == "Cpk.G"
+    assert any(c.value == "turning" for row in report["Report elements"].iter_rows() for c in row)
+
+    page.click("nav.tabs button[data-tab=saved]")
+    expect(page.locator("#saved-reports a", has_text="Excel").first).to_be_visible()  # earlier tests made reports too
+    ctx.close()

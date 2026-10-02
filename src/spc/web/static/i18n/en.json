@@ -458,5 +458,8 @@
   "data.status_phase": "new limits from here",
   "data.log_restart_phase": "Chart restarted, new limits",
   "data.restart_item_phase": "{n} (new limits)",
-  "result.phase_line": "Phase {k}, from file row {from}: {n} values, centre line {mu}, σ̂ {sigma}"
+  "result.phase_line": "Phase {k}, from file row {from}: {n} values, centre line {mu}, σ̂ {sigma}",
+  "data.export_xlsx": "Export Excel",
+  "report.excel": "Excel workbook (.xlsx)",
+  "saved.report_excel": "Excel"
 }
