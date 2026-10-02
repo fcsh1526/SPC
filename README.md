@@ -32,11 +32,22 @@ Data is kept in memory and is lost when the server stops. Use the CSV export to 
 | `spc.data.dataset` | `Dataset` with traceable invalid marks, subgroup building (`subgroups()`), counts for the report |
 | `spc.data.outliers` | Hints for suspect values (MAD, Tukey, Grubbs). Hints never mark anything |
 | `spc.service.analysis` | One analysis run: chart, criteria, stability, index names, indices, targets. Returns plain JSON data with message codes |
+| `spc.report` | The 20+2 element report as one self-contained HTML file (print it to PDF, A4) and a JSON archive with an integrity digest. `verify_archive` shows changes, `reproduce` runs the calculation again from the stored data |
 | `spc.api` | FastAPI app (`/api/...`) and the web interface (`spc/web/static`) |
 
 ## Web interface
 
-Steps: import a CSV (Big5 / UTF-8, columns chosen on a preview) → check data and mark outliers with a reason → run the analysis → read charts, index names, confidence intervals and targets. A tools tab holds the small-sample target calculator and the ARL / OC calculator.
+Steps: import a CSV (Big5 / UTF-8, columns chosen on a preview) → check data and mark outliers with a reason → run the analysis → read charts, index names, confidence intervals and targets. After an analysis, the report panel makes the 20+2 element report in either language. A tools tab holds the small-sample target calculator, the ARL / OC calculator and the archive check.
+
+## Report
+
+- Elements 1–10 and 20–22 take author input (process, machine, people, conditions, deviations, recommendations, measurement uncertainty). Everything else comes from the data and the same analysis run that the screen shows.
+- The report is a snapshot. Later marks on the data do not change a report that exists.
+- Cw/Cwk never appear in a report. The handbook says they are not for reporting.
+- Elements 4 and 10 use the time stamps of the data when there are any.
+- Element 22 gives the guard band `g = u(1 - risk) * U / k` and the acceptance limits `LSL + g`, `USL - g`.
+- The archive keeps the data, the invalid marks with reason, person and time, all parameters, the result and the report inputs. Check it with `POST /api/archive/check` or the tools tab. A changed value breaks the digest. The digest shows a change. It does not stop one: to prove who made the record, sign the file outside this program.
+- Report texts are in `spc/report/texts.py`. `tests/test_report.py` checks that both languages match.
 
 - Texts live in `spc/web/static/i18n/zh-TW.json` and `en.json`. `tests/test_i18n.py` fails when the two files differ, or when a message code in the backend has no text.
 - The API sends message codes with parameters, never translated sentences.

@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from spc.core.constants import ALPHA_3SIGMA
+from spc.report import ReportMeta
 from spc.service import AnalysisRequest
 
 
@@ -68,3 +69,34 @@ class AttributeBody(Strict):
     counts: list[float] = Field(min_length=2, max_length=100_000)
     sizes: list[float] | float | None = None
     alpha: float = Field(default=ALPHA_3SIGMA, gt=0, lt=1)
+
+
+class ReportMetaBody(Strict):
+    process: str = Field(default="", max_length=2000)
+    machine: str = Field(default="", max_length=2000)
+    site: str = Field(default="", max_length=2000)
+    process_ref: str = Field(default="", max_length=2000)
+    machine_ref: str = Field(default="", max_length=2000)
+    persons: str = Field(default="", max_length=2000)
+    period_text: str = Field(default="", max_length=2000)
+    part_name: str = Field(default="", max_length=2000)
+    part_number: str = Field(default="", max_length=2000)
+    characteristic: str = Field(default="", max_length=2000)
+    unit: str = Field(default="", max_length=2000)
+    target: float | None = None
+    technical_conditions: str = Field(default="", max_length=2000)
+    deviations: str = Field(default="", max_length=2000)
+    sampling_frequency: str = Field(default="", max_length=2000)
+    recommendations: str = Field(default="", max_length=2000)
+    uncertainty: float | None = Field(default=None, gt=0)
+    coverage_factor: float = Field(default=2.0, ge=1)
+    guard_band_risk: float = Field(default=0.05, gt=0, lt=0.5)
+
+    def to_meta(self) -> ReportMeta:
+        return ReportMeta(**self.model_dump())
+
+
+class ReportBody(Strict):
+    analysis: AnalyzeBody
+    meta: ReportMetaBody = Field(default_factory=ReportMetaBody)
+    language: Literal["zh-TW", "en"] = "en"

@@ -216,3 +216,84 @@ def test_attribute_chart_tool(client):
     small = client.post("/api/attribute-chart", json={"kind": "c", "counts": [4, 6, 5, 7]}).json()
     assert small["kind"] == "c"
     assert client.post("/api/attribute-chart", json={"kind": "p", "counts": [1, 2, 3]}).status_code == 400
+
+
+# ------------------------------------------------------------------ reports
+
+REPORT_BODY = {
+    "analysis": {"lsl": 9.0, "usl": 11.0, "model": "A1", "characteristic_class": "major"},
+    "meta": {"process": "turning", "machine": "CNC-07", "unit": "mm", "target": 10.0, "uncertainty": 0.0211},
+    "language": "en",
+}
+
+
+def test_create_and_open_a_report(client):
+    ds = upload(client).json()
+    r = client.post(f"/api/datasets/{ds['id']}/reports", json=REPORT_BODY)
+    assert r.status_code == 200
+    out = r.json()
+    assert out["language"] == "en" and len(out["digest"]) == 64
+    page = client.get(out["urls"]["html"])
+    assert page.status_code == 200 and "text/html" in page.headers["content-type"]
+    csp = page.headers["content-security-policy"]
+    assert "default-src 'none'" in csp and "script" not in csp  # the report can run no script at all
+    assert "attachment" not in page.headers.get("content-disposition", "")
+    assert "Process study report" in page.text and "CNC-07" in page.text and out["digest"] in page.text
+    download = client.get(out["urls"]["download"])
+    assert "attachment" in download.headers["content-disposition"] and download.text == page.text
+
+
+def test_archive_download_and_check(client):
+    ds = upload(client).json()
+    out = client.post(f"/api/datasets/{ds['id']}/reports", json=REPORT_BODY).json()
+    archive = client.get(out["urls"]["archive"])
+    assert archive.status_code == 200 and "attachment" in archive.headers["content-disposition"]
+    check = client.post("/api/archive/check", content=archive.content).json()
+    assert check == {"integrity_ok": True, "reproduced": True, "same_engine_version": True, "differences": []}
+    tampered = archive.json()
+    tampered["dataset"]["values"][0] += 0.5
+    bad = client.post("/api/archive/check", json=tampered).json()
+    assert bad["integrity_ok"] is False
+
+
+def test_a_report_is_a_snapshot(client):
+    ds = upload(client).json()
+    out = client.post(f"/api/datasets/{ds['id']}/reports", json=REPORT_BODY).json()
+    before = client.get(out["urls"]["html"]).text
+    client.post(f"/api/datasets/{ds['id']}/invalid", json={"positions": [3], "reason": "wrong part", "by": "A"})
+    assert client.get(out["urls"]["html"]).text == before
+    newer = client.post(f"/api/datasets/{ds['id']}/reports", json=REPORT_BODY).json()
+    assert newer["id"] != out["id"] and "wrong part" in client.get(newer["urls"]["html"]).text
+
+
+def test_report_in_chinese(client):
+    ds = upload(client).json()
+    body = {**REPORT_BODY, "language": "zh-TW"}
+    out = client.post(f"/api/datasets/{ds['id']}/reports", json=body).json()
+    assert "製程研究報告" in client.get(out["urls"]["html"]).text
+
+
+def test_report_errors(client):
+    ds = upload(client).json()
+    url = f"/api/datasets/{ds['id']}/reports"
+    no_spec = client.post(url, json={"analysis": {}})
+    assert no_spec.status_code == 400 and err(no_spec)["code"] == "report_needs_spec"
+    assert client.post(url, json={**REPORT_BODY, "language": "fr"}).status_code == 422
+    assert client.post(url, json={**REPORT_BODY, "meta": {"uncertainty": -1}}).status_code == 422
+    assert client.post(url, json={**REPORT_BODY, "meta": {"unknown": 1}}).status_code == 422
+    missing = client.get("/api/reports/nope")
+    assert missing.status_code == 404 and err(missing)["code"] == "report_not_found"
+    assert client.get("/api/reports/nope/archive.json").status_code == 404
+    assert client.post("/api/datasets/nope/reports", json=REPORT_BODY).status_code == 404
+    unreadable = client.post("/api/archive/check", content=b"this is not json")
+    assert unreadable.status_code == 400 and err(unreadable)["code"] == "archive_unreadable"
+    assert err(client.post("/api/archive/check", content=b"{}"))["code"] == "archive_unreadable"
+
+
+def test_report_html_escapes_text_sent_by_the_user(client):
+    ds = upload(client).json()
+    body = {**REPORT_BODY, "meta": {"process": "<script>alert(1)</script>", "recommendations": "<img src=x onerror=alert(2)>"}}
+    out = client.post(f"/api/datasets/{ds['id']}/reports", json=body).json()
+    html = client.get(out["urls"]["html"]).text
+    assert "<script" not in html.lower() and "<img" not in html.lower()
+    assert "&lt;script&gt;" in html

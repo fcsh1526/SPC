@@ -95,6 +95,7 @@ def test_every_backend_code_has_a_text(messages):
     api_codes |= set(re.findall(r'_error\(\s*\d+,\s*"(\w+)"', api))
     api_codes |= {"not_invalid", "already_invalid"}
     api_codes -= {"", "import_failed"}  # shown with its own title
+    api_codes |= {"report_needs_spec", "report_not_found", "archive_unreadable"}  # chosen through a variable
     for code in api_codes | {"import_failed"}:
         assert f"error.{code}" in en, f"error.{code}"
 

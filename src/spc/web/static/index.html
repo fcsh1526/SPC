@@ -272,6 +272,45 @@
       <p id="r-fingerprint" class="muted"></p>
       <p id="r-hash" class="muted"></p>
     </div>
+    <div class="card" id="report-card">
+      <h3 data-i18n="report.title"></h3>
+      <p class="note" data-i18n="report.intro"></p>
+      <div class="form-grid">
+        <label><span data-i18n="report.language"></span>
+          <select id="rp-language"><option value="zh-TW">繁體中文</option><option value="en">English</option></select></label>
+        <label><span data-i18n="report.process"></span><input id="rp-process" type="text" maxlength="2000"></label>
+        <label><span data-i18n="report.machine"></span><input id="rp-machine" type="text" maxlength="2000"></label>
+        <label><span data-i18n="report.site"></span><input id="rp-site" type="text" maxlength="2000"></label>
+        <label><span data-i18n="report.process_ref"></span><input id="rp-process_ref" type="text" maxlength="2000"></label>
+        <label><span data-i18n="report.machine_ref"></span><input id="rp-machine_ref" type="text" maxlength="2000"></label>
+        <label class="wide"><span data-i18n="report.persons"></span><input id="rp-persons" type="text" maxlength="2000"></label>
+        <label><span data-i18n="report.part_name"></span><input id="rp-part_name" type="text" maxlength="2000"></label>
+        <label><span data-i18n="report.part_number"></span><input id="rp-part_number" type="text" maxlength="2000"></label>
+        <label><span data-i18n="report.characteristic"></span><input id="rp-characteristic" type="text" maxlength="2000"></label>
+        <label><span data-i18n="report.unit"></span><input id="rp-unit" type="text" maxlength="40"></label>
+        <label><span data-i18n="report.target"></span><input id="rp-target" type="number" step="any"></label>
+        <label class="wide"><span data-i18n="report.technical_conditions"></span><input id="rp-technical_conditions" type="text" maxlength="2000"></label>
+        <label class="wide"><span data-i18n="report.deviations"></span><input id="rp-deviations" type="text" maxlength="2000"></label>
+        <label class="wide"><span data-i18n="report.period_text"></span><input id="rp-period_text" type="text" maxlength="2000"></label>
+        <label class="wide"><span data-i18n="report.sampling_frequency"></span><input id="rp-sampling_frequency" type="text" maxlength="2000"></label>
+        <label><span data-i18n="report.uncertainty"></span><input id="rp-uncertainty" type="number" step="any" min="0"></label>
+        <label><span data-i18n="report.coverage"></span><input id="rp-coverage_factor" type="number" step="any" min="1" value="2"></label>
+        <label class="wide"><span data-i18n="report.recommendations"></span><textarea id="rp-recommendations" rows="3" maxlength="2000"></textarea></label>
+      </div>
+      <p class="row">
+        <button id="rp-create" class="primary" data-i18n="report.create"></button>
+      </p>
+      <div id="rp-out" hidden>
+        <p id="rp-created" class="strong ok"></p>
+        <p class="row">
+          <a id="rp-open" class="button" target="_blank" rel="noopener" data-i18n="report.open"></a>
+          <a id="rp-download" class="button" data-i18n="report.download"></a>
+          <a id="rp-archive" class="button" data-i18n="report.archive"></a>
+        </p>
+        <p id="rp-digest" class="muted"></p>
+        <p class="muted" data-i18n="report.pdf_hint"></p>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -315,6 +354,16 @@
     </div>
     <p><button id="l-btn" class="primary" data-i18n="tools.calculate"></button></p>
     <div id="l-out"></div>
+  </div>
+  <div class="card">
+    <h3 data-i18n="tools.archive_title"></h3>
+    <p class="note" data-i18n="tools.archive_intro"></p>
+    <p class="row">
+      <label class="filebtn"><input type="file" id="archive-file" accept=".json,application/json"><span data-i18n="tools.archive_choose"></span></label>
+      <span id="archive-name" class="muted"></span>
+      <button id="archive-btn" data-i18n="tools.archive_check"></button>
+    </p>
+    <div id="archive-out"></div>
   </div>
 </section>
 </main>

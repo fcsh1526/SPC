@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 
+import json
+
 import numpy as np
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -21,14 +23,16 @@ from spc.api.schemas import (
     ArlBody,
     AttributeBody,
     MarkBody,
+    ReportBody,
     SuspectsBody,
     TargetBody,
 )
-from spc.api.store import DatasetNotFound, DatasetStore
+from spc.api.store import DatasetNotFound, DatasetStore, ReportNotFound, ReportStore
 from spc.core.arl_oc import alarm_probability, arl, required_subgroup_size
 from spc.core.capability import Stage, TargetAdjustmentNotAllowed, required_targets
 from spc.core.charts import attribute as attr
 from spc.data import ColumnMap, DataImportError, Dataset, IncompleteSubgroupsError, load_csv, preview_csv, suspects, to_csv
+from spc.report import ReportError, generate, reproduce
 from spc.service import analyze
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "web" / "static"
@@ -77,10 +81,15 @@ def _row_json(ds: Dataset, i: int, info: dict) -> dict:
     }
 
 
+REPORT_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'"  # no script at all
+
+
 def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_BYTES) -> FastAPI:
     app = FastAPI(title="SPC", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
     store = DatasetStore() if store is None else store  # an empty store is falsy, so no `or`
     app.state.store = store
+    reports = ReportStore()
+    app.state.reports = reports
 
     # ------------------------------------------------------------------ plumbing
 
@@ -114,6 +123,15 @@ def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_B
     @app.exception_handler(DatasetNotFound)
     async def _missing(_: Request, exc: DatasetNotFound):
         return _error(404, "dataset_not_found", "dataset not found (the server may have restarted)")
+
+    @app.exception_handler(ReportNotFound)
+    async def _report_missing(_: Request, exc: ReportNotFound):
+        return _error(404, "report_not_found", "report not found (the server may have restarted)")
+
+    @app.exception_handler(ReportError)
+    async def _report_error(_: Request, exc: ReportError):
+        code = {"spec_missing": "report_needs_spec"}.get(exc.code, "invalid_input")
+        return _error(400, code, str(exc))
 
     @app.exception_handler(ValueError)
     async def _value(_: Request, exc: ValueError):
@@ -244,6 +262,53 @@ def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_B
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": 'attachment; filename="spc-data.csv"'},
         )
+
+    # ------------------------------------------------------------------ reports
+
+    @app.post("/api/datasets/{key}/reports")
+    def create_report(key: str, body: ReportBody):
+        g = generate(store.get(key), body.analysis.to_request(), body.meta.to_meta(), body.language)
+        reports.add(g.report_id, g)
+        base = f"/api/reports/{g.report_id}"
+        return {
+            "id": g.report_id,
+            "language": g.language,
+            "digest": g.archive["integrity"]["digest"],
+            "urls": {"html": base, "download": f"{base}?download=1", "archive": f"{base}/archive.json"},
+        }
+
+    @app.get("/api/reports/{rid}")
+    def get_report(rid: str, download: int = 0):
+        g = reports.get(rid)
+        headers = {"Content-Security-Policy": REPORT_CSP, "Cache-Control": "no-store"}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="spc-report-{g.report_id}.html"'
+        return Response(g.html.encode("utf-8"), media_type="text/html; charset=utf-8", headers=headers)
+
+    @app.get("/api/reports/{rid}/archive.json")
+    def get_archive(rid: str):
+        g = reports.get(rid)
+        text = json.dumps(g.archive, ensure_ascii=False, indent=1, sort_keys=True)
+        return Response(
+            text.encode("utf-8"),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="spc-archive-{g.report_id}.json"'},
+        )
+
+    @app.post("/api/archive/check")
+    async def check_archive(request: Request):
+        raw = await read_body(request)
+        try:
+            archive = json.loads(raw)
+            result = reproduce(archive)
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ApiError(400, "archive_unreadable", f"the file is not a readable archive: {exc}")
+        return {
+            "integrity_ok": result.integrity_ok,
+            "reproduced": result.reproduced,
+            "same_engine_version": result.same_engine_version,
+            "differences": list(result.differences),
+        }
 
     # ------------------------------------------------------------------ analysis and tools
 

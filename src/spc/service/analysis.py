@@ -145,7 +145,20 @@ def _verdict(estimate: float | None, lower: float | None, target: float | None) 
     return "fails"
 
 
+@dataclass(frozen=True)
+class Outcome:
+    """The result dict plus the values it was calculated from, for reports that draw them."""
+
+    result: dict
+    values: np.ndarray  # values used in the calculation, in use order
+    positions: np.ndarray  # dataset positions of those values
+
+
 def analyze(dataset: Dataset, req: AnalysisRequest) -> dict:
+    return analyze_detailed(dataset, req).result
+
+
+def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
     if req.stage not in STAGES:
         raise ValueError(f"stage must be one of {STAGES}")
     if req.lsl is not None and req.usl is not None and not req.lsl < req.usl:
@@ -265,7 +278,7 @@ def analyze(dataset: Dataset, req: AnalysisRequest) -> dict:
 
     if req.lsl is None and req.usl is None:
         _warn(warnings, "spec_missing")
-        return result
+        return Outcome(result, x, np.asarray(positions))
 
     norm_res = _normality(x)
     result["normality"] = norm_res
@@ -310,4 +323,4 @@ def analyze(dataset: Dataset, req: AnalysisRequest) -> dict:
             result["targets"] = {"class": req.characteristic_class.lower(), "blocked": True, "n": idx.n,
                                  "n_base": base}
             _warn(warnings, "target_not_allowed", n=idx.n, base=base)
-    return result
+    return Outcome(result, x, np.asarray(positions))

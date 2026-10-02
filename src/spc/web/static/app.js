@@ -13,6 +13,7 @@
     dataset: null, offset: 0, pageSize: 100, pageRows: [], total: 0,
     selected: new Set(), suspects: new Set(),
     result: null, toolsTargets: null, toolsArl: null,
+    lastAnalysisBody: null, reportOut: null, reportLangTouched: false, archiveOut: null,
   };
 
   // ---------------------------------------------------------------- small helpers
@@ -235,7 +236,8 @@
     await guarded(async () => {
       const ds = await api("/api/datasets?" + q.toString(), { method: "POST", body: state.file });
       state.dataset = ds;
-      state.offset = 0; state.selected.clear(); state.suspects.clear(); state.result = null;
+      state.offset = 0; state.selected.clear(); state.suspects.clear(); state.result = null; state.reportOut = null;
+      renderReportOut();
       $("#result").hidden = true;
       $("#a-size-wrap").hidden = ds.has_subgroup;
       $("#export-link").href = `/api/datasets/${ds.id}/export.csv`;
@@ -353,7 +355,7 @@
       const n = body.positions.length;
       state.dataset = ds;
       state.selected.clear(); state.suspects.clear(); $("#suspect-select").hidden = true;
-      state.result = null; $("#result").hidden = true;
+      state.result = null; state.reportOut = null; renderReportOut(); $("#result").hidden = true;
       await loadRows();
       renderData();
       $("#suspect-msg").textContent = t(kind === "mark" ? "data.marked" : "data.restored", { n });
@@ -392,7 +394,11 @@
   async function runAnalysis(ev) {
     ev.preventDefault();
     await guarded(async () => {
-      state.result = await post(`/api/datasets/${state.dataset.id}/analyze`, buildAnalysisBody());
+      const body = buildAnalysisBody();
+      state.result = await post(`/api/datasets/${state.dataset.id}/analyze`, body);
+      state.lastAnalysisBody = body;
+      state.reportOut = null;
+      renderReportOut();
       renderResult();
     });
   }
@@ -526,6 +532,78 @@
     $("#r-hash").textContent = r.source ? `${t("result.source_hash")}: ${r.source.sha256}` : "";
   }
 
+
+  // ---------------------------------------------------------------- report and archive
+  const REPORT_TEXT_FIELDS = ["process", "machine", "site", "process_ref", "machine_ref", "persons", "period_text",
+    "part_name", "part_number", "characteristic", "unit", "technical_conditions", "deviations", "sampling_frequency", "recommendations"];
+  const REMEMBERED_FIELDS = ["process", "machine", "site", "process_ref", "machine_ref", "persons", "unit"];
+
+  function readReportMeta() {
+    const meta = {};
+    REPORT_TEXT_FIELDS.forEach((f) => { meta[f] = $("#rp-" + f).value; });
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    meta.target = num("#rp-target");
+    meta.uncertainty = num("#rp-uncertainty");
+    const k = num("#rp-coverage_factor");
+    meta.coverage_factor = k === null ? 2 : k;
+    return meta;
+  }
+  function restoreReportMeta() {
+    try {
+      const saved = JSON.parse(store("spc.reportMeta") || "{}");
+      REMEMBERED_FIELDS.forEach((f) => { if (typeof saved[f] === "string") $("#rp-" + f).value = saved[f]; });
+    } catch (e) { /* ignore a broken saved value */ }
+  }
+  async function createReport() {
+    if (!state.result || !state.lastAnalysisBody) {
+      return showError({ code: "needs_run", message: t("report.needs_run"), params: {} });
+    }
+    const meta = readReportMeta();
+    const remembered = {};
+    REMEMBERED_FIELDS.forEach((f) => { remembered[f] = meta[f]; });
+    store("spc.reportMeta", JSON.stringify(remembered));
+    await guarded(async () => {
+      const out = await post(`/api/datasets/${state.dataset.id}/reports`, {
+        analysis: state.lastAnalysisBody, meta, language: $("#rp-language").value,
+      });
+      state.reportOut = out;
+      renderReportOut();
+    });
+  }
+  function renderReportOut() {
+    const box = $("#rp-out");
+    const out = state.reportOut;
+    box.hidden = !out;
+    if (!out) return;
+    $("#rp-created").textContent = t("report.created", { id: out.id });
+    $("#rp-open").href = out.urls.html;
+    $("#rp-download").href = out.urls.download;
+    $("#rp-archive").href = out.urls.archive;
+    $("#rp-digest").textContent = `${t("report.digest")}: ${out.digest}`;
+  }
+  async function checkArchive() {
+    const file = $("#archive-file").files[0];
+    if (!file) return showError({ code: "no_file", params: {} });
+    await guarded(async () => {
+      state.archiveOut = await api("/api/archive/check", { method: "POST", body: file });
+      renderArchiveOut();
+    });
+  }
+  function renderArchiveOut() {
+    const box = $("#archive-out");
+    box.replaceChildren();
+    const r = state.archiveOut;
+    if (!r) return;
+    box.appendChild(el("p", r.integrity_ok ? "ok strong" : "bad strong", t(r.integrity_ok ? "archive.integrity_ok" : "archive.integrity_bad")));
+    box.appendChild(el("p", r.reproduced ? "ok strong" : "bad strong", t(r.reproduced ? "archive.reproduced_yes" : "archive.reproduced_no")));
+    if (!r.reproduced) {
+      const ul = el("ul");
+      r.differences.forEach((d) => ul.appendChild(el("li", "", d)));
+      box.appendChild(ul);
+    }
+    box.appendChild(el("p", "muted", t(r.same_engine_version ? "archive.same_engine" : "archive.other_engine")));
+  }
+
   // ---------------------------------------------------------------- tools
   async function calcTargets() {
     await guarded(async () => {
@@ -573,12 +651,13 @@
     if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); refreshImportForm(); }
     if (state.dataset) renderData();
     if (state.result) renderResult();
-    renderTargets(); renderArl();
+    renderTargets(); renderArl(); renderReportOut(); renderArchiveOut();
   }
   async function setLanguage(lang) {
     await loadMessages(lang);
     store("spc.lang", lang);
     $("#lang").value = lang;
+    if (!state.reportLangTouched) $("#rp-language").value = lang;
     rerender();
   }
   function wire() {
@@ -599,6 +678,11 @@
     $("#t-btn").addEventListener("click", calcTargets);
     $("#l-btn").addEventListener("click", calcArl);
     $("#person").value = store("spc.person") || "";
+    restoreReportMeta();
+    $("#rp-language").addEventListener("change", () => { state.reportLangTouched = true; });
+    $("#rp-create").addEventListener("click", createReport);
+    $("#archive-file").addEventListener("change", (e) => { const f = e.target.files[0]; $("#archive-name").textContent = f ? f.name : ""; state.archiveOut = null; renderArchiveOut(); });
+    $("#archive-btn").addEventListener("click", checkArchive);
   }
   async function start() {
     wire();

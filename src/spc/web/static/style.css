@@ -87,6 +87,7 @@ input[type="text"], input[type="number"], select {
   font: inherit; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--surface); color: var(--text); min-width: 0; width: 100%;
 }
+textarea { font: inherit; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); width: 100%; resize: vertical; }
 input.small { width: 5em; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 12px 0; }
 .form-grid .wide { grid-column: 1 / -1; }

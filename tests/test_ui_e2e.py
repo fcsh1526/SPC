@@ -148,3 +148,84 @@ def test_user_text_is_never_run_as_html(server, browser, tmp_path):
     playwright_sync.expect(page.locator("#rows")).to_contain_text("<img src=x onerror")
     assert page.evaluate("() => window.__pwned === undefined")
     ctx.close()
+
+
+def test_report_and_archive_check_in_the_browser(server, browser, tmp_path):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1200, "height": 900}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("console", lambda m: problems.append(m.text) if m.type == "error" else None)
+    page.on("pageerror", lambda e: problems.append(str(e)))
+
+    page.goto(server)
+    page.set_input_files("#file", str(sample(tmp_path)))
+    page.select_option("#col-value", "直徑")
+    page.select_option("#col-subgroup", "批號")
+    page.click("#import-btn")
+    expect(page.locator("#data-counts")).to_contain_text("125 values")
+
+    # the sample holds one wrong value. Left in, the charts alarm and the indices cannot be called Cp/Cpk.
+    page.click("#suspect-btn")
+    expect(page.locator("#suspect-msg")).to_contain_text("1 suspect")
+    page.click("#suspect-select")
+    page.fill("#reason", "typing error")
+    page.fill("#person", "A. Chen")
+    page.click("#mark-btn")
+    expect(page.locator("#data-counts")).to_contain_text("1 marked invalid")
+
+    page.click("#to-analysis")
+    page.fill("#a-lsl", "9.5")
+    page.fill("#a-usl", "10.5")
+    page.select_option("#a-model", "A1")
+    page.select_option("#a-class", "major")
+
+    # the report panel is part of the result, so it only exists after an analysis
+    expect(page.locator("#rp-create")).to_be_hidden()
+    page.click("#run-btn")
+    expect(page.locator("#r-names")).to_have_text("Cp and Cpk")
+    page.fill("#rp-process", "turning")
+    page.fill("#rp-machine", "CNC-07")
+    page.fill("#rp-unit", "mm")
+    page.fill("#rp-uncertainty", "0.0211")
+    page.fill("#rp-recommendations", "keep sampling")
+    page.select_option("#rp-language", "en")
+    page.click("#rp-create")
+    expect(page.locator("#rp-created")).to_contain_text("was created")
+    href = page.locator("#rp-open").get_attribute("href")
+    assert href.startswith("/api/reports/")
+
+    # the report opens as its own page: it needs inline styles and SVG, and must run no script
+    report = ctx.new_page()
+    report_problems = []
+    report.on("console", lambda m: report_problems.append(m.text) if m.type == "error" else None)
+    report.goto(server.rstrip("/") + href)
+    expect(report.locator("h1")).to_have_text("Process study report")
+    assert report.locator("svg").count() == 5
+    expect(report.locator("section.el")).not_to_have_count(0)
+    assert report.evaluate("() => getComputedStyle(document.querySelector('h1')).fontSize") == "24px"  # inline CSS applied (18pt)
+    assert report_problems == [], report_problems
+    assert "CNC-07" in report.content() and "keep sampling" in report.content()
+
+    # download the archive and check it in the tools tab
+    archive = ctx.request.get(server.rstrip("/") + page.locator("#rp-archive").get_attribute("href"))
+    path = tmp_path / "archive.json"
+    path.write_bytes(archive.body())
+    page.click("nav.tabs button[data-tab=tools]")
+    page.set_input_files("#archive-file", str(path))
+    page.click("#archive-btn")
+    expect(page.locator("#archive-out")).to_contain_text("Content is unchanged")
+    expect(page.locator("#archive-out")).to_contain_text("gives the stored result again")
+
+    # a changed archive is reported as changed
+    import json
+
+    changed = json.loads(path.read_text(encoding="utf-8"))
+    changed["dataset"]["values"][0] += 0.5
+    path.write_text(json.dumps(changed), encoding="utf-8")
+    page.set_input_files("#archive-file", str(path))
+    page.click("#archive-btn")
+    expect(page.locator("#archive-out")).to_contain_text("was changed after the archive was made")
+
+    assert problems == [], problems
+    ctx.close()
