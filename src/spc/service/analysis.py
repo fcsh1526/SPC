@@ -34,12 +34,12 @@ from spc.core.capability import (
 )
 from spc.core.capability.target import BASE_SAMPLE_SIZE
 from spc.core.capability.indices import geometric_indices, zscore_indices
-from spc.core.charts.variable import SubgroupChart, imr, xbar_r, xbar_s
+from spc.core.charts.variable import MAX_MOVING_N, MovingChart, SubgroupChart, imr, imr_moving, xbar_r, xbar_s
 from spc.core.constants import ALPHA_3SIGMA
 from spc.core.distributions import (
     FAMILIES, FitError, GaussianMixture, bootstrap_interval, choose_automatically, fit, fit_candidates, quantiles,
 )
-from spc.core.rules import RuleSet, evaluate
+from spc.core.rules import RuleResult, RuleSet, Violation, evaluate
 from spc.core.stability import Stability, assess_analysis_chart, classify_stability
 from spc.data import Dataset
 from spc.params import AnalysisParams
@@ -72,6 +72,7 @@ class AnalysisRequest:
     method: str = "G"  # "G" or "Z", used when the distribution is not normal
     bootstrap_n: int = 200  # resamples for the interval of a non-normal index. 0 = no interval
     seed: int = 20260701
+    moving_n: int = 1  # I-MR only: size of the moving sample (1 = plain individuals chart). Restarts come from the data
 
 
 def rules_from_dict(data: dict[str, Any]) -> RuleSet:
@@ -121,17 +122,57 @@ def _choose_chart(requested: str, n: int) -> str:
     return requested
 
 
+def _limit(v):
+    return _list(v) if isinstance(v, np.ndarray) else _f(v)
+
+
+def _segment_bounds(chart: MovingChart) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """(start, stop) of every segment in the location series and in the variation series."""
+    starts = list(chart.segment_starts)
+    stops = starts[1:] + [chart.k]
+    loc = list(zip(starts, stops))
+    cut = np.searchsorted(chart.variation_end, starts + [chart.k], side="left")
+    var = [(int(a), int(b)) for a, b in zip(cut[:-1], cut[1:])]
+    return loc, var
+
+
+def _evaluate(values, bounds, center, lcl, ucl, rules, sigma) -> RuleResult:
+    """Apply the criteria to each segment on its own: runs and trends do not continue over a restart."""
+    if bounds is None:
+        return evaluate(values, center, lcl, ucl, rules, sigma=sigma)
+    found: list[Violation] = []
+    for a, b in bounds:
+        if b <= a:
+            continue
+        part = lambda lim: lim[a:b] if isinstance(lim, np.ndarray) else lim
+        res = evaluate(values[a:b], center, part(lcl), part(ucl), rules, sigma=sigma)
+        found += [Violation(v.index + a, v.rule) for v in res.violations]
+    return RuleResult(tuple(found))
+
+
 def _chart_json(chart: SubgroupChart, loc_labels, var_labels, loc_pos, var_pos) -> dict:
     def part(limits, values, labels, positions, alarms):
         return {
-            "lcl": _f(limits.lcl),
+            "lcl": _limit(limits.lcl),
             "center": _f(limits.center),
-            "ucl": _f(limits.ucl),
+            "ucl": _limit(limits.ucl),
             "values": _list(values),
             "labels": [str(s) for s in labels],
             "positions": positions,
             "alarms": alarms,
         }
+
+    if isinstance(chart, MovingChart):
+        loc_b, var_b = _segment_bounds(chart)
+        out = {
+            "kind": chart.kind, "n": chart.n, "k": chart.k, "alpha": chart.alpha,
+            "mu_hat": _f(chart.mu_hat), "sigma_hat": _f(chart.sigma_hat), "moving_n": chart.moving_n,
+            "location": part(chart.location, chart.location_values, loc_labels, loc_pos, []),
+            "variation": part(chart.variation, chart.variation_values, var_labels, var_pos, []),
+        }
+        out["location"]["restarts"] = [a for a, _ in loc_b[1:]]
+        out["variation"]["restarts"] = [a for a, _ in var_b[1:]]
+        return out
 
     return {
         "kind": chart.kind,
@@ -179,6 +220,8 @@ def _check_distribution_request(req: AnalysisRequest) -> None:
         raise ValueError(f"distribution must be 'normal', 'auto' or one of {FAMILIES}")
     if req.method not in ("G", "Z"):
         raise ValueError("method must be 'G' or 'Z'")
+    if not 1 <= req.moving_n <= MAX_MOVING_N:
+        raise ValueError(f"moving_n must be between 1 and {MAX_MOVING_N}")
     if not 0 <= req.bootstrap_n <= 2000:
         raise ValueError("bootstrap_n must be between 0 and 2000")
     if req.distribution == "empirical" and req.method == "Z":
@@ -266,14 +309,32 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
 
     # ---- chart
     kind = _choose_chart(req.chart if req.stage != "machine" else "imr", n_sub)
+    restarts = dataset.restart_info()
+    if kind != "imr" and req.moving_n != 1:
+        raise ValueError("the moving sample size applies only to the I-MR chart")
+    if kind != "imr" and restarts:
+        _warn(warnings, "restarts_not_used", n=len(restarts))
+    seg_loc = seg_var = None
     if kind == "imr":
         v_all, p_all = dataset.individuals() if matrix is None else (values, positions)
-        chart = imr(v_all, req.alpha)
         src_rows = dataset.source_rows[p_all]
         loc_labels = [str(r) for r in src_rows]
-        loc_pos = [[int(p)] for p in p_all]
-        var_labels, var_pos = loc_labels[1:], [[int(p_all[i]), int(p_all[i + 1])] for i in range(len(p_all) - 1)]
-        sigma_loc = chart.sigma_hat
+        cuts = sorted({int(i) for i in np.searchsorted(p_all, list(restarts), side="left") if 0 < i < len(p_all)})
+        if len(cuts) != len(restarts):  # a restart before the first or after the last used value restarts nothing
+            _warn(warnings, "restart_without_effect", n=len(restarts) - len(cuts))
+        if req.moving_n == 1 and not cuts:
+            chart = imr(v_all, req.alpha)
+            loc_pos = [[int(p)] for p in p_all]
+            var_labels, var_pos = loc_labels[1:], [[int(p_all[i]), int(p_all[i + 1])] for i in range(len(p_all) - 1)]
+            sigma_loc = chart.sigma_hat
+        else:
+            chart = imr_moving(v_all, req.alpha, req.moving_n, cuts)
+            seg_loc, seg_var = _segment_bounds(chart)
+            loc_pos = [[int(p) for p in p_all[i - t + 1 : i + 1]] for i, t in enumerate(chart.location_window)]
+            var_labels = [loc_labels[i] for i in chart.variation_end]
+            var_pos = [[int(p) for p in p_all[i - t + 1 : i + 1]] for i, t in zip(chart.variation_end, chart.variation_window)]
+            sigma_loc = chart.sigma_hat / math.sqrt(chart.moving_n)
+
     else:
         chart = (xbar_s if kind == "xbar-s" else xbar_r)(matrix, req.alpha)
         loc_labels = var_labels = labels
@@ -283,10 +344,10 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
 
     # ---- criteria on both charts. Sigma-based criteria only make sense on the location chart.
     var_rules = replace(rules, two_of_three_beyond_2s=False, four_of_five_beyond_1s=False, fifteen_within_1s=False)
-    loc_res = evaluate(chart.location_values, chart.location.center, chart.location.lcl, chart.location.ucl,
-                       rules, sigma=sigma_loc if rules.needs_sigma else None)
-    var_res = evaluate(chart.variation_values, chart.variation.center, chart.variation.lcl, chart.variation.ucl,
-                       var_rules)
+    loc_res = _evaluate(chart.location_values, seg_loc, chart.location.center, chart.location.lcl, chart.location.ucl,
+                        rules, sigma_loc if rules.needs_sigma else None)
+    var_res = _evaluate(chart.variation_values, seg_var, chart.variation.center, chart.variation.lcl, chart.variation.ucl,
+                        var_rules, None)
     out_chart["location"]["alarms"] = [{"index": v.index, "rule": v.rule} for v in loc_res.violations]
     out_chart["variation"]["alarms"] = [{"index": v.index, "rule": v.rule} for v in var_res.violations]
     n_alarms = loc_res.n_alarm_points + var_res.n_alarm_points

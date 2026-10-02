@@ -137,3 +137,5 @@ ul.alarms { font-size: 0.9rem; color: var(--alarm); }
 .panel.narrow, #login { max-width: 460px; }
 #login { margin-top: 24px; }
 body[data-role="viewer"] [data-needs="engineer"], body:not([data-role="admin"]) [data-needs="admin"] { display: none !important; }
+.chart .restart { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; }
+tr.restart-row td { border-top: 2px dashed var(--muted); }

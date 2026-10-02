@@ -162,6 +162,9 @@ def build_report(
         "ppm_total": ix["ppm"], "guard": guard, "normality": r["normality"],
         "criteria": _rule_texts(lang, r["params"]["rules"]),
         "dist": blk, "method": request.method,
+        "moving_n": chart.get("moving_n"),
+        "restarts": [{"source_row": int(dataset.source_rows[p]), "reason": rs, "by": by, "at": at}
+                     for p, (rs, by, at) in dataset.restart_info().items()] if chart.get("moving_n") else [],
     }
 
     # ---- figures

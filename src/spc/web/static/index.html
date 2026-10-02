@@ -148,6 +148,16 @@
     </p>
   </div>
 
+  <div class="card" data-needs="engineer">
+    <h3 data-i18n="data.restart_title"></h3>
+    <p class="note" data-i18n="data.restart_note"></p>
+    <p id="restart-list" class="muted"></p>
+    <p class="row">
+      <button id="restart-btn" data-i18n="data.restart_btn"></button>
+      <button id="unrestart-btn" data-i18n="data.unrestart_btn"></button>
+    </p>
+  </div>
+
   <div class="scroll"><table id="rows" class="grid"></table></div>
   <p class="row">
     <button id="prev" data-i18n="data.prev"></button>
@@ -186,6 +196,9 @@
       <label id="a-size-wrap"><span data-i18n="analysis.subgroup_size"></span>
         <input id="a-size" type="number" min="1" step="1">
         <small class="muted" data-i18n="analysis.subgroup_size_hint"></small></label>
+      <label id="a-moving-wrap"><span data-i18n="analysis.moving_n"></span>
+        <input id="a-moving" type="number" min="1" max="10" step="1" value="1">
+        <small class="muted" data-i18n="analysis.moving_hint"></small></label>
     </div>
 
     <fieldset>
@@ -301,6 +314,7 @@
     <h3 id="r-var-title"></h3>
     <div id="chart-var" class="chart"></div>
     <ul id="r-var-alarms" class="alarms"></ul>
+    <p id="r-moving" class="muted" hidden></p>
     <p class="muted" data-i18n="result.no_spec_on_chart"></p>
 
     <div id="r-indices-block">

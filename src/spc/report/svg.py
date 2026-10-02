@@ -251,9 +251,12 @@ def probability_plot(values, mean, sd, lsl, usl, labels: dict, width=430, height
 
 
 def control_chart(part: dict, labels: dict, width=W, height=250) -> str:
-    """part: values, labels, lcl, center, ucl, alarms (list of {index, rule}) from the analysis result."""
+    """part: values, labels, lcl, center, ucl, alarms (list of {index, rule}) from the analysis result.
+    lcl and ucl are numbers, or lists with one value per point (moving sample after a restart: a staircase).
+    part["restarts"] lists the points that start a new segment."""
     v = np.asarray(part["values"], dtype=float)
-    ys = list(v) + [t for t in (part["lcl"], part["center"], part["ucl"]) if t is not None]
+    flat = lambda t: t if isinstance(t, list) else [t]
+    ys = list(v) + [t for key in ("lcl", "center", "ucl") for t in flat(part[key]) if t is not None]
     y_lo, y_hi = _pad(min(ys), max(ys), 0.08)
     f = _Frame(labels["title"], 1, max(len(v), 2), y_lo, y_hi, mr=96, width=width, height=height)
     f.add(f'<polyline points="{" ".join(f"{_num(f.X(i + 1))},{_num(f.Y(a))}" for i, a in enumerate(v))}" fill="none" stroke="{SERIES}" stroke-width="1.2"/>')
@@ -262,9 +265,19 @@ def control_chart(part: dict, labels: dict, width=W, height=250) -> str:
         c = ALARM if i in alarms else SERIES
         f.add(f'<circle cx="{_num(f.X(i + 1))}" cy="{_num(f.Y(a))}" r="{3 if len(v) <= 300 else 1.7}" fill="{c}"/>')
     f.axes(labels["x"], labels["y"], x_ticks=None, x_dec=0)
+    for i in part.get("restarts") or []:
+        x = f.X(i + 0.5)  # between the last point before and the first point after the restart
+        f.line(x, f.Y(y_hi), x, f.Y(y_lo), GREY, 1.0, "2 3")
     for key, color, name, dash in (("ucl", LIMIT, labels["ucl"], "6 4"), ("center", "#59626e", labels["cl"], None), ("lcl", LIMIT, labels["lcl"], "6 4")):
         t = part[key]
-        if t is not None and y_lo <= t <= y_hi:
+        if isinstance(t, list):
+            pts = []
+            for i, val in enumerate(t):
+                pts += [f"{_num(max(f.ml, f.X(i + 0.5)))},{_num(f.Y(val))}", f"{_num(min(W - f.mr, f.X(i + 1.5)))},{_num(f.Y(val))}"]
+            d = f' stroke-dasharray="{dash}"' if dash else ""
+            f.add(f'<polyline points="{" ".join(pts)}" fill="none" stroke="{color}" stroke-width="1.2"{d}/>')
+            f.text(W - f.mr + 4, f.Y(t[-1]) + 3.5, f"{name} {t[-1]:.5g}", 9, "start", color)
+        elif t is not None and y_lo <= t <= y_hi:
             f.line(f.ml, f.Y(t), W - f.mr, f.Y(t), color, 1.2, dash)
             f.text(W - f.mr + 4, f.Y(t) + 3.5, f"{name} {t:.5g}", 9, "start", color)
     items = [("dot", SERIES, labels["point"])]

@@ -123,7 +123,7 @@ def imr(values, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
     """I-MR chart with moving range of 2.
 
     Estimators: mu_hat = mean, sigma_hat = MR̄ / d2(2). The MR limits use the w distribution for n = 2.
-    The start-up handling with growing moving-sample size (draft 10.3.3.5) is not implemented yet.
+    For restarts and moving samples larger than 2 see `imr_moving`.
     """
     check_alpha(alpha)
     x = np.asarray(values, dtype=float)
@@ -151,4 +151,95 @@ def imr(values, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
         ),
         location_values=x,
         variation_values=mr,
+    )
+
+
+MAX_MOVING_N = 10
+
+
+@dataclass(frozen=True)
+class MovingChart(SubgroupChart):
+    """I-MR with a moving sample size n >= 1 and restarts (draft 10.3.3.5). The limits are per point."""
+
+    moving_n: int = 1
+    segment_starts: tuple[int, ...] = (0,)  # index of the first value of every segment (a restart begins one)
+    location_window: np.ndarray = None  # size of the moving sample behind each location point
+    variation_window: np.ndarray = None  # size of the moving range behind each variation point
+    variation_end: np.ndarray = None  # index of the last value of each moving range
+
+
+def imr_moving(values, alpha: float = ALPHA_3SIGMA, moving_n: int = 1, restarts=()) -> MovingChart:
+    """Individuals chart with moving characteristics that restart (AIAG-VDA SPC draft 10.3.3.5).
+
+    After a planned intervention (tool change) or a violation the moving characteristic must not use
+    values from before it: its causal observation would raise more alarms although the process is
+    corrected. `restarts` holds indices into `values` where a new segment begins. A moving range never
+    spans a restart.
+
+    Every segment starts again with a moving sample of size 1 and grows by one value per point up to
+    `moving_n`, so there is no blind spot of n - 1 points. The limits follow the sample size of each point:
+
+    * location : moving mean of t values,  mu_hat ± u(1-alpha/2) * sigma_hat / sqrt(t)
+    * variation: moving range of t values (t = 2 .. max(moving_n, 2)),  w(t; p) * sigma_hat
+
+    mu_hat is the mean of all values. sigma_hat = R̄ / d2(t_max), where R̄ is the mean of the ranges of
+    complete moving samples only. For moving_n = 1 or 2 that is MR̄ / d2(2), as in `imr`.
+    The risk alpha holds for every plotted point on its own (normal data, independent values). Moving
+    means share values with their neighbours, so their alarms come in clusters.
+
+    The draft prints the location limit with the quantile u of (1 - alpha/2) replaced by an expression with
+    the n-th root of (1 - alpha). Measured on the draft's figure 10-11 (half widths 1 : 0.68 : 0.575 for n = 1, 2, 3),
+    sigma_hat / sqrt(t) with a constant u (1 : 0.71 : 0.58) fits and the n-th root version (1 : 0.76 : 0.64) does not.
+    """
+    check_alpha(alpha)
+    x = np.asarray(values, dtype=float)
+    if x.ndim != 1 or x.size < 3:
+        raise ValueError("values must be a 1-D array with at least 3 observations")
+    if not np.all(np.isfinite(x)):
+        raise ValueError("data contains NaN or inf; mark outliers as invalid and exclude them first")
+    m = int(moving_n)
+    if not 1 <= m <= MAX_MOVING_N:
+        raise ValueError(f"moving_n must be between 1 and {MAX_MOVING_N}")
+    mv = max(m, 2)
+    cuts = sorted({int(r) for r in restarts})
+    if any(not 0 < r < x.size for r in cuts):
+        raise ValueError("restart indices must be between 1 and the number of values - 1")
+    starts = [0] + cuts
+    stops = starts[1:] + [x.size]
+
+    t_loc = np.empty(x.size, dtype=int)
+    loc = np.empty(x.size)
+    ranges: list[float] = []
+    t_var: list[int] = []
+    ends: list[int] = []
+    for a, b in zip(starts, stops):
+        for i in range(a, b):
+            j = i - a
+            t = min(j + 1, m)
+            t_loc[i] = t
+            loc[i] = x[i - t + 1 : i + 1].mean()
+            if j >= 1:
+                tv = min(j + 1, mv)
+                window = x[i - tv + 1 : i + 1]
+                ranges.append(float(window.max() - window.min()))
+                t_var.append(tv)
+                ends.append(i)
+    rng = np.array(ranges)
+    tv_arr = np.array(t_var, dtype=int)
+    complete = tv_arr == mv
+    if not complete.any():
+        raise ValueError("no complete moving sample: every segment is shorter than the moving sample size")
+    rbar = float(rng[complete].mean())
+    sigma = rbar / d2(mv)
+    mu = float(x.mean())
+    half = u_quantile(alpha) * sigma / np.sqrt(t_loc)
+    low = {t: w_quantile(t, alpha / 2.0) for t in set(t_var)}
+    high = {t: w_quantile(t, 1.0 - alpha / 2.0) for t in set(t_var)}
+    return MovingChart(
+        kind="imr", n=m, k=int(x.size), alpha=alpha, mu_hat=mu, sigma_hat=sigma,
+        location=Limits(mu - half, mu, mu + half),
+        variation=Limits(np.array([low[t] for t in t_var]) * sigma, rbar, np.array([high[t] for t in t_var]) * sigma),
+        location_values=loc, variation_values=rng,
+        moving_n=m, segment_starts=tuple(starts), location_window=t_loc, variation_window=tv_arr,
+        variation_end=np.array(ends, dtype=int),
     )

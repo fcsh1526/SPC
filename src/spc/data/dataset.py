@@ -36,7 +36,7 @@ class SourceInfo:
 
 @dataclass(frozen=True)
 class LogEntry:
-    action: str  # "mark_invalid" or "restore"
+    action: str  # "mark_invalid", "restore", "restart" or "unrestart"
     positions: tuple[int, ...]
     reason: str
     by: str
@@ -144,9 +144,24 @@ class Dataset:
             for p in entry.positions:
                 if entry.action == "mark_invalid":
                     state[p] = entry
-                else:
+                elif entry.action == "restore":
                     state.pop(p, None)
         return state
+
+    def _restart_state(self) -> dict[int, LogEntry]:
+        state: dict[int, LogEntry] = {}
+        for entry in self.log:
+            for p in entry.positions:
+                if entry.action == "restart":
+                    state[p] = entry
+                elif entry.action == "unrestart":
+                    state.pop(p, None)
+        return state
+
+    def restart_info(self) -> dict[int, tuple[str, str, str]]:
+        """position -> (reason, by, at) for every restart of the moving characteristics now in force.
+        A restart sits before the value at that position."""
+        return {p: (e.reason, e.by, e.at) for p, e in sorted(self._restart_state().items())}
 
     @property
     def valid_mask(self) -> np.ndarray:
@@ -218,6 +233,30 @@ class Dataset:
         entry = LogEntry("restore", pos, reason, by, at or _now())
         return replace(self, log=self.log + (entry,))
 
+    def add_restart(self, positions: Sequence[int], reason: str, by: str, at: str | None = None) -> "Dataset":
+        """Restart the moving characteristics of an individuals chart before these values (tool change,
+        action after an alarm). The values stay in the data. The reason says what happened."""
+        reason, by = (reason or "").strip(), (by or "").strip()
+        if not reason or not by:
+            raise ValueError("a reason and the person are required to restart the chart")
+        pos = self._check_positions(positions)
+        if 0 in pos:
+            raise ValueError("a restart before the first value has no effect")
+        already = [p for p in pos if p in self._restart_state()]
+        if already:
+            raise ValueError(f"already restarted: {already}")
+        return replace(self, log=self.log + (LogEntry("restart", pos, reason, by, at or _now()),))
+
+    def remove_restart(self, positions: Sequence[int], reason: str, by: str, at: str | None = None) -> "Dataset":
+        reason, by = (reason or "").strip(), (by or "").strip()
+        if not reason or not by:
+            raise ValueError("a reason and the person are required to take a restart away")
+        pos = self._check_positions(positions)
+        missing = [p for p in pos if p not in self._restart_state()]
+        if missing:
+            raise ValueError(f"no restart at: {missing}")
+        return replace(self, log=self.log + (LogEntry("unrestart", pos, reason, by, at or _now()),))
+
     # ------------------------------------------------------------------ use in calculations
 
     def individuals(self) -> tuple[np.ndarray, np.ndarray]:
@@ -230,6 +269,8 @@ class Dataset:
         out = {"n_total": self.n_total, "n_effective": self.n_valid, "n_invalid": self.n_invalid}
         if self.subgroup is not None:
             out["k_subgroups"] = len(dict.fromkeys(self.subgroup.tolist()))
+        if self._restart_state():
+            out["n_restarts"] = len(self._restart_state())
         return out
 
     def _labels(self, size: int | None) -> np.ndarray:

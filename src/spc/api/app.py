@@ -64,11 +64,13 @@ def _dataset_json(key: str, ds: Dataset) -> dict:
         "tags": list(ds.tags),
         "warnings": [{"code": f"data_{w.code}", "params": dict(w.params)} for w in ds.warnings],
         "log": [asdict(e) for e in ds.log],
+        "restarts": [{"pos": p, "reason": r, "by": b, "at": a} for p, (r, b, a) in ds.restart_info().items()],
     }
 
 
-def _row_json(ds: Dataset, i: int, info: dict) -> dict:
+def _row_json(ds: Dataset, i: int, info: dict, restarts: dict | None = None) -> dict:
     mark = info.get(i)
+    restart = (restarts or {}).get(i)
     return {
         "pos": i,
         "source_row": int(ds.source_rows[i]),
@@ -78,6 +80,7 @@ def _row_json(ds: Dataset, i: int, info: dict) -> dict:
         "tags": {k: str(v[i]) for k, v in ds.tags.items()},
         "valid": mark is None,
         "invalid": None if mark is None else {"reason": mark[0], "by": mark[1], "at": mark[2]},
+        "restart": None if restart is None else {"reason": restart[0], "by": restart[1], "at": restart[2]},
     }
 
 
@@ -265,9 +268,9 @@ def create_app(
     @app.get("/api/datasets/{key}/rows")
     def get_rows(key: str, offset: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=2000)):
         ds = store.get(key)
-        info = ds.invalid_info()
+        info, restarts = ds.invalid_info(), ds.restart_info()
         stop = min(ds.n_total, offset + limit)
-        return {"total": ds.n_total, "offset": offset, "rows": [_row_json(ds, i, info) for i in range(offset, stop)]}
+        return {"total": ds.n_total, "offset": offset, "rows": [_row_json(ds, i, info, restarts) for i in range(offset, stop)]}
 
     @app.post("/api/datasets/{key}/suspects")
     def get_suspects(key: str, body: SuspectsBody):
@@ -322,6 +325,45 @@ def create_app(
             return ds.restore(body.positions, body.reason, user.label)
 
         return _marked(key, "dataset_restored", body, user, change)
+
+    def _restarted(key: str, action: str, body: MarkBody, user: User, change) -> dict:
+        with db.tx():
+            new = store.modify(key, change)
+            audit.append(action, user_id=user.id, username=user.username, target=key,
+                         detail={"n": len(body.positions), "positions": body.positions[:50], "reason": body.reason})
+        return _dataset_json(key, new)
+
+    @app.post("/api/datasets/{key}/restarts")
+    def add_restart(key: str, body: MarkBody, user: User = Depends(writer)):
+        """Restart the moving characteristics of the I-MR chart before the given values."""
+        if not body.reason.strip():
+            raise ApiError(400, "reason_required", "a reason is required to restart the chart")
+
+        def change(ds: Dataset) -> Dataset:
+            bad = [p for p in body.positions if not 0 <= p < ds.n_total]
+            if bad:
+                raise ApiError(400, "positions_out_of_range", "positions out of range", positions=bad[:20])
+            if 0 in body.positions:
+                raise ApiError(400, "restart_at_start", "a restart before the first value has no effect")
+            again = [p for p in body.positions if p in ds.restart_info()]
+            if again:
+                raise ApiError(409, "already_restart", "a restart exists already", positions=again[:20])
+            return ds.add_restart(body.positions, body.reason, user.label)
+
+        return _restarted(key, "dataset_restart_added", body, user, change)
+
+    @app.post("/api/datasets/{key}/restarts/remove")
+    def remove_restart(key: str, body: MarkBody, user: User = Depends(writer)):
+        if not body.reason.strip():
+            raise ApiError(400, "reason_required", "a reason is required to take a restart away")
+
+        def change(ds: Dataset) -> Dataset:
+            missing = [p for p in body.positions if p not in ds.restart_info()]
+            if missing:
+                raise ApiError(409, "not_restart", "there is no restart here", positions=missing[:20])
+            return ds.remove_restart(body.positions, body.reason, user.label)
+
+        return _restarted(key, "dataset_restart_removed", body, user, change)
 
     @app.get("/api/datasets/{key}/export.csv")
     def export_csv(key: str):

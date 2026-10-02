@@ -389,3 +389,55 @@ def test_fitted_distribution_in_the_browser(server, browser, tmp_path):
     expect(page.locator("#r-indices")).to_contain_text(".Z")
     assert problems == [], problems
     ctx.close()
+
+
+def test_restart_of_the_individuals_chart_in_the_browser(server, browser, tmp_path):
+    expect = playwright_sync.expect
+    rng = np.random.default_rng(2)
+    values = np.r_[rng.normal(10, 0.1, 30), rng.normal(10.6, 0.1, 30)]  # a tool change moved the level
+    path = tmp_path / "ind.csv"
+    path.write_text("v\n" + "\n".join(f"{v:.4f}" for v in values) + "\n")
+    ctx = browser.new_context(viewport={"width": 1200, "height": 900}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.set_input_files("#file", str(path))
+    page.select_option("#col-value", "v")
+    page.click("#import-btn")
+    expect(page.locator("#restart-list")).to_have_text("No restarts.")
+
+    page.click("#unrestart-btn")  # nothing selected
+    expect(page.locator("#errors")).to_contain_text("Select")
+    page.click("#errors button")
+    page.locator("#rows tr:nth-child(32) input").check()  # No. 31: the first value after the tool change
+    page.click("#restart-btn")
+    expect(page.locator("#errors")).to_contain_text("reason")  # a reason is required
+    page.click("#errors button")
+    page.locator("#rows tr:nth-child(32) input").check()
+    page.fill("#reason", "tool change T-07")
+    page.click("#restart-btn")
+    expect(page.locator("#restart-list")).to_contain_text("31")
+    expect(page.locator("#data-counts")).to_contain_text("1 restart")
+    expect(page.locator("#rows tr.restart-row")).to_have_count(1)
+    expect(page.locator("#rows tr.restart-row .reason")).to_have_text("tool change T-07")
+
+    page.click("#to-analysis")
+    page.fill("#a-lsl", "9")
+    page.fill("#a-usl", "12")
+    page.fill("#a-moving", "3")
+    page.click("#run-btn")
+    expect(page.locator("#r-moving")).to_contain_text("moving sample size 3 and 1 restart")
+    expect(page.locator("#chart-loc svg line.restart")).to_have_count(1)
+    expect(page.locator("#chart-var svg line.restart")).to_have_count(1)
+    assert page.locator("#chart-loc svg polyline.limit").count() == 2  # the limits are staircases
+    expect(page.locator("#r-var-alarms li")).to_have_count(0)  # no alarm from the jump itself
+
+    page.click("nav.tabs button[data-tab=data]")
+    page.locator("#rows tr:nth-child(32) input").check()
+    page.fill("#reason", "entered by mistake")
+    page.click("#unrestart-btn")
+    expect(page.locator("#restart-list")).to_have_text("No restarts.")
+    assert problems == [], problems
+    ctx.close()

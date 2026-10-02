@@ -258,6 +258,7 @@
     renderReportOut();
     $("#result").hidden = true;
     $("#a-size-wrap").hidden = ds.has_subgroup;
+    $("#a-moving-wrap").hidden = ds.has_subgroup;  // a moving sample belongs to the individuals chart
     $("#export-link").href = `/api/datasets/${ds.id}/export.csv`;
     unlockTabs();
     await loadRows();
@@ -281,6 +282,8 @@
     const s = ds.summary;
     let line = t("data.counts", { total: s.n_total, valid: s.n_effective, invalid: s.n_invalid });
     if (s.k_subgroups) line += " · " + t("data.subgroups", { k: s.k_subgroups });
+    if (s.n_restarts) line += " · " + t("data.restarts_count", { n: s.n_restarts });
+    $("#restart-list").textContent = ds.restarts.length ? t("data.restart_list", { rows: ds.restarts.map((r) => r.pos + 1).join(", ") }) : t("data.restart_none");
     $("#data-counts").textContent = line;
     const src = $("#data-source");
     if (ds.source) {
@@ -299,7 +302,7 @@
     const log = state.dataset.log;
     if (!log.length) { ul.appendChild(el("li", "muted", t("data.log_empty"))); return; }
     log.forEach((e) => {
-      const action = t(e.action === "mark_invalid" ? "data.log_mark_invalid" : "data.log_restore");
+      const action = t({ mark_invalid: "data.log_mark_invalid", restore: "data.log_restore", restart: "data.log_restart", unrestart: "data.log_unrestart" }[e.action]);
       const li = el("li", "", t("data.log_line", { action, n: e.positions.length, by: e.by, at: e.at }));
       li.appendChild(el("div", "muted", "“" + e.reason + "”"));
       ul.appendChild(li);
@@ -339,9 +342,11 @@
       if (ds.has_subgroup) tr.appendChild(el("td", "", r.subgroup));
       if (ds.has_timestamp) tr.appendChild(el("td", "", r.timestamp));
       ds.tags.forEach((tag) => tr.appendChild(el("td", "", r.tags[tag])));
-      tr.appendChild(el("td", "status", t(r.valid ? "data.status_valid" : "data.status_invalid")));
-      const reason = el("td", "reason", r.invalid ? r.invalid.reason : "");
-      if (r.invalid) reason.title = `${r.invalid.by}, ${r.invalid.at}`;
+      tr.appendChild(el("td", "status", t(r.valid ? "data.status_valid" : "data.status_invalid") + (r.restart ? " · ↻ " + t("data.status_restart") : "")));
+      const note = r.invalid || r.restart;
+      const reason = el("td", "reason", note ? note.reason : "");
+      if (note) reason.title = `${note.by}, ${note.at}`;
+      if (r.restart) tr.classList.add("restart-row");
       tr.appendChild(reason);
       table.appendChild(tr);
     });
@@ -378,6 +383,20 @@
     });
   }
 
+  async function restartOrRemove(kind) {
+    if (!state.selected.size) return showError({ code: "no_selection", params: {} });
+    const body = { positions: Array.from(state.selected).sort((a, b) => a - b), reason: $("#reason").value };
+    await guarded(async () => {
+      const ds = await post(`/api/datasets/${state.dataset.id}/restarts${kind === "add" ? "" : "/remove"}`, body);
+      state.dataset = ds;
+      state.selected.clear(); state.suspects.clear(); $("#suspect-select").hidden = true;
+      state.result = null; state.reportOut = null; renderReportOut(); $("#result").hidden = true;
+      await loadRows();
+      renderData();
+      $("#suspect-msg").textContent = t(kind === "add" ? "data.restarted" : "data.restart_removed", { n: body.positions.length });
+    });
+  }
+
   // ---------------------------------------------------------------- analysis
   function buildAnalysisBody() {
     const num = (sel) => { const v = $(sel).value.trim(); return v === "" ? null : Number(v); };
@@ -405,6 +424,7 @@
       },
     };
     if (alpha) body.alpha = Number(alpha);
+    if (!$("#a-moving-wrap").hidden) body.moving_n = Math.max(1, Math.min(10, Math.round(Number($("#a-moving").value) || 1)));
     body.distribution = $("#a-dist").value;
     if (body.distribution !== "normal") {
       body.method = $("#a-method").value;
@@ -429,7 +449,8 @@
     container.replaceChildren();
     const W = 960, H = 280, ml = 70, mr = 150, mt = 16, mb = 34;
     const n = part.values.length;
-    const ys = part.values.concat([part.lcl, part.ucl, part.center]).filter((v) => v !== null);
+    const flat = (v) => (Array.isArray(v) ? v : [v]);  // limits are one number, or one per point after a restart
+    const ys = part.values.concat(flat(part.lcl), flat(part.ucl), flat(part.center)).filter((v) => v !== null);
     let lo = Math.min(...ys), hi = Math.max(...ys);
     if (hi === lo) { hi += 1; lo -= 1; }
     const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
@@ -450,8 +471,19 @@
     for (let i = 0; i < n; i += step) {
       root.appendChild(svg("text", { x: X(i), y: H - mb + 16, "text-anchor": "middle" }, String(part.labels[i] || i + 1).slice(0, 8)));
     }
+    const half = n > 1 ? (W - ml - mr) / (n - 1) / 2 : 0;
+    (part.restarts || []).forEach((i) => {  // a restart sits between two points
+      root.appendChild(svg("line", { class: "restart", x1: X(i) - half, y1: mt, x2: X(i) - half, y2: H - mb }));
+    });
     [["limit", part.ucl, t("result.ucl")], ["center", part.center, t("result.cl")], ["limit", part.lcl, t("result.lcl")]].forEach(([cls, v, name]) => {
       if (v === null) return;
+      if (Array.isArray(v)) {  // limits that follow the size of the moving sample: a staircase
+        const pts = [];
+        v.forEach((val, i) => { pts.push(`${Math.max(ml, X(i) - half)},${Y(val)}`, `${Math.min(W - mr, X(i) + half)},${Y(val)}`); });
+        root.appendChild(svg("polyline", { class: cls, points: pts.join(" "), fill: "none" }));
+        root.appendChild(svg("text", { class: "limit-label", x: W - mr + 6, y: Y(v[v.length - 1]) + 4 }, `${name} ${sig(v[v.length - 1], 5)}`));
+        return;
+      }
       root.appendChild(svg("line", { class: cls, x1: ml, y1: Y(v), x2: W - mr, y2: Y(v) }));
       root.appendChild(svg("text", { class: "limit-label", x: W - mr + 6, y: Y(v) + 4 }, `${name} ${sig(v, 5)}`));
     });
@@ -505,6 +537,9 @@
     $("#r-var-title").textContent = `${varTitle} · ${sum(ch.variation)}`;
     drawChart($("#chart-loc"), ch.location, locTitle);
     drawChart($("#chart-var"), ch.variation, varTitle);
+    const mv = $("#r-moving");
+    mv.hidden = !ch.moving_n;
+    if (ch.moving_n) mv.textContent = t("result.moving_line", { n: ch.moving_n, k: ch.location.restarts.length });
     alarmSummary($("#r-loc-alarms"), ch.location);
     alarmSummary($("#r-var-alarms"), ch.variation);
 
@@ -909,6 +944,8 @@
     $("#suspect-select").addEventListener("click", () => { state.suspects.forEach((p) => state.selected.add(p)); renderData(); });
     $("#mark-btn").addEventListener("click", () => markOrRestore("mark"));
     $("#restore-btn").addEventListener("click", () => markOrRestore("restore"));
+    $("#restart-btn").addEventListener("click", () => restartOrRemove("add"));
+    $("#unrestart-btn").addEventListener("click", () => restartOrRemove("remove"));
     $("#to-analysis").addEventListener("click", () => showTab("analysis"));
     $("#a-dist").addEventListener("change", syncDistributionControls);
     syncDistributionControls();

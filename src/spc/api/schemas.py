@@ -78,6 +78,7 @@ class AnalyzeBody(Strict):
     method: Literal["G", "Z"] = "G"
     bootstrap_n: int = Field(default=200, ge=0, le=2000)
     seed: int = Field(default=20260701, ge=0, le=2**32 - 1)
+    moving_n: int = Field(default=1, ge=1, le=10)
 
     def to_request(self) -> AnalysisRequest:
         return AnalysisRequest(**self.model_dump())

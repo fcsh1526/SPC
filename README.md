@@ -52,6 +52,14 @@ The server listens on 127.0.0.1 only. To serve a team, put it behind an https pr
 
 Sign in first. Steps: import a CSV (Big5 / UTF-8, columns chosen on a preview) → check data and mark outliers with a reason → run the analysis → read charts, index names, confidence intervals and targets. After an analysis, the report panel makes the 20+2 element report in either language. The Saved tab lists stored datasets and reports and opens them again. A tools tab holds the small-sample target calculator, the ARL / OC calculator and the archive check.
 
+## I-MR restarts and moving samples
+
+After a tool change or an action that followed an alarm, the moving characteristics of an individuals chart must start again, or the old values cause more alarms although the process is corrected (draft 10.3.3.5).
+- In the Data tab select the first value after the event, write the reason and press "Restart before selected values". Like an invalid mark it is stored with the reason, your sign-in and the time, goes into the audit trail, and can be taken away again.
+- A moving range never spans a restart. After the start and after every restart the moving sample grows 1, 2, … up to the size you set in the analysis form, so there is no blind spot. The limits follow the size of the moving sample (a staircase in the chart), and the chart shows the restarts as dotted lines. Runs and trends do not continue over a restart.
+- The centre line is still the mean of all values. A tool change that moves the level makes the location points after it fall outside the limits, because the level did move. Limits per phase are not done yet.
+- Restarts apply only to the I-MR chart. The capability indices still use all valid values. The CSV export does not carry restarts. The archive does.
+
 ## Non-normal data (.G and .Z)
 
 In the analysis form, choose a distribution (or "choose automatically") and a method. The indices are then named `Cpk.G` or `Ppk.Z` and come from the fitted distribution: `.G` from its 0.135 %, 50 % and 99.865 % quantiles, `.Z` from the shares outside the limits.

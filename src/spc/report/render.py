@@ -139,6 +139,10 @@ def render_html(rep: Report) -> str:
         mode = L("v.mode_" + r["params"]["stability_mode"])
         e14 = kv([
             (L("f.chart"), esc(L("v.chart_" + f["chart_kind"]))),
+            *(
+                [(L("f.moving"), esc(L("v.moving_line", n=f["moving_n"], k=len(f["restarts"]))))]
+                if f["moving_n"] else []
+            ),
             (L("f.risk"), esc(_sig(f["alpha"], 4))),
             (L("f.criteria"), esc(crit)),
             (L("f.stability_mode"), esc(mode)),
@@ -259,6 +263,13 @@ def render_html(rep: Report) -> str:
                    f'<th>{esc(L("f.col_reason"))}</th><th>{esc(L("f.col_by"))}</th><th>{esc(L("f.col_at"))}</th></tr>{body}</table>')
     else:
         annex_a = f'<p class="muted">{esc(L("f.none"))}</p>'
+    if f["restarts"]:
+        body = "".join(
+            f'<tr><td class="num">{x["source_row"]}</td><td>{esc(x["reason"])}</td><td>{esc(x["by"])}</td><td>{esc(x["at"])}</td></tr>'
+            for x in f["restarts"]
+        )
+        annex_a += (f'<h3>{esc(L("f.restarts_title"))}</h3><table><tr><th class="num">{esc(L("f.col_row"))}</th>'
+                    f'<th>{esc(L("f.col_reason"))}</th><th>{esc(L("f.col_by"))}</th><th>{esc(L("f.col_at"))}</th></tr>{body}</table>')
     dropped = next((w for w in r["warnings"] if w["code"] == "dropped_subgroups"), None)
     if dropped:
         annex_a += f'<p class="muted">{esc(L("f.unused_labels", labels=", ".join(dropped["params"]["labels"])))}</p>'
