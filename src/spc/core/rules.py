@@ -70,22 +70,26 @@ class RuleResult:
 
 def evaluate(
     values,
-    center: float,
+    center,
     lcl,
     ucl,
     rules: RuleSet = RuleSet(),
-    sigma: float | None = None,
+    sigma=None,
 ) -> RuleResult:
     """Apply the enabled criteria to a series of plotted values.
 
-    `lcl` and `ucl` may be scalars or per-point arrays. `sigma` is the standard deviation of the
-    plotted statistic. It is needed for the Western Electric style criteria.
+    `center`, `lcl`, `ucl` and `sigma` may be scalars or per-point arrays (limits that change with the
+    moving sample size or between phases). `sigma` is the standard deviation of the plotted statistic.
+    It is needed for the Western Electric style criteria.
     """
     v = np.asarray(values, dtype=float)
     n = v.size
     lo = np.broadcast_to(np.asarray(lcl, dtype=float), (n,))
     hi = np.broadcast_to(np.asarray(ucl, dtype=float), (n,))
-    if rules.needs_sigma and (sigma is None or sigma <= 0):
+    center = np.broadcast_to(np.asarray(center, dtype=float), (n,))
+    if sigma is not None:
+        sigma = np.broadcast_to(np.asarray(sigma, dtype=float), (n,))
+    if rules.needs_sigma and (sigma is None or np.any(sigma <= 0)):
         raise ValueError("sigma of the plotted statistic is needed for the sigma-based criteria")
 
     found: list[Violation] = []

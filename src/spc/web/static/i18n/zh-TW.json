@@ -453,5 +453,10 @@
   "warn.restart_without_effect": "{n} 個重啟沒有作用：使用的資料中，它之前或之後沒有有效值。",
   "error.restart_at_start": "在第一筆資料之前重啟沒有作用。",
   "error.already_restart": "這筆資料之前已經有重啟。",
-  "error.not_restart": "這筆資料之前沒有重啟。"
+  "error.not_restart": "這筆資料之前沒有重啟。",
+  "data.restart_phase": "從這裡起使用新界限：製程是刻意改變的。中心線與管制界限只用這一點之後的資料重新計算。若製程沒有改變、只是移動樣本要重新開始，請不要勾選。",
+  "data.status_phase": "此起使用新界限",
+  "data.log_restart_phase": "管制圖重啟，使用新界限",
+  "data.restart_item_phase": "{n}（新界限）",
+  "result.phase_line": "第 {k} 階段，自檔案第 {from} 列起：{n} 筆，中心線 {mu}，σ̂ {sigma}"
 }

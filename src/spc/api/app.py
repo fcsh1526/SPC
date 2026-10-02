@@ -26,6 +26,7 @@ from spc.api.schemas import (
     ArlBody,
     AttributeBody,
     MarkBody,
+    RestartBody,
     ReportBody,
     SuspectsBody,
     TargetBody,
@@ -64,13 +65,15 @@ def _dataset_json(key: str, ds: Dataset) -> dict:
         "tags": list(ds.tags),
         "warnings": [{"code": f"data_{w.code}", "params": dict(w.params)} for w in ds.warnings],
         "log": [asdict(e) for e in ds.log],
-        "restarts": [{"pos": p, "reason": r, "by": b, "at": a} for p, (r, b, a) in ds.restart_info().items()],
+        "restarts": [{"pos": p, "reason": r, "by": b, "at": a, "new_limits": p in ds.phase_positions()}
+                     for p, (r, b, a) in ds.restart_info().items()],
     }
 
 
 def _row_json(ds: Dataset, i: int, info: dict, restarts: dict | None = None) -> dict:
     mark = info.get(i)
     restart = (restarts or {}).get(i)
+    phases = ds.phase_positions() if restarts else set()
     return {
         "pos": i,
         "source_row": int(ds.source_rows[i]),
@@ -80,7 +83,8 @@ def _row_json(ds: Dataset, i: int, info: dict, restarts: dict | None = None) -> 
         "tags": {k: str(v[i]) for k, v in ds.tags.items()},
         "valid": mark is None,
         "invalid": None if mark is None else {"reason": mark[0], "by": mark[1], "at": mark[2]},
-        "restart": None if restart is None else {"reason": restart[0], "by": restart[1], "at": restart[2]},
+        "restart": None if restart is None else {"reason": restart[0], "by": restart[1], "at": restart[2],
+                                                 "new_limits": i in phases},
     }
 
 
@@ -330,11 +334,12 @@ def create_app(
         with db.tx():
             new = store.modify(key, change)
             audit.append(action, user_id=user.id, username=user.username, target=key,
-                         detail={"n": len(body.positions), "positions": body.positions[:50], "reason": body.reason})
+                         detail={"n": len(body.positions), "positions": body.positions[:50], "reason": body.reason,
+                                 **({"new_limits": True} if getattr(body, "new_limits", False) else {})})
         return _dataset_json(key, new)
 
     @app.post("/api/datasets/{key}/restarts")
-    def add_restart(key: str, body: MarkBody, user: User = Depends(writer)):
+    def add_restart(key: str, body: RestartBody, user: User = Depends(writer)):
         """Restart the moving characteristics of the I-MR chart before the given values."""
         if not body.reason.strip():
             raise ApiError(400, "reason_required", "a reason is required to restart the chart")
@@ -348,7 +353,7 @@ def create_app(
             again = [p for p in body.positions if p in ds.restart_info()]
             if again:
                 raise ApiError(409, "already_restart", "a restart exists already", positions=again[:20])
-            return ds.add_restart(body.positions, body.reason, user.label)
+            return ds.add_restart(body.positions, body.reason, user.label, new_limits=body.new_limits)
 
         return _restarted(key, "dataset_restart_added", body, user, change)
 

@@ -441,3 +441,38 @@ def test_restart_of_the_individuals_chart_in_the_browser(server, browser, tmp_pa
     expect(page.locator("#restart-list")).to_have_text("No restarts.")
     assert problems == [], problems
     ctx.close()
+
+
+def test_new_limits_for_a_phase_in_the_browser(server, browser, tmp_path):
+    expect = playwright_sync.expect
+    rng = np.random.default_rng(4)
+    values = np.r_[rng.normal(10, 0.1, 40), rng.normal(10.6, 0.15, 40)]
+    path = tmp_path / "phase.csv"
+    path.write_text("v\n" + "\n".join(f"{v:.4f}" for v in values) + "\n")
+    ctx = browser.new_context(viewport={"width": 1200, "height": 900}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.set_input_files("#file", str(path))
+    page.select_option("#col-value", "v")
+    page.click("#import-btn")
+    page.fill("#reason", "new fixture F-2")
+    page.locator("#rows tr:nth-child(42) input").check()  # No. 41: the first value of the second phase
+    page.check("#restart-phase")
+    page.click("#restart-btn")
+    expect(page.locator("#restart-list")).to_contain_text("41 (new limits)")
+    expect(page.locator("#rows tr.restart-row .status")).to_contain_text("new limits from here")
+
+    page.click("#to-analysis")
+    page.fill("#a-lsl", "9")
+    page.fill("#a-usl", "12")
+    page.click("#run-btn")
+    expect(page.locator("#r-phases li")).to_have_count(2)
+    expect(page.locator("#r-phases li").nth(1)).to_contain_text("Phase 2, from file row 42: 40 values")
+    expect(page.locator("#chart-loc svg line.restart.phase")).to_have_count(1)
+    expect(page.locator("#chart-loc svg polyline.center")).to_have_count(1)  # one centre line per phase, drawn as a staircase
+    expect(page.locator("#r-loc-alarms li")).to_have_count(0)  # the new level raises no alarm against its own limits
+    assert problems == [], problems
+    ctx.close()

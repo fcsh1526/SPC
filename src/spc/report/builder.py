@@ -163,8 +163,11 @@ def build_report(
         "criteria": _rule_texts(lang, r["params"]["rules"]),
         "dist": blk, "method": request.method,
         "moving_n": chart.get("moving_n"),
-        "restarts": [{"source_row": int(dataset.source_rows[p]), "reason": rs, "by": by, "at": at}
+        "restarts": [{"source_row": int(dataset.source_rows[p]), "reason": rs, "by": by, "at": at,
+                      "new_limits": p in dataset.phase_positions()}
                      for p, (rs, by, at) in dataset.restart_info().items()] if chart.get("moving_n") else [],
+        "phases": [{"from_row": chart["location"]["labels"][ph["start"]], "n": ph["n_values"], "mu": ph["mu_hat"],
+                    "sigma": ph["sigma_hat"]} for ph in chart.get("phase_stats", [])],
     }
 
     # ---- figures

@@ -27,6 +27,10 @@ class MarkBody(Strict):
     reason: str = Field(max_length=2000)
 
 
+class RestartBody(MarkBody):
+    new_limits: bool = False  # also start a new phase: centre line and limits are calculated again from here
+
+
 class LoginBody(Strict):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=1024)

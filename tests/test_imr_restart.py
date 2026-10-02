@@ -256,7 +256,8 @@ def test_restart_endpoints_audit_and_errors(client):
     assert err(client.post(f"{base}/restarts", json={"positions": [999], "reason": "x"}))["code"] == "positions_out_of_range"
     ok = client.post(f"{base}/restarts", json={"positions": [30], "reason": "tool change"})
     assert ok.status_code == 200 and ok.json()["restarts"] == [
-        {"pos": 30, "reason": "tool change", "by": "Eva Engineer (eng)", "at": ok.json()["restarts"][0]["at"]}]
+        {"pos": 30, "reason": "tool change", "by": "Eva Engineer (eng)", "at": ok.json()["restarts"][0]["at"],
+         "new_limits": False}]
     assert ok.json()["summary"]["n_restarts"] == 1 and ok.json()["summary"]["n_invalid"] == 0
     assert err(client.post(f"{base}/restarts", json={"positions": [30], "reason": "again"}))["code"] == "already_restart"
     rows = client.get(f"{base}/rows", params={"offset": 29, "limit": 3}).json()["rows"]
@@ -284,3 +285,136 @@ def test_moving_size_is_validated(client):
     ds = client.post("/api/datasets", params={"value": "v"}, content=csv_individuals()).json()
     r = client.post(f"/api/datasets/{ds['id']}/analyze", json={"moving_n": 11})
     assert r.status_code == 422
+
+
+# ------------------------------------------------------------------ phases: limits calculated again
+
+def two_levels(seed=4):
+    rng = np.random.default_rng(seed)
+    return np.r_[rng.normal(10, 0.1, 40), rng.normal(10.6, 0.15, 40)]
+
+
+@pytest.mark.parametrize("m", [1, 3])
+def test_each_phase_has_the_limits_of_a_chart_made_from_its_own_values(m):
+    x = two_levels()
+    both = imr_moving(x, moving_n=m, restarts=[40], phase_starts=[40])
+    first, second = imr_moving(x[:40], moving_n=m), imr_moving(x[40:], moving_n=m)
+    assert both.phase_starts == (0, 40) and both.phase_mu == pytest.approx((x[:40].mean(), x[40:].mean()))
+    assert both.location.ucl[:40] == pytest.approx(first.location.ucl)
+    assert both.location.lcl[40:] == pytest.approx(second.location.lcl)
+    assert both.location.center[:40] == pytest.approx(x[:40].mean()) and both.location.center[40:] == pytest.approx(x[40:].mean())
+    assert both.variation.ucl[: first.variation_values.size] == pytest.approx(first.variation.ucl)
+    assert both.variation.ucl[first.variation_values.size :] == pytest.approx(second.variation.ucl)
+    assert both.variation.center[:5] == pytest.approx(first.variation.center)
+    assert both.variation.center[-5:] == pytest.approx(second.variation.center)
+    assert both.sigma_hat != second.sigma_hat  # the scalars describe all values and are not used for limits
+    assert both.location_values == pytest.approx(np.r_[first.location_values, second.location_values])
+
+
+def test_a_restart_without_a_phase_keeps_one_centre_line_and_scalar_centres():
+    c = imr_moving(two_levels(), restarts=[40])
+    assert c.phase_starts == (0,) and isinstance(c.location.center, float) and isinstance(c.variation.center, float)
+
+
+def test_a_phase_must_start_at_a_restart_and_needs_a_complete_moving_sample():
+    x = two_levels()
+    with pytest.raises(ValueError, match="restart"):
+        imr_moving(x, restarts=[40], phase_starts=[30])
+    with pytest.raises(ValueError, match="phase 2"):
+        imr_moving(x[:44], moving_n=4, restarts=[41, 43], phase_starts=[41])  # phase 2: segments of 2 and 1 values
+
+
+def test_the_jump_to_the_new_level_raises_no_alarm_when_the_limits_are_calculated_again():
+    x = two_levels()
+    only_restart = imr_moving(x, restarts=[40])
+    phased = imr_moving(x, restarts=[40], phase_starts=[40])
+    alarm = lambda c: ((c.location_values > c.location.ucl) | (c.location_values < c.location.lcl))
+    assert alarm(only_restart).sum() > 10  # much of the second level is outside the limits that mix both levels
+    assert alarm(phased).sum() <= 1  # at most the odd chance alarm at 3 sigma
+
+
+def test_rules_accept_per_point_centres():
+    from spc.core.rules import evaluate
+
+    v = np.r_[np.full(8, 11.0), np.full(8, 19.0)]
+    centre = np.r_[np.full(8, 10.0), np.full(8, 20.0)]
+    res = evaluate(v, centre, centre - 5, centre + 5, RuleSet(beyond_limits=False, run_length=7))
+    assert res.indices == (6, 7, 14, 15)  # above the first line, then below the second: two runs
+    res_scalar = evaluate(v, 10.0, 0.0, 100.0, RuleSet(beyond_limits=False, run_length=7))
+    assert res_scalar.indices == tuple(range(6, 16))  # with one line all 16 values are above it: one long run
+
+
+def test_sigma_based_criteria_take_a_sigma_per_point():
+    from spc.core.rules import evaluate
+
+    v = np.array([0.0, 2.5, 2.6, 0.0, 0.0])
+    rules = RuleSet(beyond_limits=False, two_of_three_beyond_2s=True)
+    assert evaluate(v, 0.0, -9, 9, rules, sigma=np.array([1.0, 1.0, 1.0, 5.0, 5.0])).indices == (2, 3)
+    assert evaluate(v, 0.0, -9, 9, rules, sigma=np.array([1.0, 5.0, 5.0, 1.0, 1.0])).indices == ()  # 2.5 is only 0.5 sigma here
+
+
+# ------------------------------------------------------------------ phases in data, service, api, report
+
+def test_phase_restarts_are_restarts_that_say_new_limits():
+    ds = Dataset.from_values(np.arange(10.0)).add_restart([3], "tool change", "A").add_restart([6], "new fixture", "A", new_limits=True)
+    assert set(ds.restart_info()) == {3, 6} and ds.phase_positions() == {6}
+    assert [e.action for e in ds.log] == ["restart", "restart_phase"]
+    assert ds.n_invalid == 0
+    back = dataset_from_dict(json.loads(json.dumps(dataset_to_dict(ds))))
+    assert back.phase_positions() == {6}
+    assert ds.remove_restart([6], "mistake", "A").phase_positions() == set()
+    with pytest.raises(ValueError, match="already"):
+        ds.add_restart([6], "again", "A")
+
+
+def test_analysis_uses_a_phase_per_flagged_restart():
+    x = two_levels()
+    ds = Dataset.from_values(x).add_restart([40], "new fixture", "A", new_limits=True)
+    r = analyze(ds, req(stage="preliminary", moving_n=3))
+    loc, var = r["chart"]["location"], r["chart"]["variation"]
+    assert loc["phases"] == [40] and loc["restarts"] == [40] and var["restarts"] == [39] and var["phases"] == [39]
+    assert isinstance(loc["center"], list) and loc["center"][0] != loc["center"][-1]
+    assert [p["start"] for p in r["chart"]["phase_stats"]] == [0, 40]
+    assert r["chart"]["phase_stats"][1]["mu_hat"] == pytest.approx(x[40:].mean())
+    assert not loc["alarms"]
+    plain = analyze(Dataset.from_values(x).add_restart([40], "tool change", "A"), req(stage="preliminary", moving_n=3))
+    assert plain["chart"]["location"]["alarms"] and "phase_stats" not in plain["chart"] and plain["chart"]["location"]["phases"] == []
+    # the capability indices describe all valid values either way
+    assert r["indices"]["pk"] == plain["indices"]["pk"]
+    json.dumps(r)
+
+
+def test_a_phase_that_is_too_short_is_refused_with_its_number():
+    ds = Dataset.from_values(two_levels()).add_restart([78], "new fixture", "A", new_limits=True)
+    with pytest.raises(ValueError, match="phase 2"):
+        analyze(ds, req(moving_n=3))
+
+
+def test_api_phase_flag_row_and_audit(client=None):
+    app = make_app(max_upload=200_000)
+    eng, admin = logged_in_client(app, "eng"), logged_in_client(app, "admin")
+    ds = eng.post("/api/datasets", params={"value": "v"}, content=csv_individuals()).json()
+    base = f"/api/datasets/{ds['id']}"
+    r = eng.post(f"{base}/restarts", json={"positions": [30], "reason": "new fixture", "new_limits": True})
+    assert r.status_code == 200 and r.json()["restarts"][0]["new_limits"] is True
+    rows = eng.get(f"{base}/rows", params={"offset": 30, "limit": 1}).json()["rows"]
+    assert rows[0]["restart"]["new_limits"] is True
+    out = eng.post(f"{base}/analyze", json={}).json()
+    assert out["chart"]["location"]["phases"] == [30] and len(out["chart"]["phase_stats"]) == 2
+    entry = next(e for e in admin.get("/api/audit").json()["entries"] if e["action"] == "dataset_restart_added")
+    assert entry["detail"]["new_limits"] is True
+    bad = eng.post(f"{base}/restarts/remove", json={"positions": [30], "reason": "x", "new_limits": True})
+    assert bad.status_code == 422  # the flag belongs to setting a restart only
+
+
+def test_report_lists_the_phases_and_marks_the_restart_that_started_one():
+    ds = (Dataset.from_values(two_levels())
+          .add_restart([20], "tool change T-07", "A. Chen")
+          .add_restart([40], "new fixture F-2", "A. Chen", new_limits=True))
+    g = generate(ds, req(stage="preliminary", moving_n=1), None, "en", now="2026-10-01T00:00:00+00:00", report_id="p1")
+    assert "Phase 1" in g.html and "Phase 2" in g.html and "new fixture F-2" in g.html
+    assert "new limits from here" in g.html and g.html.count("new limits from here") == 1  # only the flagged restart
+    zh = generate(ds, req(stage="preliminary"), None, "zh-TW", now="2026-10-01T00:00:00+00:00", report_id="p2")
+    assert "第 2 階段" in zh.html and "此起使用新界限" in zh.html and "Cw" not in zh.html
+    res = reproduce(g.archive)
+    assert res.integrity_ok and res.reproduced, res.differences

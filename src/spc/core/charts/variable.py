@@ -159,16 +159,24 @@ MAX_MOVING_N = 10
 
 @dataclass(frozen=True)
 class MovingChart(SubgroupChart):
-    """I-MR with a moving sample size n >= 1 and restarts (draft 10.3.3.5). The limits are per point."""
+    """I-MR with a moving sample size n >= 1, restarts and phases (draft 10.3.3.5). The limits are per point.
+
+    With more than one phase `location.center`, `variation.center`, `mu_hat` per phase are arrays with one
+    value per point; `mu_hat` and `sigma_hat` then describe all values together and are not used for limits.
+    """
 
     moving_n: int = 1
     segment_starts: tuple[int, ...] = (0,)  # index of the first value of every segment (a restart begins one)
+    phase_starts: tuple[int, ...] = (0,)  # index of the first value of every phase (a restart with new limits)
+    phase_mu: tuple[float, ...] = ()
+    phase_sigma: tuple[float, ...] = ()
     location_window: np.ndarray = None  # size of the moving sample behind each location point
     variation_window: np.ndarray = None  # size of the moving range behind each variation point
     variation_end: np.ndarray = None  # index of the last value of each moving range
+    location_sigma: np.ndarray = None  # sigma_hat / sqrt(t) of each location point, for sigma-based criteria
 
 
-def imr_moving(values, alpha: float = ALPHA_3SIGMA, moving_n: int = 1, restarts=()) -> MovingChart:
+def imr_moving(values, alpha: float = ALPHA_3SIGMA, moving_n: int = 1, restarts=(), phase_starts=()) -> MovingChart:
     """Individuals chart with moving characteristics that restart (AIAG-VDA SPC draft 10.3.3.5).
 
     After a planned intervention (tool change) or a violation the moving characteristic must not use
@@ -176,14 +184,18 @@ def imr_moving(values, alpha: float = ALPHA_3SIGMA, moving_n: int = 1, restarts=
     corrected. `restarts` holds indices into `values` where a new segment begins. A moving range never
     spans a restart.
 
+    `phase_starts` (a subset of `restarts`) also start a new phase: the process was changed on purpose,
+    so the centre line and the limits are calculated again from the values of that phase alone (draft 7.2:
+    limits are calculated again after an improvement). Every phase needs at least one complete moving sample.
+
     Every segment starts again with a moving sample of size 1 and grows by one value per point up to
     `moving_n`, so there is no blind spot of n - 1 points. The limits follow the sample size of each point:
 
     * location : moving mean of t values,  mu_hat ± u(1-alpha/2) * sigma_hat / sqrt(t)
     * variation: moving range of t values (t = 2 .. max(moving_n, 2)),  w(t; p) * sigma_hat
 
-    mu_hat is the mean of all values. sigma_hat = R̄ / d2(t_max), where R̄ is the mean of the ranges of
-    complete moving samples only. For moving_n = 1 or 2 that is MR̄ / d2(2), as in `imr`.
+    mu_hat is the mean of the values of the phase. sigma_hat = R̄ / d2(t_max), where R̄ is the mean of the
+    ranges of complete moving samples of the phase only. For moving_n = 1 or 2 that is MR̄ / d2(2), as in `imr`.
     The risk alpha holds for every plotted point on its own (normal data, independent values). Moving
     means share values with their neighbours, so their alarms come in clusters.
 
@@ -204,19 +216,26 @@ def imr_moving(values, alpha: float = ALPHA_3SIGMA, moving_n: int = 1, restarts=
     cuts = sorted({int(r) for r in restarts})
     if any(not 0 < r < x.size for r in cuts):
         raise ValueError("restart indices must be between 1 and the number of values - 1")
+    new_phase = {int(r) for r in phase_starts}
+    if not new_phase <= set(cuts):
+        raise ValueError("a phase can only start at a restart")
     starts = [0] + cuts
     stops = starts[1:] + [x.size]
 
     t_loc = np.empty(x.size, dtype=int)
     loc = np.empty(x.size)
+    pid = np.empty(x.size, dtype=int)  # phase of each value
     ranges: list[float] = []
     t_var: list[int] = []
     ends: list[int] = []
+    phase = 0
     for a, b in zip(starts, stops):
+        if a in new_phase:
+            phase += 1
         for i in range(a, b):
             j = i - a
             t = min(j + 1, m)
-            t_loc[i] = t
+            t_loc[i], pid[i] = t, phase
             loc[i] = x[i - t + 1 : i + 1].mean()
             if j >= 1:
                 tv = min(j + 1, mv)
@@ -226,20 +245,37 @@ def imr_moving(values, alpha: float = ALPHA_3SIGMA, moving_n: int = 1, restarts=
                 ends.append(i)
     rng = np.array(ranges)
     tv_arr = np.array(t_var, dtype=int)
-    complete = tv_arr == mv
-    if not complete.any():
-        raise ValueError("no complete moving sample: every segment is shorter than the moving sample size")
-    rbar = float(rng[complete].mean())
-    sigma = rbar / d2(mv)
-    mu = float(x.mean())
-    half = u_quantile(alpha) * sigma / np.sqrt(t_loc)
+    end_arr = np.array(ends, dtype=int)
+    var_pid = pid[end_arr]
+    n_phases = phase + 1
+    mus, rbars, sigmas = [], [], []
+    for k in range(n_phases):
+        full = (var_pid == k) & (tv_arr == mv)
+        if not full.any():
+            raise ValueError(
+                f"no complete moving sample in phase {k + 1}: every segment of it is shorter than the moving sample size"
+                if n_phases > 1 else
+                "no complete moving sample: every segment is shorter than the moving sample size"
+            )
+        rbars.append(float(rng[full].mean()))
+        sigmas.append(rbars[-1] / d2(mv))
+        mus.append(float(x[pid == k].mean()))
+    mu_a, sig_a, rbar_a = np.array(mus)[pid], np.array(sigmas)[pid], np.array(rbars)
+    u = u_quantile(alpha)
+    half = u * sig_a / np.sqrt(t_loc)
     low = {t: w_quantile(t, alpha / 2.0) for t in set(t_var)}
     high = {t: w_quantile(t, 1.0 - alpha / 2.0) for t in set(t_var)}
+    sig_v = np.array(sigmas)[var_pid]
+    one = n_phases == 1
     return MovingChart(
-        kind="imr", n=m, k=int(x.size), alpha=alpha, mu_hat=mu, sigma_hat=sigma,
-        location=Limits(mu - half, mu, mu + half),
-        variation=Limits(np.array([low[t] for t in t_var]) * sigma, rbar, np.array([high[t] for t in t_var]) * sigma),
+        kind="imr", n=m, k=int(x.size), alpha=alpha,
+        mu_hat=mus[0] if one else float(x.mean()), sigma_hat=sigmas[0] if one else float(np.mean(sigmas)),
+        location=Limits(mu_a - half, mus[0] if one else mu_a, mu_a + half),
+        variation=Limits(np.array([low[t] for t in t_var]) * sig_v, rbars[0] if one else rbar_a[var_pid],
+                         np.array([high[t] for t in t_var]) * sig_v),
         location_values=loc, variation_values=rng,
-        moving_n=m, segment_starts=tuple(starts), location_window=t_loc, variation_window=tv_arr,
-        variation_end=np.array(ends, dtype=int),
+        moving_n=m, segment_starts=tuple(starts),
+        phase_starts=tuple(a for a in starts if a == 0 or a in new_phase),
+        phase_mu=tuple(mus), phase_sigma=tuple(sigmas),
+        location_window=t_loc, variation_window=tv_arr, variation_end=end_arr, location_sigma=sig_a / np.sqrt(t_loc),
     )

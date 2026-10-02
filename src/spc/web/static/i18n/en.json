@@ -453,5 +453,10 @@
   "warn.restart_without_effect": "{n} restart(s) have no effect: there is no valid value before or after them in the data used.",
   "error.restart_at_start": "A restart before the first value has no effect.",
   "error.already_restart": "There is a restart before this value already.",
-  "error.not_restart": "There is no restart before this value."
+  "error.not_restart": "There is no restart before this value.",
+  "data.restart_phase": "New limits from here: the process was changed on purpose. The centre line and the limits are calculated again from the values after this point. Leave it off when the process is the same and only the moving sample must start again.",
+  "data.status_phase": "new limits from here",
+  "data.log_restart_phase": "Chart restarted, new limits",
+  "data.restart_item_phase": "{n} (new limits)",
+  "result.phase_line": "Phase {k}, from file row {from}: {n} values, centre line {mu}, σ̂ {sigma}"
 }

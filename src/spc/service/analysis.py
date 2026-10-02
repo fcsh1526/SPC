@@ -144,8 +144,8 @@ def _evaluate(values, bounds, center, lcl, ucl, rules, sigma) -> RuleResult:
     for a, b in bounds:
         if b <= a:
             continue
-        part = lambda lim: lim[a:b] if isinstance(lim, np.ndarray) else lim
-        res = evaluate(values[a:b], center, part(lcl), part(ucl), rules, sigma=sigma)
+        part = lambda lim: lim[a:b] if isinstance(lim, np.ndarray) and lim.ndim else lim
+        res = evaluate(values[a:b], part(center), part(lcl), part(ucl), rules, sigma=part(sigma))
         found += [Violation(v.index + a, v.rule) for v in res.violations]
     return RuleResult(tuple(found))
 
@@ -154,7 +154,7 @@ def _chart_json(chart: SubgroupChart, loc_labels, var_labels, loc_pos, var_pos) 
     def part(limits, values, labels, positions, alarms):
         return {
             "lcl": _limit(limits.lcl),
-            "center": _f(limits.center),
+            "center": _limit(limits.center),
             "ucl": _limit(limits.ucl),
             "values": _list(values),
             "labels": [str(s) for s in labels],
@@ -172,6 +172,15 @@ def _chart_json(chart: SubgroupChart, loc_labels, var_labels, loc_pos, var_pos) 
         }
         out["location"]["restarts"] = [a for a, _ in loc_b[1:]]
         out["variation"]["restarts"] = [a for a, _ in var_b[1:]]
+        in_phase = [i for i, a in enumerate(chart.segment_starts) if a in chart.phase_starts and a > 0]
+        out["location"]["phases"] = [loc_b[i][0] for i in in_phase]
+        out["variation"]["phases"] = [var_b[i][0] for i in in_phase]
+        if len(chart.phase_starts) > 1:
+            stops = list(chart.phase_starts[1:]) + [chart.k]
+            out["phase_stats"] = [
+                {"start": int(a), "n_values": int(b - a), "mu_hat": _f(mu), "sigma_hat": _f(sg)}
+                for a, b, mu, sg in zip(chart.phase_starts, stops, chart.phase_mu, chart.phase_sigma)
+            ]
         return out
 
     return {
@@ -319,7 +328,11 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
         v_all, p_all = dataset.individuals() if matrix is None else (values, positions)
         src_rows = dataset.source_rows[p_all]
         loc_labels = [str(r) for r in src_rows]
-        cuts = sorted({int(i) for i in np.searchsorted(p_all, list(restarts), side="left") if 0 < i < len(p_all)})
+        restart_pos = list(restarts)
+        idx = np.searchsorted(p_all, restart_pos, side="left")
+        cuts = sorted({int(i) for i in idx if 0 < i < len(p_all)})
+        phase_pos = dataset.phase_positions()
+        phase_cuts = sorted({int(i) for pos, i in zip(restart_pos, idx) if pos in phase_pos and 0 < i < len(p_all)})
         if len(cuts) != len(restarts):  # a restart before the first or after the last used value restarts nothing
             _warn(warnings, "restart_without_effect", n=len(restarts) - len(cuts))
         if req.moving_n == 1 and not cuts:
@@ -328,12 +341,12 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
             var_labels, var_pos = loc_labels[1:], [[int(p_all[i]), int(p_all[i + 1])] for i in range(len(p_all) - 1)]
             sigma_loc = chart.sigma_hat
         else:
-            chart = imr_moving(v_all, req.alpha, req.moving_n, cuts)
+            chart = imr_moving(v_all, req.alpha, req.moving_n, cuts, phase_cuts)
             seg_loc, seg_var = _segment_bounds(chart)
             loc_pos = [[int(p) for p in p_all[i - t + 1 : i + 1]] for i, t in enumerate(chart.location_window)]
             var_labels = [loc_labels[i] for i in chart.variation_end]
             var_pos = [[int(p) for p in p_all[i - t + 1 : i + 1]] for i, t in zip(chart.variation_end, chart.variation_window)]
-            sigma_loc = chart.sigma_hat / math.sqrt(chart.moving_n)
+            sigma_loc = chart.location_sigma
 
     else:
         chart = (xbar_s if kind == "xbar-s" else xbar_r)(matrix, req.alpha)

@@ -36,7 +36,7 @@ class SourceInfo:
 
 @dataclass(frozen=True)
 class LogEntry:
-    action: str  # "mark_invalid", "restore", "restart" or "unrestart"
+    action: str  # "mark_invalid", "restore", "restart", "restart_phase" or "unrestart"
     positions: tuple[int, ...]
     reason: str
     by: str
@@ -152,7 +152,7 @@ class Dataset:
         state: dict[int, LogEntry] = {}
         for entry in self.log:
             for p in entry.positions:
-                if entry.action == "restart":
+                if entry.action in ("restart", "restart_phase"):
                     state[p] = entry
                 elif entry.action == "unrestart":
                     state.pop(p, None)
@@ -233,9 +233,16 @@ class Dataset:
         entry = LogEntry("restore", pos, reason, by, at or _now())
         return replace(self, log=self.log + (entry,))
 
-    def add_restart(self, positions: Sequence[int], reason: str, by: str, at: str | None = None) -> "Dataset":
+    def phase_positions(self) -> set[int]:
+        """Positions of the restarts that also start a new phase (new centre line and limits)."""
+        return {p for p, e in self._restart_state().items() if e.action == "restart_phase"}
+
+    def add_restart(self, positions: Sequence[int], reason: str, by: str, at: str | None = None,
+                    new_limits: bool = False) -> "Dataset":
         """Restart the moving characteristics of an individuals chart before these values (tool change,
-        action after an alarm). The values stay in the data. The reason says what happened."""
+        action after an alarm). The values stay in the data. The reason says what happened.
+        `new_limits` also starts a new phase: the process was changed on purpose, so the limits are
+        calculated again from the values after this point."""
         reason, by = (reason or "").strip(), (by or "").strip()
         if not reason or not by:
             raise ValueError("a reason and the person are required to restart the chart")
@@ -245,7 +252,8 @@ class Dataset:
         already = [p for p in pos if p in self._restart_state()]
         if already:
             raise ValueError(f"already restarted: {already}")
-        return replace(self, log=self.log + (LogEntry("restart", pos, reason, by, at or _now()),))
+        action = "restart_phase" if new_limits else "restart"
+        return replace(self, log=self.log + (LogEntry(action, pos, reason, by, at or _now()),))
 
     def remove_restart(self, positions: Sequence[int], reason: str, by: str, at: str | None = None) -> "Dataset":
         reason, by = (reason or "").strip(), (by or "").strip()
