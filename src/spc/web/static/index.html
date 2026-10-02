@@ -13,30 +13,55 @@
     <h1 data-i18n="app.title">SPC</h1>
     <p data-i18n="app.subtitle"></p>
   </div>
-  <label class="lang">
-    <span data-i18n="app.language"></span>
-    <select id="lang">
-      <option value="zh-TW">繁體中文</option>
-      <option value="en">English</option>
-    </select>
-  </label>
+  <div class="userbar">
+    <div id="userbox" class="row" hidden>
+      <span id="user-label" class="strong"></span>
+      <button id="pw-btn" data-i18n="user.change_password"></button>
+      <button id="logout-btn" data-i18n="user.logout"></button>
+    </div>
+    <label class="lang">
+      <span data-i18n="app.language"></span>
+      <select id="lang">
+        <option value="zh-TW">繁體中文</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+  </div>
 </header>
-
-<p class="notice" data-i18n="app.notice"></p>
-
-<nav class="tabs" role="tablist">
-  <button role="tab" data-tab="import" aria-selected="true" data-i18n="nav.import"></button>
-  <button role="tab" data-tab="data" aria-selected="false" aria-disabled="true" data-i18n="nav.data"></button>
-  <button role="tab" data-tab="analysis" aria-selected="false" aria-disabled="true" data-i18n="nav.analysis"></button>
-  <button role="tab" data-tab="tools" aria-selected="false" data-i18n="nav.tools"></button>
-</nav>
 
 <div id="errors" class="errors" role="alert" hidden></div>
 <div id="busy" class="busy" hidden data-i18n="app.loading"></div>
 
+<section id="login" class="panel narrow" hidden>
+  <h2 data-i18n="login.title"></h2>
+  <p id="login-setup" class="note" hidden data-i18n="login.setup_needed"></p>
+  <p id="login-msg" class="note" hidden></p>
+  <form id="login-form">
+    <div class="form-grid">
+      <label class="wide"><span data-i18n="login.username"></span>
+        <input id="login-user" type="text" autocomplete="username" maxlength="64" required></label>
+      <label class="wide"><span data-i18n="login.password"></span>
+        <input id="login-pass" type="password" autocomplete="current-password" maxlength="1024" required></label>
+    </div>
+    <p><button class="primary" type="submit" data-i18n="login.submit"></button></p>
+  </form>
+</section>
+
+<div id="app" hidden>
+<p class="notice" data-i18n="app.notice"></p>
+
+<nav class="tabs" role="tablist">
+  <button role="tab" data-tab="import" data-needs="engineer" aria-selected="true" data-i18n="nav.import"></button>
+  <button role="tab" data-tab="data" aria-selected="false" aria-disabled="true" data-i18n="nav.data"></button>
+  <button role="tab" data-tab="analysis" aria-selected="false" aria-disabled="true" data-i18n="nav.analysis"></button>
+  <button role="tab" data-tab="saved" aria-selected="false" data-i18n="nav.saved"></button>
+  <button role="tab" data-tab="tools" aria-selected="false" data-i18n="nav.tools"></button>
+  <button role="tab" data-tab="admin" data-needs="admin" aria-selected="false" data-i18n="nav.admin"></button>
+</nav>
+
 <main>
 <!-- 1. import -->
-<section id="tab-import" class="panel">
+<section id="tab-import" class="panel" data-needs="engineer">
   <h2 data-i18n="import.title"></h2>
   <p data-i18n="import.intro"></p>
   <p>
@@ -109,14 +134,16 @@
   <div class="card">
     <h3 data-i18n="data.mark_title"></h3>
     <p id="selected-count" class="muted"></p>
-    <div class="form-grid">
-      <label class="wide"><span data-i18n="data.reason"></span>
-        <input id="reason" type="text" maxlength="2000" data-i18n-placeholder="data.reason_hint"></label>
-      <label><span data-i18n="data.person"></span><input id="person" type="text" maxlength="200" autocomplete="name"></label>
+    <div data-needs="engineer">
+      <div class="form-grid">
+        <label class="wide"><span data-i18n="data.reason"></span>
+          <input id="reason" type="text" maxlength="2000" data-i18n-placeholder="data.reason_hint"></label>
+      </div>
+      <p id="person-note" class="muted"></p>
     </div>
     <p class="row">
-      <button id="mark-btn" class="primary" data-i18n="data.mark"></button>
-      <button id="restore-btn" data-i18n="data.restore"></button>
+      <button id="mark-btn" class="primary" data-needs="engineer" data-i18n="data.mark"></button>
+      <button id="restore-btn" data-needs="engineer" data-i18n="data.restore"></button>
       <a id="export-link" class="button" download data-i18n="data.export"></a>
     </p>
   </div>
@@ -272,7 +299,7 @@
       <p id="r-fingerprint" class="muted"></p>
       <p id="r-hash" class="muted"></p>
     </div>
-    <div class="card" id="report-card">
+    <div class="card" id="report-card" data-needs="engineer">
       <h3 data-i18n="report.title"></h3>
       <p class="note" data-i18n="report.intro"></p>
       <div class="form-grid">
@@ -366,7 +393,64 @@
     <div id="archive-out"></div>
   </div>
 </section>
+
+<!-- saved -->
+<section id="tab-saved" class="panel" hidden>
+  <h2 data-i18n="saved.title"></h2>
+  <p class="note" data-i18n="saved.intro"></p>
+  <h3 data-i18n="saved.datasets"></h3>
+  <div class="scroll"><table id="saved-datasets" class="grid"></table></div>
+  <h3 data-i18n="saved.reports"></h3>
+  <div class="scroll"><table id="saved-reports" class="grid"></table></div>
+</section>
+
+<!-- password -->
+<section id="tab-password" class="panel narrow" hidden>
+  <h2 data-i18n="password.title"></h2>
+  <p id="password-forced" class="note" hidden data-i18n="password.forced"></p>
+  <p class="muted" id="password-rules"></p>
+  <form id="password-form">
+    <div class="form-grid">
+      <label class="wide"><span data-i18n="password.current"></span>
+        <input id="pw-current" type="password" autocomplete="current-password" maxlength="1024" required></label>
+      <label class="wide"><span data-i18n="password.new"></span>
+        <input id="pw-new" type="password" autocomplete="new-password" maxlength="1024" required></label>
+      <label class="wide"><span data-i18n="password.repeat"></span>
+        <input id="pw-repeat" type="password" autocomplete="new-password" maxlength="1024" required></label>
+    </div>
+    <p class="row"><button class="primary" type="submit" data-i18n="password.submit"></button></p>
+    <p id="pw-done" class="strong ok" hidden data-i18n="password.done"></p>
+  </form>
+</section>
+
+<!-- administration -->
+<section id="tab-admin" class="panel" data-needs="admin" hidden>
+  <h2 data-i18n="admin.title"></h2>
+  <h3 data-i18n="admin.users"></h3>
+  <div class="scroll"><table id="admin-users" class="grid"></table></div>
+  <p id="admin-msg" class="strong ok"></p>
+  <div class="card">
+    <h3 data-i18n="admin.new_user"></h3>
+    <div class="form-grid">
+      <label><span data-i18n="admin.username"></span><input id="nu-name" type="text" maxlength="64" autocomplete="off"></label>
+      <label><span data-i18n="admin.display_name"></span><input id="nu-display" type="text" maxlength="200" autocomplete="off"></label>
+      <label><span data-i18n="admin.col_role"></span>
+        <select id="nu-role">
+          <option value="viewer" data-i18n="role.viewer"></option>
+          <option value="engineer" data-i18n="role.engineer" selected></option>
+          <option value="admin" data-i18n="role.admin"></option>
+        </select></label>
+      <label><span data-i18n="admin.initial_password"></span><input id="nu-pass" type="password" maxlength="1024" autocomplete="new-password"></label>
+    </div>
+    <p class="row"><button id="nu-create" class="primary" data-i18n="admin.create"></button></p>
+  </div>
+  <h3 data-i18n="admin.audit"></h3>
+  <p class="note" data-i18n="admin.audit_note"></p>
+  <p class="row"><button id="audit-verify" data-i18n="admin.audit_verify"></button><span id="audit-verdict" class="strong"></span></p>
+  <div class="scroll"><table id="audit-log" class="grid"></table></div>
+</section>
 </main>
+</div>
 <script src="/static/app.js" defer></script>
 </body>
 </html>

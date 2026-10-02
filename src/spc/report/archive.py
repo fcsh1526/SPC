@@ -16,11 +16,9 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-import numpy as np
-
 from spc import __version__
-from spc.core.notes import Note
-from spc.data.dataset import Dataset, LogEntry, SourceInfo
+from spc.data.dataset import Dataset
+from spc.data.serialize import dataset_from_dict, dataset_to_dict
 from spc.report.meta import ReportMeta
 from spc.service import AnalysisRequest, analyze
 
@@ -33,35 +31,6 @@ def canonical(obj: Any) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
-def dataset_to_dict(ds: Dataset) -> dict:
-    return {
-        "values": ds.values.tolist(),
-        "source_rows": [int(r) for r in ds.source_rows],
-        "subgroup": None if ds.subgroup is None else [str(s) for s in ds.subgroup],
-        "timestamp": None if ds.timestamp is None else [str(t) for t in ds.timestamp],
-        "tags": {k: [str(x) for x in v] for k, v in ds.tags.items()},
-        "source": None if ds.source is None else asdict(ds.source),
-        "log": [
-            {"action": e.action, "positions": [int(p) for p in e.positions], "reason": e.reason, "by": e.by, "at": e.at}
-            for e in ds.log
-        ],
-        "notes": [{"code": n.code, "params": dict(n.params)} for n in ds.warnings],
-    }
-
-
-def dataset_from_dict(d: dict) -> Dataset:
-    return Dataset(
-        values=np.array(d["values"], dtype=float),
-        source_rows=np.array(d["source_rows"], dtype=int),
-        subgroup=None if d["subgroup"] is None else np.array(d["subgroup"], dtype=str),
-        timestamp=None if d["timestamp"] is None else np.array(d["timestamp"], dtype="datetime64[s]"),
-        tags={k: np.array(v, dtype=str) for k, v in d["tags"].items()},
-        source=None if d["source"] is None else SourceInfo(**d["source"]),
-        log=tuple(LogEntry(e["action"], tuple(e["positions"]), e["reason"], e["by"], e["at"]) for e in d["log"]),
-        warnings=tuple(Note(n["code"], n["params"]) for n in d["notes"]),
-    )
-
-
 def build_archive(
     dataset: Dataset,
     request: AnalysisRequest,
@@ -71,6 +40,7 @@ def build_archive(
     created_at: str,
     report_id: str,
     language: str,
+    created_by: str = "",
 ) -> dict:
     body = {
         "format": FORMAT,
@@ -84,6 +54,8 @@ def build_archive(
         "result": result,
         "dataset": dataset_to_dict(dataset),
     }
+    if created_by:  # the login that made the report; inside the digest like everything else
+        body["created_by"] = created_by
     digest = hashlib.sha256(canonical(body)).hexdigest()
     return {
         **body,

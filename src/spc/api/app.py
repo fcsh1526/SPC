@@ -10,14 +10,17 @@ from dataclasses import asdict
 from pathlib import Path
 
 import json
+import secrets
 
 import numpy as np
-from fastapi import FastAPI, Query, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from spc import __version__
+from spc.api.accounts import add_account_routes
+from spc.api.errors import ApiError, error_response as _error
 from spc.api.schemas import (
     AnalyzeBody,
     ArlBody,
@@ -27,10 +30,11 @@ from spc.api.schemas import (
     SuspectsBody,
     TargetBody,
 )
-from spc.api.store import DatasetNotFound, DatasetStore, ReportNotFound, ReportStore
+from spc.auth import Audit, AuthError, AuthService, User
 from spc.core.arl_oc import alarm_probability, arl, required_subgroup_size
 from spc.core.capability import Stage, TargetAdjustmentNotAllowed, required_targets
 from spc.core.charts import attribute as attr
+from spc.db import Database, DatasetNotFound, DatasetStore, ReportNotFound, ReportStore
 from spc.data import ColumnMap, DataImportError, Dataset, IncompleteSubgroupsError, load_csv, preview_csv, suspects, to_csv
 from spc.report import ReportError, generate, reproduce
 from spc.service import analyze
@@ -45,13 +49,9 @@ SECURITY_HEADERS = {
 }
 
 
-class ApiError(Exception):
-    def __init__(self, status: int, code: str, message: str, **params):
-        self.status, self.code, self.message, self.params = status, code, message, params
-
-
-def _error(status: int, code: str, message: str, params: dict | None = None) -> JSONResponse:
-    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message, "params": params or {}}})
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+PUBLIC = {("GET", "/api/meta"), ("POST", "/api/auth/login")}  # everything else under /api needs a session
+ALLOWED_BEFORE_PASSWORD_CHANGE = {("GET", "/api/meta"), ("GET", "/api/auth/me"), ("POST", "/api/auth/logout"), ("POST", "/api/auth/password")}
 
 
 def _dataset_json(key: str, ds: Dataset) -> dict:
@@ -84,12 +84,47 @@ def _row_json(ds: Dataset, i: int, info: dict) -> dict:
 REPORT_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'"  # no script at all
 
 
-def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_BYTES) -> FastAPI:
-    app = FastAPI(title="SPC", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
-    store = DatasetStore() if store is None else store  # an empty store is falsy, so no `or`
-    app.state.store = store
-    reports = ReportStore()
-    app.state.reports = reports
+def create_app(
+    db: Database | None = None,
+    max_upload: int = MAX_UPLOAD_BYTES,
+    secure_cookies: bool | None = None,
+    auth: AuthService | None = None,
+) -> FastAPI:
+    """`db` defaults to a private in-memory database. `secure_cookies` None means: Secure when the request is https."""
+    db = Database() if db is None else db
+    audit = Audit(db)
+    auth = AuthService(db, audit) if auth is None else auth
+
+    def authenticate(request: Request) -> None:
+        """Runs before every route. A route is protected unless it is listed in PUBLIC."""
+        key = (request.method, request.url.path)
+        if key in PUBLIC or not key[1].startswith("/api/"):  # the page itself must load to show the login form
+            return
+        info = auth.session(request.cookies.get("spc_session"))
+        if info is None:
+            raise ApiError(401, "not_authenticated", "login required")
+        if request.method not in SAFE_METHODS and not secrets.compare_digest(request.headers.get("x-csrf-token", ""), info.csrf):
+            raise ApiError(403, "csrf_failed", "missing or wrong CSRF token")
+        if info.user.must_change and key not in ALLOWED_BEFORE_PASSWORD_CHANGE:
+            raise ApiError(403, "password_change_required", "the password must be changed first")
+        request.state.session = info
+
+    def require(role: str):
+        def check(request: Request) -> User:
+            user = request.state.session.user
+            if not user.can(role):
+                raise ApiError(403, "forbidden", f"this needs the {role} role", role=role)
+            return user
+
+        return check
+
+    reader, writer, admin = require("viewer"), require("engineer"), require("admin")
+
+    app = FastAPI(title="SPC", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json",
+                  dependencies=[Depends(authenticate)])
+    store = DatasetStore(db)
+    reports = ReportStore(db)
+    app.state.db, app.state.auth, app.state.audit, app.state.store, app.state.reports = db, auth, audit, store, reports
 
     # ------------------------------------------------------------------ plumbing
 
@@ -99,6 +134,8 @@ def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_B
         for k, v in SECURITY_HEADERS.items():
             if not request.url.path.startswith("/api/docs"):  # the docs page loads its own assets
                 response.headers.setdefault(k, v)
+        if request.url.path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "no-store")  # answers depend on the login
         return response
 
     @app.exception_handler(ApiError)
@@ -120,13 +157,17 @@ def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_B
         errors = [{"field": ".".join(str(p) for p in e["loc"] if p != "body"), "message": e["msg"]} for e in exc.errors()]
         return _error(422, "validation", "invalid request", {"errors": errors})
 
+    @app.exception_handler(AuthError)
+    async def _auth_error(_: Request, exc: AuthError):
+        return _error(exc.status, exc.code, exc.message, exc.params)
+
     @app.exception_handler(DatasetNotFound)
     async def _missing(_: Request, exc: DatasetNotFound):
-        return _error(404, "dataset_not_found", "dataset not found (the server may have restarted)")
+        return _error(404, "dataset_not_found", "dataset not found")
 
     @app.exception_handler(ReportNotFound)
     async def _report_missing(_: Request, exc: ReportNotFound):
-        return _error(404, "report_not_found", "report not found (the server may have restarted)")
+        return _error(404, "report_not_found", "report not found")
 
     @app.exception_handler(ReportError)
     async def _report_error(_: Request, exc: ReportError):
@@ -151,13 +192,19 @@ def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_B
     # ------------------------------------------------------------------ meta
 
     @app.get("/api/meta")
-    def meta():
-        return {"version": __version__, "languages": list(LANGUAGES), "max_upload_mb": max_upload // (1024 * 1024)}
+    def meta(request: Request):
+        """Public. Also tells the page whether it is signed in, so a first visit makes no failing request."""
+        info = auth.session(request.cookies.get("spc_session"))
+        return {"version": __version__, "languages": list(LANGUAGES), "max_upload_mb": max_upload // (1024 * 1024),
+                "setup_needed": auth.user_count() == 0,
+                "session": None if info is None else {"user": info.user.to_json(), "csrf": info.csrf}}
+
+    add_account_routes(app, auth, audit, admin, secure_cookies)
 
     # ------------------------------------------------------------------ import
 
     @app.post("/api/preview")
-    async def preview(request: Request, encoding: str = "auto", delimiter: str | None = None):
+    async def preview(request: Request, encoding: str = "auto", delimiter: str | None = None, _: User = Depends(writer)):
         return preview_csv(await read_body(request), delimiter=delimiter or None, encoding=encoding)
 
     @app.post("/api/datasets")
@@ -177,6 +224,7 @@ def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_B
         encoding: str = "auto",
         missing: str = "error",
         filename: str | None = None,
+        user: User = Depends(writer),
     ):
         raw = await read_body(request)
         columns = ColumnMap(
@@ -189,10 +237,26 @@ def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_B
             from dataclasses import replace
 
             ds = replace(ds, source=replace(ds.source, name=Path(filename).name[:200]))
-        key = store.add(ds)
+        with db.tx():
+            key = store.add(ds, user.id)
+            audit.append("dataset_created", user_id=user.id, username=user.username, target=key,
+                         detail={"name": ds.source.name if ds.source else "", "n": ds.n_total})
         return _dataset_json(key, ds)
 
     # ------------------------------------------------------------------ data
+
+    @app.get("/api/datasets")
+    def list_datasets():
+        return {"datasets": store.list()}
+
+    @app.delete("/api/datasets/{key}")
+    def delete_dataset(key: str, user: User = Depends(writer)):
+        if store.owner(key) != user.id and not user.can("admin"):
+            raise ApiError(403, "forbidden", "only the owner or an admin can delete a dataset", role="admin")
+        with db.tx():
+            store.delete(key)
+            audit.append("dataset_deleted", user_id=user.id, username=user.username, target=key)
+        return {"ok": True}
 
     @app.get("/api/datasets/{key}")
     def get_dataset(key: str):
@@ -230,29 +294,34 @@ def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_B
                 positions=wrong[:20],
             )
 
-    @app.post("/api/datasets/{key}/invalid")
-    def mark_invalid(key: str, body: MarkBody):
-        ds = store.get(key)
-        if not body.reason.strip():
-            raise ApiError(400, "reason_required", "a reason is required to mark a value as invalid")
-        if not body.by.strip():
-            raise ApiError(400, "person_required", "the person who marks the value is required")
-        check_positions(ds, body.positions, want_invalid=False)
-        new = ds.mark_invalid(body.positions, body.reason, body.by)
-        store.replace(key, new)
+    def _marked(key: str, action: str, body: MarkBody, user: User, change) -> dict:
+        with db.tx():  # the change and its audit entry stand or fall together
+            new = store.modify(key, change)
+            audit.append(action, user_id=user.id, username=user.username, target=key,
+                         detail={"n": len(body.positions), "positions": body.positions[:50], "reason": body.reason})
         return _dataset_json(key, new)
 
+    @app.post("/api/datasets/{key}/invalid")
+    def mark_invalid(key: str, body: MarkBody, user: User = Depends(writer)):
+        if not body.reason.strip():
+            raise ApiError(400, "reason_required", "a reason is required to mark a value as invalid")
+
+        def change(ds: Dataset) -> Dataset:
+            check_positions(ds, body.positions, want_invalid=False)
+            return ds.mark_invalid(body.positions, body.reason, user.label)
+
+        return _marked(key, "dataset_marked_invalid", body, user, change)
+
     @app.post("/api/datasets/{key}/restore")
-    def restore(key: str, body: MarkBody):
-        ds = store.get(key)
+    def restore(key: str, body: MarkBody, user: User = Depends(writer)):
         if not body.reason.strip():
             raise ApiError(400, "reason_required", "a reason is required to restore a value")
-        if not body.by.strip():
-            raise ApiError(400, "person_required", "the person is required")
-        check_positions(ds, body.positions, want_invalid=True)
-        new = ds.restore(body.positions, body.reason, body.by)
-        store.replace(key, new)
-        return _dataset_json(key, new)
+
+        def change(ds: Dataset) -> Dataset:
+            check_positions(ds, body.positions, want_invalid=True)
+            return ds.restore(body.positions, body.reason, user.label)
+
+        return _marked(key, "dataset_restored", body, user, change)
 
     @app.get("/api/datasets/{key}/export.csv")
     def export_csv(key: str):
@@ -266,9 +335,12 @@ def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_B
     # ------------------------------------------------------------------ reports
 
     @app.post("/api/datasets/{key}/reports")
-    def create_report(key: str, body: ReportBody):
-        g = generate(store.get(key), body.analysis.to_request(), body.meta.to_meta(), body.language)
-        reports.add(g.report_id, g)
+    def create_report(key: str, body: ReportBody, user: User = Depends(writer)):
+        g = generate(store.get(key), body.analysis.to_request(), body.meta.to_meta(), body.language, created_by=user.label)
+        with db.tx():
+            reports.add(g, key, user.id)
+            audit.append("report_created", user_id=user.id, username=user.username, target=g.report_id,
+                         detail={"dataset": key, "digest": g.archive["integrity"]["digest"]})
         base = f"/api/reports/{g.report_id}"
         return {
             "id": g.report_id,
@@ -277,22 +349,26 @@ def create_app(store: DatasetStore | None = None, max_upload: int = MAX_UPLOAD_B
             "urls": {"html": base, "download": f"{base}?download=1", "archive": f"{base}/archive.json"},
         }
 
+    @app.get("/api/reports")
+    def list_reports():
+        return {"reports": reports.list()}
+
     @app.get("/api/reports/{rid}")
     def get_report(rid: str, download: int = 0):
-        g = reports.get(rid)
+        report_id, _, html, _ = reports.get(rid)
         headers = {"Content-Security-Policy": REPORT_CSP, "Cache-Control": "no-store"}
         if download:
-            headers["Content-Disposition"] = f'attachment; filename="spc-report-{g.report_id}.html"'
-        return Response(g.html.encode("utf-8"), media_type="text/html; charset=utf-8", headers=headers)
+            headers["Content-Disposition"] = f'attachment; filename="spc-report-{report_id}.html"'
+        return Response(html.encode("utf-8"), media_type="text/html; charset=utf-8", headers=headers)
 
     @app.get("/api/reports/{rid}/archive.json")
     def get_archive(rid: str):
-        g = reports.get(rid)
-        text = json.dumps(g.archive, ensure_ascii=False, indent=1, sort_keys=True)
+        report_id, _, _, archive = reports.get(rid)
+        text = json.dumps(archive, ensure_ascii=False, indent=1, sort_keys=True)
         return Response(
             text.encode("utf-8"),
             media_type="application/json",
-            headers={"Content-Disposition": f'attachment; filename="spc-archive-{g.report_id}.json"'},
+            headers={"Content-Disposition": f'attachment; filename="spc-archive-{report_id}.json"'},
         )
 
     @app.post("/api/archive/check")

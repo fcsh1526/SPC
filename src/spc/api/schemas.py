@@ -21,9 +21,39 @@ class SuspectsBody(Strict):
 
 
 class MarkBody(Strict):
+    """Who marks is not sent: the server takes it from the login."""
+
     positions: list[int] = Field(min_length=1, max_length=100_000)
     reason: str = Field(max_length=2000)
-    by: str = Field(max_length=200)
+
+
+class LoginBody(Strict):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class PasswordBody(Strict):
+    current: str = Field(max_length=1024)
+    new: str = Field(max_length=1024)
+
+
+class NewUserBody(Strict):
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=1024)
+    role: Literal["viewer", "engineer", "admin"] = "engineer"
+    display_name: str = Field(default="", max_length=200)
+    must_change: bool = True
+
+
+class UpdateUserBody(Strict):
+    role: Literal["viewer", "engineer", "admin"] | None = None
+    active: bool | None = None
+    display_name: str | None = Field(default=None, max_length=200)
+
+
+class ResetPasswordBody(Strict):
+    password: str = Field(max_length=1024)
+    must_change: bool = True
 
 
 class AnalyzeBody(Strict):

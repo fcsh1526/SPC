@@ -78,7 +78,7 @@ def test_every_key_in_the_files_is_used(messages):
     dynamic = (
         "issue.", "error.", "warn.", "alarmrule.", "result.class_", "result.verdict_", "result.kind_",
         "result.series_variation_", "analysis.model_", "analysis.class_", "analysis.chart_",
-        "analysis.stage_", "result.names_reason_",
+        "analysis.stage_", "result.names_reason_", "role.",
     )
     text = page_text()
     unused = sorted(
@@ -90,12 +90,16 @@ def test_every_key_in_the_files_is_used(messages):
 
 def test_every_backend_code_has_a_text(messages):
     en = messages["en"]
-    api = (ROOT / "api" / "app.py").read_text(encoding="utf-8")
-    api_codes = set(re.findall(r'ApiError\(\s*\d+,\s*(?:"(\w+)"|"not_invalid" if want_invalid else "already_invalid")', api))
+    sources = [*(ROOT / "api").glob("*.py"), *(ROOT / "auth").glob("*.py")]
+    api = "\n".join(f.read_text(encoding="utf-8") for f in sources)
+    api_codes = set(re.findall(r'(?:ApiError|AuthError)\(\s*\d+,\s*"(\w+)"', api))
     api_codes |= set(re.findall(r'_error\(\s*\d+,\s*"(\w+)"', api))
-    api_codes |= {"not_invalid", "already_invalid"}
+    api_codes |= set(re.findall(r'PasswordPolicyError\(\s*"(\w+)"', api))
+    api_codes |= {"not_invalid", "already_invalid"}  # chosen through a conditional expression
     api_codes -= {"", "import_failed"}  # shown with its own title
     api_codes |= {"report_needs_spec", "report_not_found", "archive_unreadable"}  # chosen through a variable
+    assert {"not_authenticated", "csrf_failed", "forbidden", "invalid_credentials", "login_locked", "last_admin",
+            "password_too_short", "password_change_required"} <= api_codes
     for code in api_codes | {"import_failed"}:
         assert f"error.{code}" in en, f"error.{code}"
 
@@ -129,3 +133,12 @@ def test_every_backend_code_has_a_text(messages):
         assert f"result.verdict_{v}" in en
     for kind in ("xbar-s", "xbar-r", "imr"):
         assert f"result.kind_{kind}" in en and f"result.series_variation_{kind}" in en
+
+
+def test_every_key_like_string_in_the_page_code_is_a_real_key(messages):
+    """Keys listed in arrays or passed through variables are not found by the t("...") scan. Check them here."""
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    prefixes = ("nav.", "login.", "user.", "password.", "saved.", "admin.", "data.", "import.", "result.", "report.", "tools.", "analysis.")
+    quoted = set(re.findall(r'"((?:%s)[\w.\-]*)"' % "|".join(re.escape(p) for p in prefixes), js))
+    missing = sorted(k for k in quoted if not k.endswith((".", "_")) and k not in messages["en"])
+    assert missing == [], missing

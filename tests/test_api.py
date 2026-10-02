@@ -2,8 +2,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from spc.api import create_app
-from spc.api.store import DatasetStore
+from tests.conftest import logged_in_client, make_app
 
 
 def csv_text(k=25, n=5, seed=1, spike=None):
@@ -20,7 +19,7 @@ def csv_text(k=25, n=5, seed=1, spike=None):
 
 @pytest.fixture
 def client():
-    return TestClient(create_app(DatasetStore(max_items=3), max_upload=200_000))
+    return logged_in_client(make_app(max_upload=200_000))
 
 
 def upload(client, raw=None, **params):
@@ -102,27 +101,28 @@ def test_suspects_are_hints_and_do_not_change_the_data(client):
     assert client.get(f"/api/datasets/{ds['id']}").json()["summary"]["n_invalid"] == 0
 
 
-def test_marking_needs_reason_and_person_and_cannot_be_repeated(client):
+def test_marking_needs_a_reason_and_takes_the_person_from_the_login(client):
     ds = upload(client).json()
     url = f"/api/datasets/{ds['id']}/invalid"
-    assert err(client.post(url, json={"positions": [3], "reason": "  ", "by": "A"}))["code"] == "reason_required"
-    assert err(client.post(url, json={"positions": [3], "reason": "wrong part", "by": ""}))["code"] == "person_required"
-    assert err(client.post(url, json={"positions": [999], "reason": "r", "by": "A"}))["code"] == "positions_out_of_range"
-    assert err(client.post(url, json={"positions": [1, 1], "reason": "r", "by": "A"}))["code"] == "duplicate_positions"
-    ok = client.post(url, json={"positions": [3], "reason": "wrong part", "by": "A"})
+    assert err(client.post(url, json={"positions": [3], "reason": "  "}))["code"] == "reason_required"
+    assert err(client.post(url, json={"positions": [999], "reason": "r"}))["code"] == "positions_out_of_range"
+    assert err(client.post(url, json={"positions": [1, 1], "reason": "r"}))["code"] == "duplicate_positions"
+    # a client cannot name another person
+    assert client.post(url, json={"positions": [3], "reason": "r", "by": "somebody else"}).status_code == 422
+    ok = client.post(url, json={"positions": [3], "reason": "wrong part"})
     assert ok.status_code == 200 and ok.json()["summary"]["n_invalid"] == 1 and ok.json()["log"][0]["reason"] == "wrong part"
-    again = client.post(url, json={"positions": [3], "reason": "other", "by": "B"})
+    again = client.post(url, json={"positions": [3], "reason": "other"})
     assert again.status_code == 409 and err(again)["code"] == "already_invalid"
     rows = client.get(f"/api/datasets/{ds['id']}/rows", params={"limit": 5}).json()["rows"]
-    assert rows[3]["valid"] is False and rows[3]["invalid"]["by"] == "A"
+    assert rows[3]["valid"] is False and rows[3]["invalid"]["by"] == "Eva Engineer (eng)"
 
 
 def test_restore(client):
     ds = upload(client).json()
     base = f"/api/datasets/{ds['id']}"
-    body = {"positions": [3], "reason": "it was fine", "by": "B"}
+    body = {"positions": [3], "reason": "it was fine"}
     assert err(client.post(f"{base}/restore", json=body))["code"] == "not_invalid"
-    client.post(f"{base}/invalid", json={"positions": [3], "reason": "wrong part", "by": "A"})
+    client.post(f"{base}/invalid", json={"positions": [3], "reason": "wrong part"})
     r = client.post(f"{base}/restore", json=body)
     assert r.json()["summary"]["n_invalid"] == 0
     assert [e["action"] for e in r.json()["log"]] == ["mark_invalid", "restore"]
@@ -130,7 +130,7 @@ def test_restore(client):
 
 def test_export_keeps_marks_and_opens_in_excel(client):
     ds = upload(client).json()
-    client.post(f"/api/datasets/{ds['id']}/invalid", json={"positions": [0], "reason": "量測錯誤", "by": "陳"})
+    client.post(f"/api/datasets/{ds['id']}/invalid", json={"positions": [0], "reason": "量測錯誤"})
     r = client.get(f"/api/datasets/{ds['id']}/export.csv")
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
     assert r.content.startswith(b"\xef\xbb\xbf")
@@ -155,7 +155,7 @@ def test_marked_value_changes_the_analysis_and_incomplete_policy_is_respected(cl
     ds = upload(client, csv_text(spike=(4, 2))).json()
     base = f"/api/datasets/{ds['id']}"
     before = client.post(f"{base}/analyze", json={"lsl": 9, "usl": 11}).json()
-    client.post(f"{base}/invalid", json={"positions": [22], "reason": "typing error", "by": "A"})
+    client.post(f"{base}/invalid", json={"positions": [22], "reason": "typing error"})
     after = client.post(f"{base}/analyze", json={"lsl": 9, "usl": 11}).json()
     assert after["chart"]["k"] == 24 and after["indices"]["pk"] > before["indices"]["pk"]
     assert any(w["code"] == "dropped_subgroups" for w in after["warnings"])
@@ -182,12 +182,6 @@ def test_unknown_dataset(client):
     r = client.get("/api/datasets/doesnotexist")
     assert r.status_code == 404 and err(r)["code"] == "dataset_not_found"
     assert client.post("/api/datasets/nope/analyze", json={}).status_code == 404
-
-
-def test_store_keeps_only_the_latest_datasets(client):
-    ids = [upload(client).json()["id"] for _ in range(5)]
-    assert client.get(f"/api/datasets/{ids[0]}").status_code == 404
-    assert client.get(f"/api/datasets/{ids[-1]}").status_code == 200
 
 
 # ------------------------------------------------------------------ tools
@@ -260,7 +254,7 @@ def test_a_report_is_a_snapshot(client):
     ds = upload(client).json()
     out = client.post(f"/api/datasets/{ds['id']}/reports", json=REPORT_BODY).json()
     before = client.get(out["urls"]["html"]).text
-    client.post(f"/api/datasets/{ds['id']}/invalid", json={"positions": [3], "reason": "wrong part", "by": "A"})
+    client.post(f"/api/datasets/{ds['id']}/invalid", json={"positions": [3], "reason": "wrong part"})
     assert client.get(out["urls"]["html"]).text == before
     newer = client.post(f"/api/datasets/{ds['id']}/reports", json=REPORT_BODY).json()
     assert newer["id"] != out["id"] and "wrong part" in client.get(newer["urls"]["html"]).text

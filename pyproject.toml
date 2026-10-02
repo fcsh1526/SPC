@@ -27,6 +27,7 @@ dev = [
 
 [project.scripts]
 spc-serve = "spc.api.__main__:main"
+spc-admin = "spc.admin:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

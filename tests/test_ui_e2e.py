@@ -15,7 +15,8 @@ import pytest
 playwright_sync = pytest.importorskip("playwright.sync_api")
 import uvicorn  # noqa: E402
 
-from spc.api import create_app  # noqa: E402
+from spc.data import Dataset  # noqa: E402
+from tests.conftest import PASSWORD, make_app  # noqa: E402
 
 
 def find_chromium():
@@ -25,11 +26,22 @@ def find_chromium():
 
 
 @pytest.fixture(scope="module")
-def server():
+def app():
+    return make_app(max_upload=20 * 1024 * 1024)
+
+
+def sign_in(page, user="eng", password=PASSWORD):
+    page.fill("#login-user", user)
+    page.fill("#login-pass", password)
+    page.click("#login-form button[type=submit]")
+
+
+@pytest.fixture(scope="module")
+def server(app):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    srv = uvicorn.Server(uvicorn.Config(create_app(), host="127.0.0.1", port=port, log_level="warning"))
+    srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=srv.run, daemon=True)
     thread.start()
     for _ in range(100):
@@ -74,7 +86,10 @@ def test_full_flow_in_both_languages(server, browser, tmp_path):
     page.on("pageerror", lambda e: problems.append(str(e)))
 
     page.goto(server)
-    expect(page.locator("nav.tabs button[data-tab=import]")).to_have_text("1. 匯入")  # language from the browser
+    expect(page.locator("#login h2")).to_have_text("登入")  # language from the browser
+    expect(page.locator("#app")).to_be_hidden()  # nothing of the program shows before the login
+    sign_in(page)
+    expect(page.locator("nav.tabs button[data-tab=import]")).to_have_text("1. 匯入")
 
     # import a Big5 file: columns are suggested from the content
     page.set_input_files("#file", str(sample(tmp_path)))
@@ -91,8 +106,8 @@ def test_full_flow_in_both_languages(server, browser, tmp_path):
     page.click("#mark-btn")
     expect(page.locator("#errors")).to_contain_text("必須填寫理由")
     page.click("#errors button")
+    expect(page.locator("#person-note")).to_contain_text("Eva Engineer (eng)")  # the person comes from the login
     page.fill("#reason", "typing error")
-    page.fill("#person", "A. Chen")
     page.click("#mark-btn")
     expect(page.locator("#data-counts")).to_contain_text("標記無效 1 筆")
 
@@ -129,6 +144,9 @@ def test_page_does_not_overflow_on_a_phone(server, browser):
     ctx = browser.new_context(viewport={"width": 390, "height": 800}, locale="en")
     page = ctx.new_page()
     page.goto(server)
+    playwright_sync.expect(page.locator("#login-form")).to_be_visible()
+    assert page.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+    sign_in(page)
     playwright_sync.expect(page.locator("nav.tabs")).to_be_visible()
     assert page.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth")
     ctx.close()
@@ -141,6 +159,7 @@ def test_user_text_is_never_run_as_html(server, browser, tmp_path):
     ctx = browser.new_context(locale="en")
     page = ctx.new_page()
     page.goto(server)
+    sign_in(page)
     page.set_input_files("#file", str(path))
     page.select_option("#col-value", "v")
     page.select_option("#col-subgroup", "lot")
@@ -159,6 +178,7 @@ def test_report_and_archive_check_in_the_browser(server, browser, tmp_path):
     page.on("pageerror", lambda e: problems.append(str(e)))
 
     page.goto(server)
+    sign_in(page)
     page.set_input_files("#file", str(sample(tmp_path)))
     page.select_option("#col-value", "直徑")
     page.select_option("#col-subgroup", "批號")
@@ -170,7 +190,6 @@ def test_report_and_archive_check_in_the_browser(server, browser, tmp_path):
     expect(page.locator("#suspect-msg")).to_contain_text("1 suspect")
     page.click("#suspect-select")
     page.fill("#reason", "typing error")
-    page.fill("#person", "A. Chen")
     page.click("#mark-btn")
     expect(page.locator("#data-counts")).to_contain_text("1 marked invalid")
 
@@ -228,4 +247,89 @@ def test_report_and_archive_check_in_the_browser(server, browser, tmp_path):
     expect(page.locator("#archive-out")).to_contain_text("was changed after the archive was made")
 
     assert problems == [], problems
+    ctx.close()
+
+
+def test_wrong_password_logout_and_a_reload_keep_the_data_private(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(locale="en")
+    page = ctx.new_page()
+    page.goto(server)
+    sign_in(page, "eng", "not the password!!")
+    expect(page.locator("#errors")).to_contain_text("User name or password is wrong")
+    assert page.locator("#app").is_hidden()
+    page.click("#errors button")
+    sign_in(page)
+    expect(page.locator("#user-label")).to_contain_text("Eva Engineer (eng) · Engineer")
+
+    page.reload()  # the session cookie keeps the login
+    expect(page.locator("#user-label")).to_contain_text("Eva Engineer")
+    cookie = next(c for c in ctx.cookies() if c["name"] == "spc_session")
+    assert cookie["httpOnly"] and cookie["sameSite"] == "Strict"
+
+    page.click("#logout-btn")
+    expect(page.locator("#login-form")).to_be_visible()
+    expect(page.locator("#app")).to_be_hidden()
+    assert ctx.request.get(server.rstrip("/") + "/api/datasets").status == 401
+    ctx.close()
+
+
+def test_a_viewer_can_read_saved_data_but_sees_no_way_to_change_it(server, browser, app):
+    expect = playwright_sync.expect
+    owner = app.state.auth.list_users()[0].id
+    demo = Dataset.from_values([10.0, 10.1, 9.9, 10.05, 10.02, 9.98] * 5)
+    app.state.store.add(demo, owner, "demo-saved")
+    ctx = browser.new_context(locale="en")
+    page = ctx.new_page()
+    page.goto(server)
+    sign_in(page, "view")
+    expect(page.locator("#tab-saved")).to_be_visible()  # a viewer starts at the saved data
+    expect(page.locator("nav.tabs button[data-tab=import]")).to_be_hidden()
+    expect(page.locator("nav.tabs button[data-tab=admin]")).to_be_hidden()
+    expect(page.locator("#saved-datasets")).to_contain_text("demo-saved")
+    expect(page.locator("#saved-datasets button", has_text="Delete")).to_have_count(0)
+    page.click("#saved-datasets button:has-text('Open')")
+    expect(page.locator("#data-counts")).to_contain_text("30 values")
+    expect(page.locator("#mark-btn")).to_be_hidden()
+    expect(page.locator("#reason")).to_be_hidden()
+    ctx.close()
+
+
+def test_a_new_user_must_change_the_password_before_anything_else(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(locale="en")
+    admin = ctx.new_page()
+    admin.goto(server)
+    sign_in(admin, "admin")
+    admin.click("nav.tabs button[data-tab=admin]")
+    admin.fill("#nu-name", "newbie")
+    admin.fill("#nu-display", "N. Ewbie")
+    admin.select_option("#nu-role", "engineer")
+    admin.fill("#nu-pass", "temporary-pass-1")
+    admin.click("#nu-create")
+    expect(admin.locator("#admin-msg")).to_contain_text("User newbie created")
+    expect(admin.locator("#admin-users")).to_contain_text("N. Ewbie")
+    admin.click("#audit-verify")
+    expect(admin.locator("#audit-verdict")).to_contain_text("Chain intact")
+    expect(admin.locator("#audit-log")).to_contain_text("user_created")
+    ctx.close()
+
+    ctx = browser.new_context(locale="en")
+    page = ctx.new_page()
+    page.goto(server)
+    sign_in(page, "newbie", "temporary-pass-1")
+    expect(page.locator("#password-forced")).to_be_visible()
+    page.click("nav.tabs button[data-tab=tools]")  # no other tab opens
+    expect(page.locator("#tab-password")).to_be_visible()
+    page.fill("#pw-current", "temporary-pass-1")
+    page.fill("#pw-new", "a much better password")
+    page.fill("#pw-repeat", "something different!!")
+    page.click("#password-form button[type=submit]")
+    expect(page.locator("#errors")).to_contain_text("The two new passwords differ")
+    page.click("#errors button")
+    page.fill("#pw-repeat", "a much better password")
+    page.click("#password-form button[type=submit]")
+    expect(page.locator("#pw-done")).to_be_visible()
+    page.click("nav.tabs button[data-tab=tools]")
+    expect(page.locator("#tab-tools")).to_be_visible()
     ctx.close()

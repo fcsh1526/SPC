@@ -31,6 +31,7 @@ def generate(
     *,
     now: str | None = None,
     report_id: str | None = None,
+    created_by: str = "",
 ) -> GeneratedReport:
     """Run the analysis once, archive it, and lay the report out from the same result."""
     if language not in LANGUAGES:
@@ -41,7 +42,7 @@ def generate(
         raise ReportError("spec_missing", "a report needs at least one specification limit")
     created = now or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     rid = report_id or uuid.uuid4().hex[:12]
-    archive = build_archive(dataset, request, meta, outcome.result, created_at=created, report_id=rid, language=language)
+    archive = build_archive(dataset, request, meta, outcome.result, created_at=created, report_id=rid, language=language, created_by=created_by)
     report = build_report(
         dataset, request, meta, language, generated_at=created, report_id=rid,
         archive_digest=archive["integrity"]["digest"], outcome=outcome,

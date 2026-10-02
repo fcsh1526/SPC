@@ -48,7 +48,7 @@ body {
   background: var(--bg);
   color: var(--text);
 }
-header.top, .notice, nav.tabs, main, #errors, #busy { max-width: 1100px; margin: 0 auto; padding-left: 16px; padding-right: 16px; }
+header.top, .notice, nav.tabs, main, #errors, #busy, #login { max-width: 1100px; margin: 0 auto; padding-left: 16px; padding-right: 16px; }
 header.top { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; padding-top: 16px; flex-wrap: wrap; }
 .brand h1 { margin: 0; font-size: 1.6rem; }
 .brand p { margin: 0; color: var(--muted); }
@@ -83,7 +83,7 @@ label.filebtn input:focus-visible + span, button:focus-visible, a.button:focus-v
 }
 button.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 600; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="number"], input[type="password"], select {
   font: inherit; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--surface); color: var(--text); min-width: 0; width: 100%;
 }
@@ -131,3 +131,9 @@ ul.alarms { font-size: 0.9rem; color: var(--alarm); }
   .form-grid { grid-template-columns: 1fr; }
   .big { font-size: 1.3rem; }
 }
+
+/* login and roles */
+.userbar { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+.panel.narrow, #login { max-width: 460px; }
+#login { margin-top: 24px; }
+body[data-role="viewer"] [data-needs="engineer"], body:not([data-role="admin"]) [data-needs="admin"] { display: none !important; }

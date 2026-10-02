@@ -14,6 +14,7 @@
     selected: new Set(), suspects: new Set(),
     result: null, toolsTargets: null, toolsArl: null,
     lastAnalysisBody: null, reportOut: null, reportLangTouched: false, archiveOut: null,
+    user: null, csrf: "", mustChange: false,
   };
 
   // ---------------------------------------------------------------- small helpers
@@ -78,6 +79,8 @@
     if (Array.isArray(p.labels)) p.labels = p.labels.join(", ");
     if (e.code === "validation") p.fields = (p.errors || []).map((x) => x.field).join(", ");
     if (e.code === "invalid_input") p.message = e.message;
+    if (e.code === "login_locked") p.minutes = Math.max(1, Math.ceil((p.retry_after || 0) / 60));
+    if (e.code === "forbidden" && p.role) p.role = t("role." + p.role);
     return t(key, p);
   }
   function showError(err) {
@@ -114,7 +117,11 @@
     const buttons = $$("button");
     buttons.forEach((b) => { b.dataset.wasDisabled = b.disabled ? "1" : ""; b.disabled = true; });
     try { return await fn(); }
-    catch (e) { showError(e && e.code ? e : { code: "network", message: String(e), params: {} }); }
+    catch (e) {
+      if (e && e.code === "not_authenticated" && state.user) { showLogin("login.session_ended"); return; }
+      if (e && e.code === "password_change_required") { state.mustChange = true; showTab("password"); }
+      showError(e && e.code ? e : { code: "network", message: String(e), params: {} });
+    }
     finally {
       $("#busy").hidden = true;
       buttons.forEach((b) => { b.disabled = b.dataset.wasDisabled === "1"; });
@@ -122,6 +129,8 @@
   }
   async function api(path, opts) {
     let resp;
+    opts = Object.assign({}, opts);
+    if ((opts.method || "GET") !== "GET" && state.csrf) opts.headers = Object.assign({ "X-CSRF-Token": state.csrf }, opts.headers);
     try { resp = await fetch(path, opts); } catch (e) { throw { code: "network", message: String(e), params: {} }; }
     const isJson = (resp.headers.get("content-type") || "").includes("json");
     if (!resp.ok) {
@@ -136,8 +145,12 @@
   // ---------------------------------------------------------------- tabs
   function showTab(name) {
     if ((name === "data" || name === "analysis") && !state.dataset) return;
+    if (state.mustChange) name = "password";  // nothing else works until the password is changed
     $$("nav.tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
     $$("main > section").forEach((s) => { s.hidden = s.id !== "tab-" + name; });
+    if (name === "saved") loadSaved();
+    if (name === "admin") loadAdmin();
+    if (name === "password") renderPasswordPanel();
   }
   function unlockTabs() { $$("nav.tabs button").forEach((b) => b.removeAttribute("aria-disabled")); }
 
@@ -235,18 +248,21 @@
     q.set("filename", state.file.name);
     await guarded(async () => {
       const ds = await api("/api/datasets?" + q.toString(), { method: "POST", body: state.file });
-      state.dataset = ds;
-      state.offset = 0; state.selected.clear(); state.suspects.clear(); state.result = null; state.reportOut = null;
-      renderReportOut();
-      $("#result").hidden = true;
-      $("#a-size-wrap").hidden = ds.has_subgroup;
-      $("#export-link").href = `/api/datasets/${ds.id}/export.csv`;
       $("#file-name").textContent = t("import.done", { n: ds.summary.n_total, name: state.file.name });
-      unlockTabs();
-      await loadRows();
-      renderData();
-      showTab("data");
+      await openDataset(ds);
     });
+  }
+  async function openDataset(ds) {
+    state.dataset = ds;
+    state.offset = 0; state.selected.clear(); state.suspects.clear(); state.result = null; state.reportOut = null;
+    renderReportOut();
+    $("#result").hidden = true;
+    $("#a-size-wrap").hidden = ds.has_subgroup;
+    $("#export-link").href = `/api/datasets/${ds.id}/export.csv`;
+    unlockTabs();
+    await loadRows();
+    renderData();
+    showTab("data");
   }
 
   // ---------------------------------------------------------------- data tab
@@ -272,6 +288,7 @@
       src.title = ds.source.sha256;
     } else { src.textContent = ""; }
     renderWarnings($("#data-warnings"), ds.warnings);
+    $("#person-note").textContent = state.user ? t("data.person_note", { user: userLabel() }) : "";
     $("#selected-count").textContent = state.selected.size ? t("data.selected", { n: state.selected.size }) : t("data.select_hint");
     renderRows();
     renderLog();
@@ -348,8 +365,7 @@
   }
   async function markOrRestore(kind) {
     if (!state.selected.size) return showError({ code: "no_selection", params: {} });
-    const body = { positions: Array.from(state.selected).sort((a, b) => a - b), reason: $("#reason").value, by: $("#person").value };
-    store("spc.person", body.by);
+    const body = { positions: Array.from(state.selected).sort((a, b) => a - b), reason: $("#reason").value };
     await guarded(async () => {
       const ds = await post(`/api/datasets/${state.dataset.id}/${kind === "mark" ? "invalid" : "restore"}`, body);
       const n = body.positions.length;
@@ -645,13 +661,193 @@
     wrap.appendChild(table); box.appendChild(wrap);
   }
 
+  // ---------------------------------------------------------------- login, password, roles
+  const userLabel = () => (state.user.display_name ? `${state.user.display_name} (${state.user.username})` : state.user.username);
+  const when = (s) => String(s || "").replace("T", " ").replace("Z", "");
+
+  function showLogin(messageKey) {
+    state.user = null; state.csrf = "";
+    document.body.removeAttribute("data-role");
+    $("#app").hidden = true; $("#userbox").hidden = true; $("#login").hidden = false;
+    $("#login-setup").hidden = !state.setupNeeded;
+    const msg = $("#login-msg");
+    msg.hidden = !messageKey;
+    if (messageKey) { msg.dataset.i18n = messageKey; msg.textContent = t(messageKey); } else { delete msg.dataset.i18n; }
+    $("#login-pass").value = "";
+  }
+  function enterApp(me) {
+    state.user = me.user; state.csrf = me.csrf; state.mustChange = me.user.must_change;
+    document.body.dataset.role = me.user.role;
+    $("#login").hidden = true; $("#app").hidden = false; $("#userbox").hidden = false;
+    $("#login-user").value = ""; $("#login-pass").value = "";
+    renderUserBox();
+    showTab(state.mustChange ? "password" : (me.user.role === "viewer" ? "saved" : "import"));
+  }
+  function renderUserBox() {
+    if (!state.user) return;
+    $("#user-label").textContent = `${userLabel()} · ${t("role." + state.user.role)}`;
+  }
+  async function doLogin() {
+    await guarded(async () => {
+      const me = await post("/api/auth/login", { username: $("#login-user").value, password: $("#login-pass").value });
+      enterApp(me);
+    });
+  }
+  async function doLogout() {
+    await guarded(async () => { await post("/api/auth/logout", {}); });
+    location.reload();  // drops everything that is still in the page
+  }
+  function renderPasswordPanel() {
+    $("#password-forced").hidden = !state.mustChange;
+    $("#password-rules").textContent = t("password.rules", { min: 10 });
+    $("#pw-done").hidden = true;
+  }
+  async function doChangePassword() {
+    const fresh = $("#pw-new").value;
+    if (fresh !== $("#pw-repeat").value) return showError({ code: "password_mismatch", params: {} });
+    await guarded(async () => {
+      const r = await post("/api/auth/password", { current: $("#pw-current").value, new: fresh });
+      state.user = r.user; state.mustChange = false;
+      $("#password-form").reset();
+      $("#pw-done").hidden = false;
+    });
+  }
+
+  // ---------------------------------------------------------------- saved data and reports
+  function cell(tr, text, tag = "td") { const c = el(tag, "", text); tr.appendChild(c); return c; }
+  function linkButton(label, href, newTab) {
+    const a = el("a", "button", label);
+    a.href = href;
+    if (newTab) { a.target = "_blank"; a.rel = "noopener"; }
+    return a;
+  }
+  async function loadSaved() {
+    await guarded(async () => {
+      const [ds, rp] = await Promise.all([api("/api/datasets"), api("/api/reports")]);
+      const dt = $("#saved-datasets"); dt.replaceChildren();
+      const head = el("tr");
+      ["saved.col_name", "saved.col_owner", "saved.col_updated", "saved.col_values", "saved.col_marked", ""].forEach((k) => cell(head, k ? t(k) : "", "th"));
+      dt.appendChild(head);
+      if (!ds.datasets.length) { const tr = el("tr"); const c = cell(tr, t("saved.empty")); c.colSpan = 6; dt.appendChild(tr); }
+      ds.datasets.forEach((d) => {
+        const tr = el("tr");
+        cell(tr, d.name); cell(tr, d.owner); cell(tr, when(d.updated_at)); cell(tr, String(d.n_total)); cell(tr, String(d.n_invalid));
+        const actions = cell(tr, "");
+        const open = el("button", "", t("saved.open"));
+        open.addEventListener("click", () => guarded(async () => { await openDataset(await api(`/api/datasets/${d.id}`)); }));
+        actions.appendChild(open);
+        if (state.user.role !== "viewer" && (d.owner.toLowerCase() === state.user.username.toLowerCase() || state.user.role === "admin")) {
+          const del = el("button", "", t("saved.delete"));
+          del.addEventListener("click", async () => {
+            if (!window.confirm(t("saved.confirm_delete", { name: d.name }))) return;
+            await guarded(async () => {
+              await api(`/api/datasets/${d.id}`, { method: "DELETE" });
+              if (state.dataset && state.dataset.id === d.id) { state.dataset = null; state.result = null; }
+            });
+            loadSaved();
+          });
+          actions.appendChild(del);
+        }
+        dt.appendChild(tr);
+      });
+      const rt = $("#saved-reports"); rt.replaceChildren();
+      const rh = el("tr");
+      ["saved.col_id", "saved.col_created", "saved.col_language", "saved.col_owner", ""].forEach((k) => cell(rh, k ? t(k) : "", "th"));
+      rt.appendChild(rh);
+      if (!rp.reports.length) { const tr = el("tr"); const c = cell(tr, t("saved.empty")); c.colSpan = 5; rt.appendChild(tr); }
+      rp.reports.forEach((r) => {
+        const tr = el("tr");
+        cell(tr, r.id); cell(tr, when(r.created_at)); cell(tr, r.language); cell(tr, r.owner);
+        const actions = cell(tr, "");
+        const base = `/api/reports/${r.id}`;
+        actions.appendChild(linkButton(t("saved.report_open"), base, true));
+        actions.appendChild(linkButton(t("saved.report_download"), `${base}?download=1`));
+        actions.appendChild(linkButton(t("saved.report_archive"), `${base}/archive.json`));
+        rt.appendChild(tr);
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------- administration
+  async function loadAdmin() {
+    await guarded(async () => {
+      const [users, audit] = await Promise.all([api("/api/users"), api("/api/audit?limit=100")]);
+      renderUsers(users.users);
+      renderAudit(audit.entries);
+    });
+  }
+  function renderUsers(users) {
+    const table = $("#admin-users"); table.replaceChildren();
+    const head = el("tr");
+    ["admin.col_user", "admin.col_name", "admin.col_role", "admin.col_active", "admin.col_actions"].forEach((k) => cell(head, t(k), "th"));
+    table.appendChild(head);
+    users.forEach((u) => {
+      const tr = el("tr");
+      cell(tr, u.username); cell(tr, u.display_name);
+      const roleCell = cell(tr, ""), role = el("select");
+      ["viewer", "engineer", "admin"].forEach((r) => { const o = el("option", "", t("role." + r)); o.value = r; role.appendChild(o); });
+      role.value = u.role;
+      role.addEventListener("change", () => updateUser(u.id, { role: role.value }));
+      roleCell.appendChild(role);
+      const activeCell = cell(tr, ""), active = el("input");
+      active.type = "checkbox"; active.checked = u.active;
+      active.addEventListener("change", () => updateUser(u.id, { active: active.checked }));
+      activeCell.appendChild(active);
+      const actions = cell(tr, "");
+      const reset = el("button", "", t("admin.reset"));
+      reset.addEventListener("click", async () => {
+        const pw = window.prompt(t("admin.reset_prompt", { name: u.username }));
+        if (!pw) return;
+        await guarded(async () => { await post(`/api/users/${u.id}/password`, { password: pw }); $("#admin-msg").textContent = t("admin.reset_done", { name: u.username }); });
+      });
+      const unlock = el("button", "", t("admin.unlock"));
+      unlock.addEventListener("click", () => guarded(async () => { await post(`/api/users/${u.id}/unlock`, {}); $("#admin-msg").textContent = t("admin.unlocked", { name: u.username }); }));
+      actions.appendChild(reset); actions.appendChild(unlock);
+      table.appendChild(tr);
+    });
+  }
+  async function updateUser(id, patch) {
+    await guarded(async () => { await api(`/api/users/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }); });
+    loadAdmin();  // shows the real state again, also after a refused change
+  }
+  async function createUser() {
+    const body = { username: $("#nu-name").value.trim(), display_name: $("#nu-display").value.trim(), role: $("#nu-role").value, password: $("#nu-pass").value, must_change: true };
+    await guarded(async () => {
+      const r = await post("/api/users", body);
+      $("#admin-msg").textContent = t("admin.created", { name: r.user.username });
+      $("#nu-name").value = ""; $("#nu-display").value = ""; $("#nu-pass").value = "";
+      renderUsers((await api("/api/users")).users);
+      renderAudit((await api("/api/audit?limit=100")).entries);
+    });
+  }
+  function renderAudit(entries) {
+    const table = $("#audit-log"); table.replaceChildren();
+    const head = el("tr");
+    ["admin.audit_col_time", "admin.audit_col_user", "admin.audit_col_action", "admin.audit_col_target", "admin.audit_col_detail"].forEach((k) => cell(head, t(k), "th"));
+    table.appendChild(head);
+    entries.forEach((e) => {
+      const tr = el("tr");
+      cell(tr, when(e.ts)); cell(tr, e.username); cell(tr, e.action); cell(tr, e.target);
+      cell(tr, Object.keys(e.detail).length ? JSON.stringify(e.detail) : "");
+      table.appendChild(tr);
+    });
+  }
+  async function verifyAudit() {
+    await guarded(async () => {
+      const r = await api("/api/audit/verify");
+      $("#audit-verdict").textContent = r.ok ? t("admin.audit_ok", { n: r.entries, hash: r.last_hash }) : t("admin.audit_broken", { id: r.broken_at });
+    });
+  }
+
   // ---------------------------------------------------------------- wiring
   function rerender() {
     applyStatic();
     if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); refreshImportForm(); }
     if (state.dataset) renderData();
     if (state.result) renderResult();
-    renderTargets(); renderArl(); renderReportOut(); renderArchiveOut();
+    renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
+    if (state.user && !$("#tab-saved").hidden) loadSaved();
+    if (state.user && !$("#tab-admin").hidden) loadAdmin();
   }
   async function setLanguage(lang) {
     await loadMessages(lang);
@@ -677,7 +873,12 @@
     $("#analysis-form").addEventListener("submit", runAnalysis);
     $("#t-btn").addEventListener("click", calcTargets);
     $("#l-btn").addEventListener("click", calcArl);
-    $("#person").value = store("spc.person") || "";
+    $("#login-form").addEventListener("submit", (e) => { e.preventDefault(); doLogin(); });
+    $("#logout-btn").addEventListener("click", doLogout);
+    $("#pw-btn").addEventListener("click", () => showTab("password"));
+    $("#password-form").addEventListener("submit", (e) => { e.preventDefault(); doChangePassword(); });
+    $("#nu-create").addEventListener("click", createUser);
+    $("#audit-verify").addEventListener("click", verifyAudit);
     restoreReportMeta();
     $("#rp-language").addEventListener("change", () => { state.reportLangTouched = true; });
     $("#rp-create").addEventListener("click", createReport);
@@ -686,8 +887,12 @@
   }
   async function start() {
     wire();
-    try { await setLanguage(pickLanguage()); }
-    catch (e) { showError({ code: "network", message: String(e && e.message), params: {} }); }
+    try {
+      await setLanguage(pickLanguage());
+      const meta = await api("/api/meta");
+      state.setupNeeded = meta.setup_needed;
+      if (meta.session) enterApp(meta.session); else showLogin();
+    } catch (e) { showError({ code: "network", message: String(e && e.message || e.code), params: {} }); }
   }
   start();
 })();
