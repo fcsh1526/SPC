@@ -2,7 +2,7 @@
 
 目標：依 AIAG-VDA SPC Manual 1st Edition（2026）建置 SPC 軟體；統計演算法符合 ISO 7870 與 ISO 22514。
 
-狀態：第一階段 core 已實作（`src/spc/core`，119 項測試）。尚無 UI、API、資料匯入、儲存。實作範圍見 `README.md`。
+狀態：第一階段 core 與資料匯入已實作（`src/spc/core`、`src/spc/data`，161 項測試）。尚無 UI、API、資料庫儲存。實作範圍見 `README.md`。
 平台：Python core + Web UI。介面語言：繁體中文 / 英文雙語。
 
 ---
