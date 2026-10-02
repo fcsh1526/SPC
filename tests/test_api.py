@@ -291,3 +291,43 @@ def test_report_html_escapes_text_sent_by_the_user(client):
     html = client.get(out["urls"]["html"]).text
     assert "<script" not in html.lower() and "<img" not in html.lower()
     assert "&lt;script&gt;" in html
+
+
+# ------------------------------------------------------------------ non-normal indices
+
+def skewed_csv(n=125, seed=3):
+    rng = np.random.default_rng(seed)
+    lines = ["lot,diameter"]
+    for i in range(n):
+        lines.append(f"L{i // 5 + 1},{9 + rng.lognormal(0, 0.4):.4f}")
+    return "\n".join(lines).encode()
+
+
+def test_analyze_with_a_fitted_distribution_and_report(client):
+    ds = upload(client, skewed_csv(), tags=[]).json()
+    body = {"stage": "preliminary", "lsl": 8.5, "usl": 13.0, "characteristic_class": "major",
+            "distribution": "auto", "method": "G", "bootstrap_n": 40, "seed": 7}
+    r = client.post(f"/api/datasets/{ds['id']}/analyze", json=body)
+    assert r.status_code == 200
+    out = r.json()
+    assert out["distribution"]["requested"] == "auto" and out["distribution"]["bootstrap"]["seed"] == 7
+    assert out["indices"]["method"].startswith("General Geometric (.G)")
+    z = client.post(f"/api/datasets/{ds['id']}/analyze", json={**body, "method": "Z", "distribution": "lognormal"}).json()
+    assert z["indices"]["method"] == "z-score (.Z), lognormal"
+
+    rep = client.post(f"/api/datasets/{ds['id']}/reports", json={"analysis": body, "language": "en"})
+    assert rep.status_code == 200
+    html = client.get(rep.json()["urls"]["html"]).text
+    assert ".G" in html and "bootstrap" in html
+    check = client.post("/api/archive/check", content=client.get(rep.json()["urls"]["archive"]).content).json()
+    assert check["integrity_ok"] and check["reproduced"]
+
+
+@pytest.mark.parametrize("extra,code", [({"distribution": "nonsense"}, "validation"), ({"method": "Q"}, "validation"),
+                                        ({"bootstrap_n": 9999}, "validation"),
+                                        ({"distribution": "empirical", "method": "Z"}, "invalid_input"),
+                                        ({"distribution": "empirical"}, "invalid_input")])
+def test_bad_distribution_settings_give_clear_errors(client, extra, code):
+    ds = upload(client).json()
+    r = client.post(f"/api/datasets/{ds['id']}/analyze", json={"lsl": 9, "usl": 11, **extra})
+    assert r.status_code in (400, 422) and err(r)["code"] == code

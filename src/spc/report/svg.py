@@ -136,7 +136,8 @@ def _pad(lo: float, hi: float, frac: float = 0.06) -> tuple[float, float]:
 
 # ------------------------------------------------------------------------------------------ figures
 
-def histogram(values, lsl, usl, target, mean, sd, labels: dict, width=430, height=300) -> str:
+def histogram(values, lsl, usl, target, mean, sd, labels: dict, width=430, height=300, dist=None) -> str:
+    """`dist` (an object with pdf) replaces the normal curve when the indices use a fitted distribution."""
     x = np.asarray(values, dtype=float)
     n = x.size
     k = int(min(40, max(5, math.ceil(1 + 3.322 * math.log10(max(n, 2))))))
@@ -144,7 +145,16 @@ def histogram(values, lsl, usl, target, mean, sd, labels: dict, width=430, heigh
     xs = [x.min(), x.max()] + [v for v in (lsl, usl, target) if v is not None]
     x_lo, x_hi = _pad(min(xs), max(xs))
     bin_w = edges[1] - edges[0]
-    y_hi = max(counts.max(), norm.pdf(mean, mean, sd) * n * bin_w if sd > 0 else 0) * 1.12
+    curve = None
+    if dist is not None:
+        grid = np.linspace(x_lo, x_hi, 160)
+        with np.errstate(all="ignore"):
+            dens = np.nan_to_num(np.asarray(dist.pdf(grid), dtype=float), nan=0.0, posinf=0.0) * n * bin_w
+        curve = (grid, dens)
+        top = float(dens.max())
+    else:
+        top = norm.pdf(mean, mean, sd) * n * bin_w if sd > 0 else 0
+    y_hi = max(counts.max(), top) * 1.12
     f = _Frame(labels["title"], x_lo, x_hi, 0, y_hi, ml=48, mr=14, width=width, height=height)
     for c, a, b in zip(counts, edges[:-1], edges[1:]):
         if c:
@@ -152,7 +162,10 @@ def histogram(values, lsl, usl, target, mean, sd, labels: dict, width=430, heigh
                 f'<rect x="{_num(f.X(a))}" y="{_num(f.Y(c))}" width="{_num(f.X(b) - f.X(a))}" height="{_num(f.Y(0) - f.Y(c))}" '
                 f'fill="{BAR_FILL}" stroke="{SERIES}" stroke-width="0.8"/>'
             )
-    if sd > 0:
+    if curve is not None:
+        pts = " ".join(f"{_num(f.X(g))},{_num(f.Y(min(d, y_hi)))}" for g, d in zip(*curve))
+        f.add(f'<polyline points="{pts}" fill="none" stroke="{LIMIT}" stroke-width="1.4"/>')
+    elif sd > 0:
         grid = np.linspace(max(x_lo, mean - 4 * sd), min(x_hi, mean + 4 * sd), 120)
         pts = " ".join(f"{_num(f.X(g))},{_num(f.Y(norm.pdf(g, mean, sd) * n * bin_w))}" for g in grid)
         f.add(f'<polyline points="{pts}" fill="none" stroke="{LIMIT}" stroke-width="1.4"/>')
@@ -202,7 +215,8 @@ def run_chart(values, states, lsl, usl, target, labels: dict, width=W, height=26
     return f.render()
 
 
-def probability_plot(values, mean, sd, lsl, usl, labels: dict, width=430, height=300) -> str:
+def probability_plot(values, mean, sd, lsl, usl, labels: dict, width=430, height=300, dist=None) -> str:
+    """With `dist` the fitted line is the curve z = Phi^-1(F(x)) of that distribution (straight only for a normal one)."""
     x = np.sort(np.asarray(values, dtype=float))
     n = x.size
     pp = (np.arange(1, n + 1) - 0.375) / (n + 0.25)  # Blom plotting positions
@@ -216,7 +230,14 @@ def probability_plot(values, mean, sd, lsl, usl, labels: dict, width=430, height
         y_ticks=[float(norm.ppf(p / 100)) for p in ticks],
         y_text=lambda zz: f"{100 * norm.cdf(zz):.3g}",
     )
-    if sd > 0:
+    if dist is not None:
+        grid = np.linspace(x_lo, x_hi, 160)
+        with np.errstate(all="ignore"):
+            zz = norm.ppf(np.clip(np.asarray(dist.cdf(grid), dtype=float), 1e-12, 1 - 1e-12))
+        zz = np.clip(np.nan_to_num(zz, nan=0.0), -z_lim, z_lim)
+        pts = " ".join(f"{_num(f.X(g))},{_num(f.Y(zv))}" for g, zv in zip(grid, zz))
+        f.add(f'<polyline points="{pts}" fill="none" stroke="{LIMIT}" stroke-width="1.4"/>')
+    elif sd > 0:
         f.line(f.X(mean - z_lim * sd), f.Y(-z_lim), f.X(mean + z_lim * sd), f.Y(z_lim), LIMIT, 1.4)
     r = 2.4 if n <= 400 else 1.5
     for xi, zi in zip(x, z):

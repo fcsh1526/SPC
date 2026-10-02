@@ -36,6 +36,7 @@ The server listens on 127.0.0.1 only. To serve a team, put it behind an https pr
 | `spc.core.rules` | Stability criteria, each one switched on explicitly |
 | `spc.core.stability` | Analysis-chart stability decision |
 | `spc.core.capability` | Pm/Pmk, Pp/Ppk, Cp/Cpk, Cw/Cwk, .G / .Z, CI, PPM, naming gate, sample-size target adjustment |
+| `spc.core.distributions` | Fits for non-normal data (lognormal, Weibull, gamma, Johnson SU, Box-Cox, normal mixture, empirical), AIC ranking, seeded bootstrap interval |
 | `spc.core.arl_oc` | OC curve and ARL |
 | `spc.params` | All analysis parameters in one record, for archiving |
 | `spc.data.csv_io` | CSV import and export: Big5 / UTF-8, delimiter and decimal comma, all errors reported with line numbers, SHA-256 of the source file |
@@ -50,6 +51,14 @@ The server listens on 127.0.0.1 only. To serve a team, put it behind an https pr
 ## Web interface
 
 Sign in first. Steps: import a CSV (Big5 / UTF-8, columns chosen on a preview) → check data and mark outliers with a reason → run the analysis → read charts, index names, confidence intervals and targets. After an analysis, the report panel makes the 20+2 element report in either language. The Saved tab lists stored datasets and reports and opens them again. A tools tab holds the small-sample target calculator, the ARL / OC calculator and the archive check.
+
+## Non-normal data (.G and .Z)
+
+In the analysis form, choose a distribution (or "choose automatically") and a method. The indices are then named `Cpk.G` or `Ppk.Z` and come from the fitted distribution: `.G` from its 0.135 %, 50 % and 99.865 % quantiles, `.Z` from the shares outside the limits.
+- The result lists every candidate family with AIC and the Anderson-Darling statistic. These describe the fit and are not tests. A normal distribution within 2 AIC units of the best one wins the automatic choice. Check the choice against what you know about the process.
+- The interval is a percentile bootstrap (default 200 resamples, the same family fitted again). The seed is kept with the result, so the same data, settings and seed give the same interval. If the interval cannot be computed, a target is judged on the estimate alone and the result says so.
+- Few values (under 50) make the tail quantiles uncertain. The result warns about it. The empirical method needs 2000 values and supports only `.G`.
+- Through the API: `distribution`, `method`, `bootstrap_n` and `seed` in the analysis body. Results for a normal distribution (`distribution: "normal"`, the default) are unchanged.
 
 ## Report
 

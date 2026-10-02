@@ -5,8 +5,10 @@ user interface can show them in any language. Nothing here is translated.
 
 Assumptions of this version, stated in the result as warnings:
 
-* Capability indices assume a normal distribution. A normality test is run and reported. The
-  fitted-distribution methods (.G / .Z for non-normal data) are not available yet.
+* By default the indices assume a normal distribution (total standard deviation). A normality test is
+  run and reported. With `distribution` set, a distribution is fitted and the indices come from the
+  General Geometric method (.G, quantiles) or the z-score method (.Z, shares outside the limits). The
+  interval then comes from a seeded bootstrap. Results for a normal distribution stay as they were.
 * The time-dependent model (A1 .. D) is chosen by the user. It is not detected.
 """
 
@@ -31,8 +33,12 @@ from spc.core.capability import (
     within_indices,
 )
 from spc.core.capability.target import BASE_SAMPLE_SIZE
+from spc.core.capability.indices import geometric_indices, zscore_indices
 from spc.core.charts.variable import SubgroupChart, imr, xbar_r, xbar_s
 from spc.core.constants import ALPHA_3SIGMA
+from spc.core.distributions import (
+    FAMILIES, FitError, GaussianMixture, bootstrap_interval, choose_automatically, fit, fit_candidates, quantiles,
+)
 from spc.core.rules import RuleSet, evaluate
 from spc.core.stability import Stability, assess_analysis_chart, classify_stability
 from spc.data import Dataset
@@ -62,6 +68,10 @@ class AnalysisRequest:
     target_confidence: float = 0.9999
     incomplete: str = "drop"
     customer: str | None = None
+    distribution: str = "normal"  # "normal", "auto" or one of spc.core.distributions.FAMILIES
+    method: str = "G"  # "G" or "Z", used when the distribution is not normal
+    bootstrap_n: int = 200  # resamples for the interval of a non-normal index. 0 = no interval
+    seed: int = 20260701
 
 
 def rules_from_dict(data: dict[str, Any]) -> RuleSet:
@@ -138,7 +148,9 @@ def _chart_json(chart: SubgroupChart, loc_labels, var_labels, loc_pos, var_pos) 
 def _verdict(estimate: float | None, lower: float | None, target: float | None) -> str | None:
     if estimate is None or target is None:
         return None
-    if lower is not None and lower >= target:
+    if lower is None:  # no interval (non-normal index with the bootstrap off or failed): the estimate alone
+        return "meets_no_interval" if estimate >= target else "fails"
+    if lower >= target:
         return "meets"
     if estimate >= target:
         return "meets_estimate_only"  # estimate reaches the target, the lower confidence bound does not
@@ -152,6 +164,58 @@ class Outcome:
     result: dict
     values: np.ndarray  # values used in the calculation, in use order
     positions: np.ndarray  # dataset positions of those values
+    dist: object = None  # the fitted distribution when the indices are not the plain normal ones
+
+
+RANK_SAMPLE = 5000  # more values than this: the families are ranked on a random sample, the chosen one is fitted on all
+
+
+def _json_params(d: dict) -> dict:
+    return {k: ([_f(v) for v in val] if isinstance(val, list) else _f(val)) for k, val in d.items()}
+
+
+def _check_distribution_request(req: AnalysisRequest) -> None:
+    if req.distribution not in ("normal", "auto", *FAMILIES):
+        raise ValueError(f"distribution must be 'normal', 'auto' or one of {FAMILIES}")
+    if req.method not in ("G", "Z"):
+        raise ValueError("method must be 'G' or 'Z'")
+    if not 0 <= req.bootstrap_n <= 2000:
+        raise ValueError("bootstrap_n must be between 0 and 2000")
+    if req.distribution == "empirical" and req.method == "Z":
+        raise ValueError("the empirical distribution supports only method G")
+
+
+def _fit_distribution(x: np.ndarray, req: AnalysisRequest, warnings: list):
+    """(fitted distribution or None when the result is a normal one, description block)."""
+    try:
+        rank_x = x
+        if x.size > RANK_SAMPLE:
+            rank_x = np.random.default_rng(req.seed).choice(x, RANK_SAMPLE, replace=False)
+        families = tuple(f for f in FAMILIES if f != "empirical")
+        cands = fit_candidates(rank_x, families)
+        if req.distribution == "auto":
+            chosen = choose_automatically(cands)
+            family = chosen.family
+            components = len(chosen.dist.w) if isinstance(chosen.dist, GaussianMixture) else None
+        else:
+            family, components = req.distribution, None
+            chosen = next((c for c in cands if c.family == family), None)
+            if chosen is not None and not chosen.ok:
+                raise FitError(f"{family}: {chosen.reason}")
+        dist = fit(x, family, components=components)
+        quantiles(dist)
+    except FitError as exc:
+        raise ValueError(f"the distribution could not be fitted: {exc}") from None
+    if x.size < 50:
+        _warn(warnings, "fit_small_sample", n=int(x.size))
+    block = {
+        "requested": req.distribution, "name": family, "method": req.method, "params": _json_params(dist.describe()),
+        "ranked_on": int(rank_x.size),
+        "candidates": [{"family": c.family, "ok": c.ok, "k": c.k, "aic": _f(c.aic), "delta_aic": _f(c.delta_aic),
+                        "ad": _f(c.ad), "reason": c.reason} for c in cands],
+        "bootstrap": None,
+    }
+    return (None if family == "normal" else dist), block
 
 
 def analyze(dataset: Dataset, req: AnalysisRequest) -> dict:
@@ -163,6 +227,7 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
         raise ValueError(f"stage must be one of {STAGES}")
     if req.lsl is not None and req.usl is not None and not req.lsl < req.usl:
         raise ValueError("lsl must be below usl")
+    _check_distribution_request(req)
     params = AnalysisParams(
         alpha=req.alpha,
         estimate_confidence=req.estimate_confidence,
@@ -282,22 +347,43 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
 
     norm_res = _normality(x)
     result["normality"] = norm_res
-    if norm_res and norm_res["p_value"] is not None and norm_res["p_value"] < 0.05:
+    fitted, block = (None, None)
+    if req.distribution != "normal":
+        fitted, block = _fit_distribution(x, req, warnings)
+        result["distribution"] = block
+    elif norm_res and norm_res["p_value"] is not None and norm_res["p_value"] < 0.05:
         _warn(warnings, "non_normal", p_value=norm_res["p_value"], test=norm_res["test"])
 
-    idx = overall_indices(x, req.lsl, req.usl)
     mean, sd = float(x.mean()), float(x.std(ddof=1))
-    dist = norm(mean, sd)
-    ci_p = cp_confidence_interval(idx.p, idx.n, req.estimate_confidence) if idx.p is not None else None
-    ci_pk = cpk_confidence_interval(idx.pk, idx.n, req.estimate_confidence)
+    if fitted is None:
+        idx = overall_indices(x, req.lsl, req.usl)
+        dist = norm(mean, sd)
+        ci_p = cp_confidence_interval(idx.p, idx.n, req.estimate_confidence) if idx.p is not None else None
+        ci_pk = cpk_confidence_interval(idx.pk, idx.n, req.estimate_confidence)
+        method_text = "normal, total standard deviation"
+    else:
+        dist = fitted
+        index_fn = geometric_indices if req.method == "G" else zscore_indices
+        idx = replace(index_fn(dist, req.lsl, req.usl), n=int(x.size))
+        ci_p = ci_pk = None
+        if req.bootstrap_n:
+            bi = bootstrap_interval(x, dist, lambda d: index_fn(d, req.lsl, req.usl), req.bootstrap_n,
+                                    req.estimate_confidence, req.seed)
+            ci_p, ci_pk = bi.ci_p, bi.ci_pk
+            block["bootstrap"] = {"requested": bi.requested, "succeeded": bi.succeeded, "seed": req.seed,
+                                  "confidence": req.estimate_confidence}
+            if ci_pk is None:
+                _warn(warnings, "bootstrap_failed", succeeded=bi.succeeded, requested=bi.requested)
+        method_text = ("General Geometric (.G)" if req.method == "G" else "z-score (.Z)") + f", {block['name']}"
+    pair = lambda ci: None if ci is None else [_f(ci[0]), _f(ci[1])]
     result["indices"] = {
         "p": _f(idx.p), "pk": _f(idx.pk), "pu": _f(idx.pu), "pl": _f(idx.pl),
-        "ci_p": None if ci_p is None else [_f(ci_p[0]), _f(ci_p[1])],
-        "ci_pk": [_f(ci_pk[0]), _f(ci_pk[1])],
+        "ci_p": pair(ci_p),
+        "ci_pk": pair(ci_pk),
         "ci_confidence": req.estimate_confidence,
         "mean": _f(mean), "sd": _f(sd), "n": idx.n,
         "ppm": _f(ppm_out_of_spec(dist, req.lsl, req.usl)),
-        "method": "normal, total standard deviation",
+        "method": method_text,
     }
     if idx.p is None:
         _warn(warnings, "one_sided_no_p")
@@ -315,7 +401,7 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
             result["targets"] = {
                 "class": req.characteristic_class.lower(), "p": _f(t.p), "pk": _f(t.pk), "n_base": t.n_base,
                 "n": t.n, "adjusted": t.adjusted, "confidence": t.confidence, "edition": t.edition,
-                "verdict_pk": _verdict(idx.pk, ci_pk[0], t.pk),
+                "verdict_pk": _verdict(idx.pk, ci_pk[0] if ci_pk else None, t.pk),
                 "verdict_p": _verdict(idx.p, ci_p[0] if ci_p else None, t.p) if idx.p is not None else None,
                 "blocked": False,
             }
@@ -323,4 +409,4 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
             result["targets"] = {"class": req.characteristic_class.lower(), "blocked": True, "n": idx.n,
                                  "n_base": base}
             _warn(warnings, "target_not_allowed", n=idx.n, base=base)
-    return Outcome(result, x, np.asarray(positions))
+    return Outcome(result, x, np.asarray(positions), fitted)

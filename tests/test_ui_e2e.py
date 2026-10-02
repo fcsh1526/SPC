@@ -333,3 +333,59 @@ def test_a_new_user_must_change_the_password_before_anything_else(server, browse
     page.click("nav.tabs button[data-tab=tools]")
     expect(page.locator("#tab-tools")).to_be_visible()
     ctx.close()
+
+
+def test_fitted_distribution_in_the_browser(server, browser, tmp_path):
+    expect = playwright_sync.expect
+    rng = np.random.default_rng(3)
+    lines = ["lot,v"] + [f"L{i // 5 + 1},{9 + rng.lognormal(0, 0.4):.4f}" for i in range(125)]
+    path = tmp_path / "skew.csv"
+    path.write_text("\n".join(lines) + "\n")
+    ctx = browser.new_context(viewport={"width": 1200, "height": 900}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.set_input_files("#file", str(path))
+    page.select_option("#col-value", "v")
+    page.select_option("#col-subgroup", "lot")
+    page.click("#import-btn")
+    page.click("#to-analysis")
+    page.fill("#a-lsl", "8.5")
+    page.fill("#a-usl", "13")
+    page.select_option("#a-class", "major")
+    page.select_option("#a-model", "A2")
+
+    expect(page.locator("#a-method")).to_be_hidden()  # only for a non-normal distribution
+    expect(page.locator("#r-dist-block")).to_be_hidden()
+    page.click("#run-btn")
+    expect(page.locator("#r-normality")).to_contain_text("Normality test")
+    expect(page.locator("#r-dist-block")).to_be_hidden()
+
+    page.select_option("#a-dist", "lognormal")
+    expect(page.locator("#a-method")).to_be_visible()
+    page.fill("#a-boot", "40")
+    page.click("#run-btn")
+    expect(page.locator("#r-dist-block")).to_be_visible()
+    expect(page.locator("#r-dist-line")).to_contain_text("Lognormal (chosen by you) · method .G")
+    expect(page.locator("#r-names")).to_have_text("Cp and Cpk")
+    expect(page.locator("#r-indices")).to_contain_text("Cpk.G")
+    expect(page.locator("#r-targets")).to_contain_text("Cpk.G")
+    expect(page.locator("#r-dist-boot")).to_contain_text("seed 20260701")
+    assert page.locator("#r-dist-cands tr").count() == 8  # header and seven families
+
+    page.select_option("#a-dist", "empirical")  # needs 2000 values: a clear message, no crash
+    assert page.locator("#a-method option[value=Z]").evaluate("o => o.disabled")
+    page.click("#run-btn")
+    expect(page.locator("#errors")).to_contain_text("2000")
+    page.click("#errors button")
+
+    page.select_option("#a-dist", "auto")
+    page.select_option("#a-method", "Z")
+    page.select_option("#lang", "zh-TW")
+    page.click("#run-btn")
+    expect(page.locator("#r-dist-line")).to_contain_text("自動選擇")
+    expect(page.locator("#r-indices")).to_contain_text(".Z")
+    assert problems == [], problems
+    ctx.close()

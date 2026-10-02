@@ -115,6 +115,17 @@ def geometric_indices(dist, lsl=None, usl=None) -> CapabilityIndices:
     return geometric_from_quantiles(lsl, usl, float(dist.ppf(P_LOW)), float(dist.ppf(P_MID)), float(dist.ppf(P_HIGH)))
 
 
+Z_MAX = 37.0  # a share below about 1e-300 cannot be told from zero
+
+
+def _z_from_tail(tail) -> float:
+    """Distance in sigma for a tail share: z = -Phi^-1(share). Capped at Z_MAX when the share is 0."""
+    t = float(tail)
+    if not t > 0.0:
+        return Z_MAX
+    return min(Z_MAX, float(-norm.ppf(min(t, 1.0))))
+
+
 def zscore_indices(dist, lsl=None, usl=None) -> CapabilityIndices:
     """Exceedance proportion (z-Score / Bothe) method, index suffix .Z.
 
@@ -123,8 +134,9 @@ def zscore_indices(dist, lsl=None, usl=None) -> CapabilityIndices:
     """
     _limits(lsl, usl)
     # Both values are positive sigma distances to the limits: z_l = -z_L, z_u = z_U.
-    z_l = float(-norm.ppf(dist.cdf(lsl))) if lsl is not None else None
-    z_u = float(norm.ppf(dist.cdf(usl))) if usl is not None else None
+    # The tails are used directly (cdf below, sf above), so a share of 1e-20 does not turn into 0 or 1.
+    z_l = _z_from_tail(dist.cdf(lsl)) if lsl is not None else None
+    z_u = _z_from_tail(dist.sf(usl)) if usl is not None else None
     pl = z_l / 3.0 if z_l is not None else None
     pu = z_u / 3.0 if z_u is not None else None
     p = (z_l + z_u) / 6.0 if (z_l is not None and z_u is not None) else None

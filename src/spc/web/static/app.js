@@ -405,6 +405,12 @@
       },
     };
     if (alpha) body.alpha = Number(alpha);
+    body.distribution = $("#a-dist").value;
+    if (body.distribution !== "normal") {
+      body.method = $("#a-method").value;
+      body.bootstrap_n = Math.max(0, Math.min(2000, Math.round(Number($("#a-boot").value) || 0)));
+      body.seed = Math.max(0, Math.round(Number($("#a-seed").value) || 0));
+    }
     return body;
   }
   async function runAnalysis(ev) {
@@ -510,8 +516,8 @@
       table.replaceChildren();
       tableRow(table, [t("result.index_name"), t("result.index_value"), t("result.index_ci", { level: Math.round(ix.ci_confidence * 1000) / 10 + " %" })], true);
       const ci = (c) => (c ? `${fmt(c[0])} – ${fmt(c[1])}` : "–");
-      if (ix.p !== null) tableRow(table, [`${r.names.p} · ${t("result.index_p")}`, fmt(ix.p), ci(ix.ci_p)]);
-      tableRow(table, [`${r.names.pk} · ${t("result.index_pk")}`, fmt(ix.pk), ci(ix.ci_pk)]);
+      if (ix.p !== null) tableRow(table, [`${indexName(r, "p")} · ${t("result.index_p")}`, fmt(ix.p), ci(ix.ci_p)]);
+      tableRow(table, [`${indexName(r, "pk")} · ${t("result.index_pk")}`, fmt(ix.pk), ci(ix.ci_pk)]);
       if (ix.pu !== null) tableRow(table, [t("result.index_pu"), fmt(ix.pu), ""]);
       if (ix.pl !== null) tableRow(table, [t("result.index_pl"), fmt(ix.pl), ""]);
       $("#r-stats").textContent = `${t("result.mean")} ${sig(ix.mean)} · ${t("result.sd")} ${sig(ix.sd)} · n = ${ix.n}`;
@@ -520,6 +526,7 @@
         ? `${t("result.normality")}: ${t("result.normality_line", { test: r.normality.test, p: fmt(r.normality.p_value, 4) })}`
         : "";
     }
+    renderDistribution(r);
 
     const tb = $("#r-targets-block");
     tb.hidden = !r.targets;
@@ -531,8 +538,9 @@
       } else {
         tableRow(table, [t("result.index_name"), t("result.index_value"), t("result.index_ci", { level: Math.round(r.indices.ci_confidence * 1000) / 10 + " %" }), t("result.target_value"), t("result.verdict")], true);
         const verdict = (v) => t(v ? "result.verdict_" + v : "result.verdict_none");
-        if (r.indices.p !== null) tableRow(table, [r.names.p, fmt(r.indices.p), fmt(r.indices.ci_p[0]), fmt(tg.p), verdict(tg.verdict_p)]);
-        tableRow(table, [r.names.pk, fmt(r.indices.pk), fmt(r.indices.ci_pk[0]), fmt(tg.pk), verdict(tg.verdict_pk)]);
+        const lower = (c) => (c ? fmt(c[0]) : "–");
+        if (r.indices.p !== null) tableRow(table, [indexName(r, "p"), fmt(r.indices.p), lower(r.indices.ci_p), fmt(tg.p), verdict(tg.verdict_p)]);
+        tableRow(table, [indexName(r, "pk"), fmt(r.indices.pk), lower(r.indices.ci_pk), fmt(tg.pk), verdict(tg.verdict_pk)]);
         $("#r-target-note").textContent = t("result.target_base", { base: tg.n_base, n: tg.n }) + (tg.adjusted ? " " + t("result.target_adjusted") : "");
       }
     }
@@ -548,6 +556,32 @@
     $("#r-hash").textContent = r.source ? `${t("result.source_hash")}: ${r.source.sha256}` : "";
   }
 
+
+  // index name with the method suffix when the distribution is not normal: Ppk.G, Cp.Z
+  function indexName(r, key) {
+    const d = r.distribution;
+    return r.names[key] + (d && d.name !== "normal" ? "." + d.method : "");
+  }
+  function renderDistribution(r) {
+    const d = r.distribution, block = $("#r-dist-block");
+    block.hidden = !d;
+    if (!d) return;
+    const how = t(d.requested === "auto" ? "result.dist_how_auto" : "result.dist_how_manual");
+    $("#r-dist-line").textContent = t("result.dist_line", { name: t("dist." + d.name), how, method: d.method });
+    const fmtParam = (v) => (Array.isArray(v) ? "[" + v.map((x) => sig(x, 5)).join(", ") + "]" : sig(v, 5));
+    $("#r-dist-params").textContent = t("result.dist_params", { params: Object.entries(d.params).map(([k, v]) => `${k} = ${fmtParam(v)}`).join(" · ") });
+    $("#r-dist-boot").textContent = d.bootstrap
+      ? t(r.indices.ci_pk ? "result.dist_boot" : "result.dist_boot_failed", { used: d.bootstrap.succeeded, requested: d.bootstrap.requested, seed: d.bootstrap.seed })
+      : t("result.dist_no_boot");
+    const table = $("#r-dist-cands"); table.replaceChildren();
+    tableRow(table, [t("result.dist_cand_family"), t("result.dist_cand_aic"), t("result.dist_cand_delta"), t("result.dist_cand_ad"), ""], true);
+    d.candidates.forEach((c) => {
+      const row = c.ok ? [t("dist." + c.family), fmt(c.aic, 1), fmt(c.delta_aic, 1), fmt(c.ad, 2), c.family === d.name ? "◀" : ""]
+        : [t("dist." + c.family), "–", "–", "–", t("result.dist_failed")];
+      tableRow(table, row);
+    });
+    $("#r-dist-sample").textContent = r.counts.n_used > d.ranked_on ? t("result.dist_ranked_sample", { n: d.ranked_on }) : "";
+  }
 
   // ---------------------------------------------------------------- report and archive
   const REPORT_TEXT_FIELDS = ["process", "machine", "site", "process_ref", "machine_ref", "persons", "period_text",
@@ -840,6 +874,12 @@
   }
 
   // ---------------------------------------------------------------- wiring
+  function syncDistributionControls() {
+    const d = $("#a-dist").value, nonNormal = d !== "normal";
+    ["#a-method-wrap", "#a-boot-wrap", "#a-seed-wrap"].forEach((s) => { $(s).hidden = !nonNormal; });
+    if (d === "empirical") $("#a-method").value = "G";
+    $("#a-method option[value=Z]").disabled = d === "empirical";
+  }
   function rerender() {
     applyStatic();
     if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); refreshImportForm(); }
@@ -870,6 +910,8 @@
     $("#mark-btn").addEventListener("click", () => markOrRestore("mark"));
     $("#restore-btn").addEventListener("click", () => markOrRestore("restore"));
     $("#to-analysis").addEventListener("click", () => showTab("analysis"));
+    $("#a-dist").addEventListener("change", syncDistributionControls);
+    syncDistributionControls();
     $("#analysis-form").addEventListener("submit", runAnalysis);
     $("#t-btn").addEventListener("click", calcTargets);
     $("#l-btn").addEventListener("click", calcArl);

@@ -257,6 +257,33 @@
         <label><span data-i18n="analysis.customer"></span><input id="a-customer" type="text" maxlength="200"></label>
       </div>
     </details>
+    <fieldset>
+      <legend data-i18n="analysis.distribution_title"></legend>
+      <p class="note" data-i18n="analysis.distribution_hint"></p>
+      <div class="form-grid">
+        <label><span data-i18n="analysis.distribution"></span>
+          <select id="a-dist">
+            <option value="normal" data-i18n="dist.normal"></option>
+            <option value="auto" data-i18n="analysis.dist_auto"></option>
+            <option value="lognormal" data-i18n="dist.lognormal"></option>
+            <option value="weibull" data-i18n="dist.weibull"></option>
+            <option value="gamma" data-i18n="dist.gamma"></option>
+            <option value="johnson_su" data-i18n="dist.johnson_su"></option>
+            <option value="box_cox" data-i18n="dist.box_cox"></option>
+            <option value="mixture" data-i18n="dist.mixture"></option>
+            <option value="empirical" data-i18n="dist.empirical"></option>
+          </select></label>
+        <label id="a-method-wrap"><span data-i18n="analysis.method"></span>
+          <select id="a-method">
+            <option value="G" data-i18n="analysis.method_G"></option>
+            <option value="Z" data-i18n="analysis.method_Z"></option>
+          </select></label>
+        <label id="a-boot-wrap"><span data-i18n="analysis.bootstrap"></span>
+          <input id="a-boot" type="number" min="0" max="2000" step="1" value="200"></label>
+        <label id="a-seed-wrap"><span data-i18n="analysis.seed"></span>
+          <input id="a-seed" type="number" min="0" max="4294967295" step="1" value="20260701"></label>
+      </div>
+    </fieldset>
     <p><button id="run-btn" class="primary" type="submit" data-i18n="analysis.run"></button></p>
   </form>
 
@@ -282,6 +309,15 @@
       <p id="r-stats" class="muted"></p>
       <p id="r-ppm" class="strong"></p>
       <p id="r-normality" class="muted"></p>
+    </div>
+    <div id="r-dist-block" class="card" hidden>
+      <h3 data-i18n="result.dist_title"></h3>
+      <p id="r-dist-line" class="strong"></p>
+      <p id="r-dist-params" class="muted"></p>
+      <p id="r-dist-boot" class="muted"></p>
+      <div class="scroll"><table id="r-dist-cands" class="grid"></table></div>
+      <p class="note" data-i18n="result.dist_cand_note"></p>
+      <p id="r-dist-sample" class="muted"></p>
     </div>
     <div id="r-targets-block" hidden>
       <h3 data-i18n="result.targets_title"></h3>

@@ -103,13 +103,14 @@ def build_report(
     n = int(x.size)
     ix = r["indices"]
     mean, sd = ix["mean"], ix["sd"]
-    dist = norm(mean, sd)
+    dist = outcome.dist if outcome.dist is not None else norm(mean, sd)  # fitted distribution or the normal one
+    blk = r.get("distribution") if outcome.dist is not None else None
     conf = r["params"]["estimate_confidence"]
     level = f"{round(conf * 1000) / 10:g} %"
     lsl, usl = request.lsl, request.usl
     stage = r["stage"]
     names = r["names"]
-    suffix = ".G"  # for a normal distribution .G and .Z give the same result
+    suffix = f".{request.method}" if blk else ".G"  # for a normal distribution .G and .Z give the same result
     name_p, name_pk = names["p"] + suffix, names["pk"] + suffix
     stability = r["stability"]
     chart = r["chart"]
@@ -160,6 +161,7 @@ def build_report(
         "name_p": name_p, "name_pk": name_pk, "ppm_below": below, "ppm_above": above,
         "ppm_total": ix["ppm"], "guard": guard, "normality": r["normality"],
         "criteria": _rule_texts(lang, r["params"]["rules"]),
+        "dist": blk, "method": request.method,
     }
 
     # ---- figures
@@ -169,11 +171,14 @@ def build_report(
     for p in range(dataset.n_total):
         if all_states[p] == 0 and p not in used:
             all_states[p] = 2
+    fit_hist = L("fig.hist.fit_dist", name=L("v.dist_" + blk["name"])) if blk else L("fig.hist.fit")
+    fit_prob = L("fig.prob.fit_dist", name=L("v.dist_" + blk["name"])) if blk else L("fig.prob.fit")
     figures = {
         "hist": svg.histogram(
             x, lsl, usl, meta.target, mean, sd,
             {"title": L("fig.hist.title"), "x": L("fig.hist.x"), "y": L("fig.hist.y"), "target": L("fig.target"),
-             "bars": L("fig.hist.bars"), "fit": L("fig.hist.fit"), "spec": L("fig.hist.spec")},
+             "bars": L("fig.hist.bars"), "fit": fit_hist, "spec": L("fig.hist.spec")},
+            dist=outcome.dist,
         ),
         "run": svg.run_chart(
             dataset.values, all_states, lsl, usl, meta.target,
@@ -183,7 +188,8 @@ def build_report(
         "prob": svg.probability_plot(
             x, mean, sd, lsl, usl,
             {"title": L("fig.prob.title"), "x": L("fig.prob.x"), "y": L("fig.prob.y"), "data": L("fig.prob.data"),
-             "fit": L("fig.prob.fit")},
+             "fit": fit_prob},
+            dist=outcome.dist,
         ),
     }
     if stage != "machine":
@@ -201,6 +207,9 @@ def build_report(
         stage, "v.reason_stable" if stability["class"] in ("statistical_control", "in_control") else "v.reason_not_proven"
     )
     conclusions.append(L("c.names", p=name_p, pk=name_pk, reason=L(reason_key)))
+    if blk:
+        conclusions.append(L("c.fitted", name=L("v.dist_" + blk["name"]), method=request.method,
+                             how=L("v.how_auto" if blk["requested"] == "auto" else "v.how_manual")))
     tg = r["targets"]
     verdicts: list[str] = []
     if tg is None:
@@ -215,8 +224,10 @@ def build_report(
             if est is None or verdict is None:
                 continue
             verdicts.append(verdict)
-            key = {"meets": "c.met", "meets_estimate_only": "c.met_estimate", "fails": "c.fails"}[verdict]
-            conclusions.append(L(key, name=nm, value=f"{est:.2f}", target=f"{target:.2f}", level=level, lower=f"{ci[0]:.2f}"))
+            key = {"meets": "c.met", "meets_estimate_only": "c.met_estimate", "meets_no_interval": "c.met_no_interval",
+                   "fails": "c.fails"}[verdict]
+            conclusions.append(L(key, name=nm, value=f"{est:.2f}", target=f"{target:.2f}", level=level,
+                                 lower=f"{ci[0]:.2f}" if ci else "–"))
         if verdicts:
             conclusions.append(L("c.overall_met" if all(v == "meets" for v in verdicts) else "c.overall_not_met"))
     if stage == "machine":
@@ -226,8 +237,10 @@ def build_report(
         conclusions.append(L(f"c.stability_{cls}", model=request.model or ""))
         if stability["n_alarm_points"]:
             conclusions.append(L("c.alarms", n=stability["n_alarm_points"]))
+    if blk and ix["ci_pk"] is None:
+        conclusions.append(L("c.no_interval"))
     nm_ = r["normality"]
-    if nm_ and nm_["p_value"] is not None and nm_["p_value"] < 0.05:
+    if not blk and nm_ and nm_["p_value"] is not None and nm_["p_value"] < 0.05:
         conclusions.append(L("c.not_normal", p=f"{nm_['p_value']:.4f}"))
     if "sample_below_base" in warn_codes:
         conclusions.append(L("c.sample_small", n=warn_codes["sample_below_base"]["n"], base=warn_codes["sample_below_base"]["base"]))

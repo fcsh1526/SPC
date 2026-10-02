@@ -154,7 +154,7 @@ def render_html(rep: Report) -> str:
         (L("f.mean"), f"{_sig(f['mean'])}{unit}"),
         (ci, f"{_sig(f['mean_ci'][0])} – {_sig(f['mean_ci'][1])}{unit}"),
         (L("f.median"), f"{_sig(f['q_mid'])}{unit}"),
-        (L("f.method"), esc(L("v.mean_method"))),
+        (L("f.method"), esc(L("v.median_fitted" if f["dist"] else "v.mean_method"))),
     ])
     e16 = kv([
         (L("f.sd"), f"{_sig(f['sd'])}{unit}"),
@@ -165,7 +165,17 @@ def render_html(rep: Report) -> str:
         (L("f.method"), esc(L("v.sd_method"))),
     ])
     nm = f["normality"]
-    e17_rows = [(L("f.model"), esc(L("v.normal_assumed")))]
+    d = f["dist"]
+    if d:
+        params = "; ".join(f"{k} = {_sig(v, 5) if not isinstance(v, list) else '[' + ', '.join(_sig(x, 5) for x in v) + ']'}"
+                           for k, v in d["params"].items())
+        how = L("v.how_auto" if d["requested"] == "auto" else "v.how_manual")
+        e17_rows = [(L("f.model"), esc(L("v.fitted_model", name=L("v.dist_" + d["name"]), how=how, params=params)))]
+        chosen = next((c for c in d["candidates"] if c["family"] == d["name"] and c["ok"]), None)
+        if chosen:
+            e17_rows.append(("", esc(L("v.fit_quality", aic=_f(chosen["aic"], 1), ad=_f(chosen["ad"], 2)))))
+    else:
+        e17_rows = [(L("f.model"), esc(L("v.normal_assumed")))]
     if nm and nm["p_value"] is not None:
         e17_rows.append((L("f.normality"), esc(L("v.p_value", test=nm["test"], p=f"{nm['p_value']:.4f}"))))
     e17 = kv(e17_rows)
@@ -184,14 +194,19 @@ def render_html(rep: Report) -> str:
     else:
         rows18.append(("", esc(L("c.no_target"))))
     rows18.append((L("f.confidence_est"), esc(level)))
-    rows18.append((L("f.method"), esc(L("v.normal_total"))))
+    if d:
+        b = d["bootstrap"]
+        interval = L("v.interval_boot", used=b["succeeded"], requested=b["requested"], seed=b["seed"]) if b and ix["ci_pk"] else L("v.interval_none")
+        rows18.append((L("f.method"), esc(L("v.method_" + f["method"], interval=interval))))
+    else:
+        rows18.append((L("f.method"), esc(L("v.normal_total"))))
     e18 = kv(rows18)
 
     def idx_row(name, value, ci_, target, verdict) -> str:
         tcell = _f(target) if target is not None else "–"
         vcell = esc(L("v.verdict_" + verdict)) if verdict else esc(L("v.verdict_none"))
-        cls_ = {"meets": "ok", "meets_estimate_only": "warn", "fails": "bad"}.get(verdict or "", "")
-        return (f'<tr><td>{esc(name)}</td><td class="num">{_f(value)}</td><td class="num">{_f(ci_[0])} – {_f(ci_[1])}</td>'
+        cls_ = {"meets": "ok", "meets_estimate_only": "warn", "meets_no_interval": "warn", "fails": "bad"}.get(verdict or "", "")
+        return (f'<tr><td>{esc(name)}</td><td class="num">{_f(value)}</td><td class="num">{_f(ci_[0]) + " – " + _f(ci_[1]) if ci_ else "–"}</td>'
                 f'<td class="num">{tcell}</td><td class="{cls_}">{vcell}</td></tr>')
 
     ok_tg = tg and not tg.get("blocked")
