@@ -971,3 +971,66 @@ def test_short_run_and_multivariate_monitors_in_the_browser(server, browser, app
     expect(page.locator("#md-mv-note")).to_contain_text("多個特性")
     assert problems == [], problems
     ctx.close()
+
+
+def test_extended_limits_and_pearson_monitors_in_the_browser(server, browser, app):
+    expect = playwright_sync.expect
+    problems = []
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=monitor]")
+
+    def start(name, kind):
+        page.click("#mon-new")
+        page.fill("#me-name", name)
+        page.fill("#me-characteristic", "diameter")
+        page.select_option("#me-kind", kind)
+        page.locator("#me-ocap tr[data-key=default] input").nth(0).fill("Check the tool")
+        page.locator("#me-ocap tr[data-key=default] input").nth(1).fill("Setter")
+
+    start("Tool wear", "ext-xbar")
+    expect(page.locator("#me-warn-label")).to_be_hidden()
+    expect(page.locator("#me-sigma-out")).to_be_visible()
+    expect(page.locator("#me-skew")).to_be_hidden()
+    assert page.input_value("#me-n") == "5"
+    page.fill("#me-mu", "10")
+    page.fill("#me-sigma", "0.1")
+    page.fill("#me-sigma-out", "0.06")
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Tool wear")
+    page.click("#md-ack-btn")
+    for i, v in enumerate([10.15, 10.2, 10.17, 10.18, 10.2]):  # beyond a plain 3 sigma limit, inside the extended one
+        page.fill(f"#md-v{i}", str(v))
+    page.click("#md-submit")
+    expect(page.locator("#md-result .ok-box")).to_be_visible()
+    expect(page.locator("#md-chart-var")).to_be_visible()
+    page.locator("#md-limits").locator("xpath=ancestor::details").locator("summary").click()
+    expect(page.locator("#md-limits")).to_contain_text("Extended limits (Analysis of variance")
+    page.click("#mon-back")
+
+    start("Runout", "pearson")
+    assert page.input_value("#me-n") == "1"
+    expect(page.locator("#me-skew")).to_be_visible()
+    expect(page.locator("#me-sigma-out")).to_be_hidden()
+    page.fill("#me-mu", "4")
+    page.fill("#me-sigma", "2")
+    page.fill("#me-skew", "1")
+    page.fill("#me-kurt", "4.5")
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Runout")
+    page.click("#md-ack-btn")
+    page.fill("#md-v0", "9.5")  # 2.75 sigma above: inside the Pearson limit
+    page.click("#md-submit")
+    expect(page.locator("#md-result .ok-box")).to_be_visible()
+    page.fill("#md-v0", "13")
+    page.click("#md-submit")
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("OUT OF CONTROL")
+    page.locator("#md-limits").locator("xpath=ancestor::details").locator("summary").click()
+    expect(page.locator("#md-limits")).to_contain_text("curve III")
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#md-limits")).to_contain_text("偏度")
+    assert problems == [], problems
+    ctx.close()

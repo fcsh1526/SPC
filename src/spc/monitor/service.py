@@ -15,6 +15,7 @@ from spc.data import Dataset
 from spc.db.database import Database
 from spc.db.stores import DatasetStore, now_iso
 from spc.monitor.model import (
+    EXT_KIND, PEARSON_KIND, SHAPE_KINDS, extended_chart_limits, pearson_chart_limits, shape_base, ext,
     VECTOR_KINDS, ZMR_KIND, check_vector_point, estimate_reference, vector_limits, zmr_limits, zmr_z,
     ACCEPT_KINDS, ACTION_STEPS, SEQ_KINDS, check_sequential_point, ewma_band, sequential_limits, ATTRIBUTE_KINDS, EVENT_KINDS, PRE_KIND, PRE_QUALIFY, TOLERANCE_KINDS, acceptance_from_values,
     acceptance_limits, base_kind, check_pre_point, pre_statistic, pre_zone, precontrol_limits, OUTCOMES, STEPS, MonitorError, attribute_limits, band, check_attribute_point,
@@ -82,6 +83,8 @@ class MonitorService:
             return self._tolerance_limits_from(monitor, source)
         if kind in SEQ_KINDS:
             return self._sequential_limits_from(monitor, source)
+        if kind in SHAPE_KINDS:
+            return self._shape_limits_from(monitor, source)
         if kind == ZMR_KIND:
             return self._zmr_limits_from(monitor, source)
         if kind in VECTOR_KINDS:
@@ -165,6 +168,72 @@ class MonitorService:
         except ValueError as exc:
             raise MonitorError("bad_source", str(exc)) from None
         raise MonitorError("bad_source", "source.type must be parameters, dataset or points")
+
+    def _shape_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
+        """Extended Shewhart and Pearson charts: from given parameters, a data set or points of this monitor."""
+        kind, n, alpha = monitor["kind"], monitor["n"], monitor["alpha"]
+        typ = source.get("type")
+        method = source.get("method")
+        if method not in (None, "anova", "extremes", "pearson", "fitted") or (kind == EXT_KIND and method in ("pearson", "fitted")) \
+                or (kind == PEARSON_KIND and method in ("anova", "extremes")):
+            raise MonitorError("bad_source", "method must be anova or extremes (extended limits), pearson or fitted (Pearson chart)")
+
+        def number(key, required=False):
+            v = source.get(key)
+            if v is None and not required:
+                return None
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                raise MonitorError("bad_source", f"{key} must be a number")
+            return float(v)
+
+        try:
+            u_out = number("u_out")
+            if typ == "parameters":
+                mu, sigma = number("mu", True), number("sigma", True)
+                if kind == EXT_KIND:
+                    sigma_out = number("sigma_out", True)
+                    limits = extended_chart_limits(n, alpha, mu, sigma, sigma_out, u_out)
+                    return limits, {"type": "parameters", "mu": mu, "sigma": sigma, "sigma_out": sigma_out, "u_out": limits["design"]["u_out"]}
+                skew, kurt = number("skew", True), number("kurt", True)
+                within = number("sigma_within") or (sigma * math.sqrt(n) if n > 1 else sigma)
+                limits = pearson_chart_limits(n, alpha, mu, sigma, skew, kurt, within)
+                return limits, {"type": "parameters", "mu": mu, "sigma": sigma, "skew": skew, "kurt": kurt, "sigma_within": within}
+            if typ == "dataset":
+                ds = self.datasets.get(source.get("dataset_id", ""))
+                ref = ds.individuals()[0] if n == 1 else ds.subgroups(size=None if ds.subgroup is not None else n, incomplete="drop").matrix
+                name = ds.source.name if ds.source else ""
+                described = {"type": "dataset", "dataset_id": source["dataset_id"], "name": name, "n_values": int(np.size(ref))}
+            elif typ == "points":
+                lo, hi = source.get("seq_from"), source.get("seq_to")
+                if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (lo, hi)) or lo > hi:
+                    raise ValueError("seq_from and seq_to must be point numbers, seq_from <= seq_to")
+                pts = [p for p in self.store.points(monitor["id"], limit=100000, since_seq=lo) if p["seq"] <= hi and p["valid"]]
+                ref = [p["values"][0] for p in pts] if n == 1 else [p["values"] for p in pts]
+                described = {"type": "points", "seq_from": lo, "seq_to": hi, "n_points": len(pts)}
+            else:
+                raise ValueError("source.type must be parameters, dataset or points")
+            base_ref = limits_from_values(shape_base(kind, n), n, alpha, None, ref)  # within standard deviation and centre of the variation chart
+            center = base_ref["variation"]["cl"]
+            if kind == EXT_KIND:
+                mu, s_in, s_out, means = ext.within_between(ref)
+                if method == "extremes":
+                    mu_max, mu_min = ext.extremes(means)
+                    limits = extended_chart_limits(n, alpha, mu, s_in, s_out, u_out, mu_max, mu_min, center)
+                else:
+                    limits = extended_chart_limits(n, alpha, mu, s_in, s_out, u_out, None, None, center)
+                return limits, {**described, "method": limits["design"]["method"], "u_out": limits["design"]["u_out"]}
+            plotted = np.asarray(ref, dtype=float).mean(axis=1) if n > 1 else np.asarray(ref, dtype=float).ravel()
+            mean, s_plot, g1, b2 = ext.moments(plotted)
+            if method == "fitted":
+                fam = source.get("family")
+                limits = pearson_chart_limits(n, alpha, mean, s_plot, g1, b2, base_ref["sigma"], center, fitted=ext.fitted_limits(plotted, fam))
+            else:
+                limits = pearson_chart_limits(n, alpha, mean, s_plot, g1, b2, base_ref["sigma"], center)
+            return limits, {**described, "method": limits["design"]["method"]}
+        except ValueError as exc:
+            if isinstance(exc, MonitorError):
+                raise
+            raise MonitorError("bad_source", str(exc)) from None
 
     def _zmr_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
         """Short runs: a table of products, each with its target and standard deviation."""
@@ -365,7 +434,8 @@ class MonitorService:
             limits = self.store.limits(monitor_id)
             if limits is None:
                 raise MonitorError("no_limits", "this monitor has no limits yet", 409)
-            previous = self.store.previous_value(monitor_id) if base_kind(monitor["kind"]) == "imr" else None
+            previous = (self.store.previous_value(monitor_id)
+                        if base_kind(monitor["kind"]) == "imr" or (monitor["kind"] == PEARSON_KIND and monitor["n"] == 1) else None)
             if monitor["kind"] == ZMR_KIND:
                 z = zmr_z(limits, tags["part"], values[0])
                 loc, var = statistic("imr", [z], previous)
@@ -593,14 +663,15 @@ class MonitorService:
 
     def analysis_request(self, monitor: dict) -> AnalysisRequest:
         sp = monitor["specs"]
-        return AnalysisRequest(stage="production", chart=self._analysis_chart(monitor), lsl=sp["lsl"], usl=sp["usl"], alpha=monitor["alpha"],
+        return AnalysisRequest(stage="production", chart=self._analysis_chart(monitor),
+                               distribution="auto" if monitor["kind"] == PEARSON_KIND else "normal", lsl=sp["lsl"], usl=sp["usl"], alpha=monitor["alpha"],
                                rules=dict(monitor["rules"]), model=sp["model"], controlled_stable=sp["controlled_stable"],
                                characteristic_class=sp["target_class"], edition=sp["edition"], customer=monitor["name"])
 
     @staticmethod
     def _analysis_chart(monitor: dict) -> str:
         """The chart of the analysis that stands for the monitor in the ongoing report."""
-        if monitor["kind"] in SEQ_KINDS:
+        if monitor["kind"] in (*SEQ_KINDS, *SHAPE_KINDS):
             return "imr" if monitor["n"] == 1 else "xbar-s"
         return base_kind(monitor["kind"])
 
@@ -661,6 +732,8 @@ class MonitorService:
         alarm_points = sum(1 for p in pts if p["alarms"])
         expected = k * monitor["alpha"]
         base = base_kind(monitor["kind"])
+        if monitor["kind"] in SHAPE_KINDS:
+            base = "xbar-s" if monitor["n"] > 1 else "imr"
         if monitor["kind"] in SEQ_KINDS:  # the points hold the statistic of the chart, so spread and location come from the raw values
             from spc.core.constants import d2
             base = "xbar-s" if monitor["n"] > 1 else "imr"
@@ -680,9 +753,9 @@ class MonitorService:
             sigma = statistics.fmean(mrs) / d2(2) if mrs else float("nan")
         ratio = sigma / limits["sigma"] if limits["sigma"] and math.isfinite(sigma) else None
         loc = [statistics.fmean(p["values"]) for p in pts] if monitor["kind"] in SEQ_KINDS else [p["loc"] for p in pts]
-        se = limits["sigma"] * (cn(monitor["n"]) if base == "median-r" else 1.0) / math.sqrt(monitor["n"])
+        se = limits.get("sigma_plot") or limits["sigma"] * (cn(monitor["n"]) if base == "median-r" else 1.0) / math.sqrt(monitor["n"])
         # an acceptance chart lets the location move inside the tolerance: only the variation is reviewed
-        shift = None if not loc or monitor["kind"] in ACCEPT_KINDS else (statistics.fmean(loc) - limits["mu"]) / se
+        shift = None if not loc or monitor["kind"] in (*ACCEPT_KINDS, EXT_KIND) else (statistics.fmean(loc) - limits["mu"]) / se
         # the order matters: a shifted location also causes alarms, and lower variation limits catch good news
         if ratio is not None and ratio < 0.8:
             verdict = "too_wide"

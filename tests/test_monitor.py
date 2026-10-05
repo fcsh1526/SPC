@@ -936,3 +936,136 @@ def test_t2_limits_from_reference_observations_and_a_mewma_monitor(env):
     assert nxt["status"] != "alarm" and nxt["point"]["loc"] < 1.0
     too_few = {"type": "observations", "rows": rows[:10]}
     assert c["eng"].post("/api/monitors", json={"config": {"name": "few", "characteristic": "x", "kind": "t2"}, "source": too_few}).status_code == 400
+
+
+# ------------------------------------------------------------------ extended limits and Pearson charts
+
+def _standardised(d):
+    m, v, s, k = d.stats(moments="mvsk")
+    return float(s), float(k) + 3.0, lambda p: (d.ppf(p) - m) / math.sqrt(v)
+
+
+@pytest.mark.parametrize("name,dist,pearson_type", [
+    ("gamma", lambda: __import__("scipy.stats", fromlist=["x"]).gamma(2.5), "III"),
+    ("invgamma", lambda: __import__("scipy.stats", fromlist=["x"]).invgamma(7), "V"),
+    ("betaprime", lambda: __import__("scipy.stats", fromlist=["x"]).betaprime(3, 8), "VI"),
+    ("beta", lambda: __import__("scipy.stats", fromlist=["x"]).beta(2, 6), "I"),
+    ("beta-left", lambda: __import__("scipy.stats", fromlist=["x"]).beta(6, 2), "I"),
+    ("normal", lambda: __import__("scipy.stats", fromlist=["x"]).norm(), "normal"),
+])
+def test_the_pearson_curve_reproduces_the_distribution_that_has_its_moments(name, dist, pearson_type):
+    from spc.core.pearson import Pearson
+    g1, b2, q = _standardised(dist())
+    p = Pearson(g1, b2)
+    probs = [0.00135, 0.02275, 0.5, 0.97725, 0.99865]
+    assert p.type == pearson_type
+    assert np.allclose(p.ppf(probs), q(probs), atol=2e-4)
+    assert np.allclose(p.cdf(q(probs)), probs, atol=2e-5)
+
+
+def test_a_mirrored_pearson_curve_and_type_iv_have_the_moments_they_were_made_from():
+    import math as m
+    from scipy import integrate, stats
+    from spc.core.pearson import Pearson, PearsonError
+    g1, b2, q = _standardised(stats.invgamma(7))
+    right, left = Pearson(g1, b2), Pearson(-g1, b2)
+    assert left.type == "V" and np.allclose(left.ppf([0.001, 0.4, 0.99]), -right.ppf([0.999, 0.6, 0.01]))
+    for g, b in ((0.3, 4.5), (0.8, 6.0), (-1.5, 9.0), (0.0, 6.0)):
+        p = Pearson(g, b)
+        assert p.type == "IV"
+        u, w, f, total = p._iv
+        mom = lambda k: integrate.quad(lambda th: (u + w * m.tan(th)) ** k * f(th) / total, -m.pi / 2, m.pi / 2, limit=400)[0]
+        m1, m2, m3, m4 = mom(1), mom(2), mom(3), mom(4)
+        var = m2 - m1 ** 2
+        assert m1 == pytest.approx(0, abs=1e-6) and var == pytest.approx(1, abs=1e-6)
+        assert (m3 - 3 * m1 * m2 + 2 * m1 ** 3) / var ** 1.5 == pytest.approx(g, abs=1e-5)
+        assert (m4 - 4 * m1 * m3 + 6 * m1 ** 2 * m2 - 3 * m1 ** 4) / var ** 2 == pytest.approx(b, abs=1e-4)
+    for g, b in ((2.0, 3.5), (1.0, 1.5), (0.0, 1.0)):  # no such distribution
+        with pytest.raises(PearsonError):
+            Pearson(g, b)
+
+
+def test_the_pearson_chart_limits_are_the_tail_quantiles_of_the_skewed_distribution():
+    from scipy import stats
+    from spc.monitor.model import pearson_chart_limits
+    d = stats.gamma(4.0)  # mean 4, standard deviation 2, skewness 1, kurtosis 4.5: a type III curve
+    lim = pearson_chart_limits(1, ALPHA_3SIGMA, 4.0, 2.0, 1.0, 4.5, 2.0)
+    assert lim["location"]["ucl"] == pytest.approx(d.ppf(0.99865), rel=1e-4) and lim["location"]["lcl"] == pytest.approx(d.ppf(0.00135), rel=2e-3)
+    assert lim["design"]["curve"] == "III" and lim["location"]["cl"] == 4.0
+    assert lim["location"]["ucl"] - 4.0 > 2 * (4.0 - lim["location"]["lcl"])  # asymmetric: much more room above
+    rng = np.random.default_rng(6)
+    x = rng.gamma(4.0, 1.0, 400_000)
+    assert np.mean(x > lim["location"]["ucl"]) == pytest.approx(0.00135, rel=0.2) and np.mean(x < lim["location"]["lcl"]) == pytest.approx(0.00135, rel=0.3)
+    assert np.mean(x > 4.0 + 3 * 2.0) > 0.004  # a normal chart on the same data alarms much more often above
+
+
+def test_extended_limits_allow_for_the_moving_mean_and_equal_a_plain_chart_without_it():
+    from spc.core.charts.extended import extended_limits, within_between
+    from spc.monitor.model import extended_chart_limits
+    rng = np.random.default_rng(14)
+    k, n, s_in, s_out = 300, 5, 0.1, 0.06
+    data = 10.0 + rng.normal(0, s_out, (k, 1)) + rng.normal(0, s_in, (k, n))
+    mu, a, b, means = within_between(data)
+    assert a == pytest.approx(s_in, rel=0.05) and b == pytest.approx(s_out, rel=0.15) and mu == pytest.approx(10.0, abs=0.01)
+    wide = extended_chart_limits(n, ALPHA_3SIGMA, mu, a, b)
+    plain = compute_limits("xbar-s", n, ALPHA_3SIGMA, None, mu, a)
+    fresh = 10.0 + rng.normal(0, s_out, (100_000, 1)) + rng.normal(0, s_in, (100_000, n))
+    m = fresh.mean(axis=1)
+    out = lambda lim: np.mean((m > lim["location"]["ucl"]) | (m < lim["location"]["lcl"]))
+    assert out(plain) > 0.05 and out(wide) < out(plain) / 8  # the plain chart cries wolf all the time
+    assert wide["location"]["ucl"] == pytest.approx(mu + 3 * a / math.sqrt(n) + 1.5 * b, rel=1e-3)
+    assert wide["variation"] == plain["variation"]
+    assert extended_limits(n, ALPHA_3SIGMA, 10.0, 0.1, 0.0)["ucl"] == pytest.approx(compute_limits("xbar-s", n, ALPHA_3SIGMA, None, 10.0, 0.1)["location"]["ucl"], rel=1e-4)
+    ext = extended_chart_limits(n, ALPHA_3SIGMA, mu, a, b, 1.5, 10.2, 9.8)  # the 3 largest / smallest means
+    assert ext["location"]["ucl"] == pytest.approx(10.2 + 3 * a / math.sqrt(n), rel=1e-3) and ext["design"]["method"] == "extremes"
+    with pytest.raises(ValueError):
+        extended_chart_limits(n, ALPHA_3SIGMA, 10.0, 0.1, 0.05, 9.0)
+
+
+def test_shape_chart_configurations():
+    base = {"name": "x", "characteristic": "y"}
+    assert validate_config({**base, "kind": "ext-xbar", "n": 4})["n"] == 4
+    assert validate_config({**base, "kind": "pearson", "n": 1})["n"] == 1
+    for bad in ({"kind": "ext-xbar", "n": 1}, {"kind": "pearson", "n": 30}, {"kind": "pearson", "n": 1, "warn_alpha": 0.05},
+                {"kind": "ext-xbar", "n": 3, "rules": {"middle_third": True}}, {"kind": "pearson", "n": 1, "rules": {"two_of_three_beyond_2s": True}}):
+        with pytest.raises(ValueError):
+            validate_config({**base, **bad})
+    assert validate_config({**base, "kind": "pearson", "n": 1, "rules": {"run_length": 7}})["rules"]["run_length"] == 7
+
+
+def test_an_extended_limits_monitor_and_a_pearson_monitor_end_to_end(env):
+    app, c = env
+    cfg = {"name": "Tool wear", "characteristic": "diameter", "kind": "ext-xbar", "n": 5}
+    mid = make_monitor(c["eng"], cfg, {"type": "parameters", "mu": 10.0, "sigma": 0.1, "sigma_out": 0.06})
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    assert lim["location"]["ucl"] == pytest.approx(10.0 + 3 * 0.1 / math.sqrt(5) + 1.5 * 0.06, rel=1e-3) and lim["design"]["method"] == "anova"
+    ack(c["oper"], mid)
+    assert enter(c["oper"], mid, [10.15, 10.2, 10.17, 10.18, 10.2])["status"] == "ok"  # a plain chart would have stopped here
+    assert enter(c["oper"], mid, [10.4, 10.42, 10.38, 10.41, 10.4])["status"] == "alarm"
+    # new limits from points of the monitor itself (40 subgroups entered below), with the other estimate of the draft
+    rng = np.random.default_rng(1)
+    for _ in range(40):
+        enter(c["oper"], mid, [float(v) for v in 10.0 + rng.normal(0, 0.05) + rng.normal(0, 0.1, 5)])
+    r = c["eng"].post(f"/api/monitors/{mid}/limits", json={"source": {"type": "points", "seq_from": 3, "seq_to": 42, "method": "extremes"},
+                                                           "reason": "re-estimate"})
+    assert r.status_code == 200, r.text
+    new = r.json()["limits"]
+    assert new["design"]["method"] == "extremes" and new["design"]["sigma_out"] > 0.02 and new["revision"] == 2
+    assert c["eng"].post(f"/api/monitors/{mid}/limits", json={"source": {"type": "parameters", "mu": 10, "sigma": 0.1, "sigma_out": 0.05, "method": "pearson"},
+                                                              "reason": "x"}).status_code == 400
+
+    pc = make_monitor(c["eng"], {"name": "Runout", "characteristic": "runout", "kind": "pearson", "n": 1, "specs": {"lsl": -2.0, "usl": 14.0}},
+                      {"type": "parameters", "mu": 4.0, "sigma": 2.0, "skew": 1.0, "kurt": 4.5})
+    plim = c["eng"].get(f"/api/monitors/{pc}").json()["limits"]
+    assert plim["design"]["curve"] == "III" and plim["location"]["ucl"] - 4 > 2 * (4 - plim["location"]["lcl"])
+    ack(c["oper"], pc)
+    assert enter(c["oper"], pc, [9.5])["status"] == "ok"  # +2.75 sigma: a normal chart would be at its limit, here there is room
+    assert enter(c["oper"], pc, [plim["location"]["ucl"] + 0.5])["status"] == "alarm"
+    for _ in range(14):
+        enter(c["oper"], pc, [float(rng.gamma(4.0))])
+    rep = c["eng"].get(f"/api/monitors/{pc}/ongoing?window=20")
+    assert rep.status_code == 200 and rep.json()["result"]["distribution"]["requested"] == "auto"
+    obs = {"type": "dataset", "dataset_id": "none"}
+    assert c["eng"].post("/api/monitors", json={"config": {"name": "ghost", "characteristic": "g", "kind": "pearson", "n": 1}, "source": obs}).status_code in (400, 404)
+    assert c["eng"].post("/api/monitors", json={"config": {"name": "bad", "characteristic": "g", "kind": "pearson", "n": 1},
+                                                "source": {"type": "parameters", "mu": 0, "sigma": 1, "skew": 3.0, "kurt": 2.0}}).status_code == 400

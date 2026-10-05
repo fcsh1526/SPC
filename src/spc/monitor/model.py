@@ -21,6 +21,7 @@ import numpy as np
 from scipy.stats import chi2
 
 from spc.core.charts.attribute import exact_limits
+from spc.core.charts import extended as ext
 from spc.core.charts import multivariate as mv
 from spc.core.charts.sequential import arl_table, cusum_h, cusum_step, ewma_half_width, ewma_l
 from spc.core.charts.variable import imr, median_r, xbar_r, xbar_s
@@ -45,7 +46,12 @@ ZMR_KIND = "zmr"
 VECTOR_KINDS = ("t2", "mewma")
 MAX_PARTS = 500
 BASE_KIND["zmr"] = "imr"
-KINDS = (*SUBGROUP_KINDS, "imr", *ATTRIBUTE_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS, ZMR_KIND, *VECTOR_KINDS)
+# charts for processes that are not plain normal and stable (draft 10.3.5.2 Pearson, 10.3.5.3 extended limits): the limits
+# are not mean +- u sigma, so only the criteria that do not use sigma zones apply (limits, runs, trends)
+EXT_KIND = "ext-xbar"
+PEARSON_KIND = "pearson"
+SHAPE_KINDS = (EXT_KIND, PEARSON_KIND)
+KINDS = (*SUBGROUP_KINDS, "imr", *ATTRIBUTE_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS, ZMR_KIND, *VECTOR_KINDS, *SHAPE_KINDS)
 PRE_RULES = ("pre_red", "pre_two_yellow_same_side", "pre_two_yellow_opposite")
 ACCEPT_DEFAULTS = {"accept_p": 0.01, "accept_pa": 0.99}  # draft 10.3.4: 1 % out of tolerance is detected with 99 %
 PRE_QUALIFY = 5  # consecutive parts in the green zone before a run is released (classical pre-control)
@@ -122,6 +128,10 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         raise ValueError("the median chart is defined for subgroup sizes 2 to 10")
     if kind in ("p", "np", "u") and not 1 <= n <= MAX_COUNT_SIZE:
         raise ValueError(f"n (the usual sample size) must be between 1 and {MAX_COUNT_SIZE}")
+    if kind == EXT_KIND and not 2 <= n <= MAX_N:
+        raise ValueError(f"n must be between 2 and {MAX_N}: the extended limits need the variation between subgroups")
+    if kind == PEARSON_KIND and not 1 <= n <= MAX_N:
+        raise ValueError(f"n must be between 1 and {MAX_N}")
     if kind in VECTOR_KINDS and not 1 <= n <= 10:
         raise ValueError("n, the number of observations of the characteristics in a sample, must be between 1 and 10")
     if kind in SEQ_KINDS and not 1 <= n <= MAX_N:
@@ -132,7 +142,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 1):
             raise ValueError(f"{key} must be between 0 and 1")
         out[key] = None if v is None else float(v)
-    if kind in (*TOLERANCE_KINDS, *SEQ_KINDS, *VECTOR_KINDS) and out["warn_alpha"] is not None:
+    if kind in (*TOLERANCE_KINDS, *SEQ_KINDS, *VECTOR_KINDS, *SHAPE_KINDS) and out["warn_alpha"] is not None:
         raise ValueError("this chart has no warning limits")
     if out["warn_alpha"] is not None and not out["warn_alpha"] > out["alpha"]:
         raise ValueError("warn_alpha must be larger than alpha: warning limits lie inside the control limits")
@@ -140,10 +150,10 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         out["rules"] = RuleSet(**(d.get("rules") or {})).__dict__.copy()
     except TypeError as exc:
         raise ValueError(f"rules: {exc}") from None
-    if kind in ATTRIBUTE_KINDS:
+    if kind in (*ATTRIBUTE_KINDS, *SHAPE_KINDS):
         extra = [name for name in RULE_NAMES if name not in ATTRIBUTE_RULES and out["rules"].get(name)]
         if extra:
-            raise ValueError(f"for counts only the control limits, runs and trends apply (not {extra}): the distribution is not normal")
+            raise ValueError(f"only the control limits, runs and trends apply here (not {extra}): the limits are not mean +- u sigma, so sigma zones mean nothing")
     if kind in (*TOLERANCE_KINDS, *SEQ_KINDS, *VECTOR_KINDS):
         extra = [name for name in ("run_length", "trend_length", "middle_third", "two_of_three_beyond_2s", "four_of_five_beyond_1s",
                                    "fifteen_within_1s") if out["rules"].get(name)]
@@ -473,6 +483,38 @@ def check_vector_point(kind: str, limits: Mapping, m: int, earlier, values) -> t
     return loc, alarms, []
 
 
+# ---- extended limits and Pearson. The plotted statistic is the subgroup mean (the value itself for n = 1); the variation chart is
+#      the s chart (MR chart for n = 1) with the within standard deviation. `sigma` of the limits is that within standard deviation.
+
+def shape_base(kind: str, n: int) -> str:
+    return "imr" if n == 1 else "xbar-s"
+
+
+def extended_chart_limits(n: int, alpha: float, mu: float, sigma_in: float, sigma_out: float, u_out: float | None = None,
+                          mu_max: float | None = None, mu_min: float | None = None, var_center: float | None = None) -> dict:
+    u_out = ext.U_OUT_DEFAULT if u_out is None else u_out
+    out = compute_limits("xbar-s", n, alpha, None, mu, sigma_in, var_center)
+    loc = ext.extended_limits(n, alpha, mu, sigma_in, sigma_out, u_out, mu_max, mu_min)
+    out["location"] = {"lcl": loc["lcl"], "cl": loc["cl"], "ucl": loc["ucl"]}
+    out["design"] = {"method": "extremes" if mu_max is not None else "anova", "u_in": loc["u_in"], "u_out": float(u_out),
+                     "sigma_in": float(sigma_in), "sigma_out": float(sigma_out), "mu_max": mu_max, "mu_min": mu_min}
+    return out
+
+
+def pearson_chart_limits(n: int, alpha: float, mean: float, s_plot: float, g1: float, b2: float, sigma_within: float,
+                         var_center: float | None = None, fitted: dict | None = None) -> dict:
+    out = compute_limits(shape_base("pearson", n), n, alpha, None, mean, sigma_within, var_center)
+    if fitted is not None:
+        loc, design = fitted, {"method": "fitted", "family": fitted["family"]}
+    else:
+        loc, design = ext.pearson_limits(mean, s_plot, g1, b2), {"method": "pearson", "curve": None}
+        design["curve"] = loc["type"]
+    out["location"] = {"lcl": loc["lcl"], "cl": loc["cl"], "ucl": loc["ucl"]}
+    out["design"] = {**design, "gamma1": float(g1), "beta2": float(b2), "sigma_plot": float(s_plot)}
+    out["sigma_plot"] = float(s_plot)
+    return out
+
+
 # ---- attribute charts (draft 10.3.6): exact binomial and Poisson limits, one chart, no variation chart
 
 def _center_in_plot_units(kind: str, n: int, rate: float) -> float:
@@ -534,7 +576,7 @@ def check_values(config: Mapping, values) -> list[float]:
                 isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values):
             raise MonitorError("wrong_value_count", "give finite numbers: m rows of one value per characteristic")
         return [float(v) for v in values]
-    need = 2 if kind in ("p", "u") else (n if kind in (*SUBGROUP_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS) else 1)
+    need = 2 if kind in ("p", "u") else (n if kind in (*SUBGROUP_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS, *SHAPE_KINDS) else 1)
     if not isinstance(values, (list, tuple)) or len(values) != need or not all(
             isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values):
         raise MonitorError("wrong_value_count", f"this monitor takes {need} value(s) per sample", need=need, n=need)
@@ -563,6 +605,8 @@ def statistic(kind: str, values, previous: float | None) -> tuple[float, float |
         raise ValueError("measured values must be finite numbers")
     if kind == PRE_KIND:  # the part that lies furthest from the middle of the tolerance is the one that is plotted
         raise ValueError("use pre_statistic")
+    if kind in SHAPE_KINDS:
+        kind = "imr" if x.size == 1 else "xbar-s"
     kind = base_kind(kind)
     if kind in ("p", "u"):
         return float(x[0] / x[1]), None

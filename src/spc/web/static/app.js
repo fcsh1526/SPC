@@ -1035,11 +1035,37 @@
   const SEQ_KINDS = ["cusum", "ewma"];
   const SEQ_RULES = ["shift_up", "shift_down"];
   const isTol = (kind) => ACC_KINDS.includes(kind) || kind === "pre";
-  const BASE_KIND = { "acc-xbar": "xbar-s", "acc-median": "median-r", "acc-x": "imr", zmr: "imr" };
+  const BASE_KIND = { "acc-xbar": "xbar-s", "acc-median": "median-r", "acc-x": "imr", zmr: "imr", "ext-xbar": "xbar-s" };
+  const SHAPE_KINDS = ["ext-xbar", "pearson"];
   const VEC_KINDS = ["t2", "mewma"];
   const isVec = (kind) => VEC_KINDS.includes(kind);
   const lines = (text) => text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== "");
   const numbers = (text) => text.split(/[\s,;]+/).filter((x) => x !== "").map(Number);
+  // the extra settings of the extended limits and the Pearson chart, from the fields with the prefix "me" or "nl"
+  function shapeExtra(prefix, kind, type) {
+    const num = (id) => { const v = $(`#${prefix}-${id}`).value.trim(); return v === "" ? null : Number(v); };
+    if (kind === "ext-xbar") {
+      return type === "parameters" ? { sigma_out: num("sigma-out"), u_out: num("u-out") } : { method: $(`#${prefix}-ext-method`).value, u_out: num("u-out") };
+    }
+    if (kind === "pearson") {
+      if (type !== "parameters") return { method: $(`#${prefix}-pear-method`).value };
+      const out = { skew: num("skew"), kurt: num("kurt") };
+      if (num("sigma-within") !== null) out.sigma_within = num("sigma-within");
+      return out;
+    }
+    return {};
+  }
+  function syncShapeFields(prefix, kind, type) {
+    const shape = SHAPE_KINDS.includes(kind);
+    $$(`.${prefix}-shape`).forEach((e) => {
+      const rightKind = e.classList.contains(`${prefix}-ext`) ? kind === "ext-xbar" : e.classList.contains(`${prefix}-pear`) ? kind === "pearson" : true;
+      const rightSource = e.classList.contains(`${prefix}-par`) || e.classList.contains(`${prefix}-data`)
+        ? (type === "parameters" ? e.classList.contains(`${prefix}-par`) : (type === "dataset" || type === "points") && e.classList.contains(`${prefix}-data`)) : true;
+      e.hidden = !(shape && rightKind && rightSource);
+    });
+    const note = $(`#${prefix}-shape-note`);
+    if (shape) note.textContent = t(kind === "pearson" ? "mon.shape_note_pearson" : "mon.shape_note_ext");
+  }
   function partsSource(text) {  // one product per line: code; target; standard deviation
     return { type: "parts", parts: lines(text).map((l) => { const tk = l.split(/[;,\t]/).map((x) => x.trim()); return { code: tk.slice(0, -2).join(","), mu: Number(tk[tk.length - 2]), sigma: Number(tk[tk.length - 1]) }; }) };
   }
@@ -1050,10 +1076,10 @@
     if (type === "observations") src.rows = lines(rows).map(numbers);
     return src;
   }
-  const baseKind = (kind) => BASE_KIND[kind] || kind;
+  const baseKind = (kind, n) => (kind === "pearson" ? (n === 1 ? "imr" : "xbar-s") : BASE_KIND[kind] || kind);
   const PRE_RULES = ["pre_red", "pre_two_yellow_same_side", "pre_two_yellow_opposite"];
   // which rules, and which sources of limits, fit a kind of monitor
-  const rulesOf = (kind) => (isVec(kind) ? ["beyond_limits"] : SEQ_KINDS.includes(kind) ? SEQ_RULES : isCount(kind) ? COUNT_RULES : ACC_KINDS.includes(kind) ? ["beyond_limits"] : kind === "pre" ? PRE_RULES : RULES);
+  const rulesOf = (kind) => (isVec(kind) ? ["beyond_limits"] : SEQ_KINDS.includes(kind) ? SEQ_RULES : isCount(kind) || SHAPE_KINDS.includes(kind) ? COUNT_RULES : ACC_KINDS.includes(kind) ? ["beyond_limits"] : kind === "pre" ? PRE_RULES : RULES);
   const SOURCES = (kind) => (isVec(kind) ? ["parameters", "observations"] : kind === "zmr" ? ["parts"] : isCount(kind) ? ["rate", "counts"] : kind === "pre" ? ["tolerance"] : ["parameters", "dataset"]);
   const parseList = (text) => text.split(/[\s,;]+/).filter((x) => x !== "").map(Number);
   const RULES = ["beyond_limits", "run", "trend", "middle_third", "two_of_three_beyond_2s", "four_of_five_beyond_1s", "fifteen_within_1s"];
@@ -1227,7 +1253,7 @@
     const m = M.view.monitor;
     const loc = monitorPart("loc"), vr = isCount(m.kind) || m.kind === "pre" || SEQ_KINDS.includes(m.kind) || isVec(m.kind) ? null : monitorPart("var");
     const draw = (sel, part, title) => { if (part.values.length) drawChart($(sel), part, title); else $(sel).replaceChildren(el("p", "muted", t("mon.no_points"))); };
-    const b = baseKind(m.kind);
+    const b = baseKind(m.kind, m.n);
     draw("#md-chart-loc", loc, isCount(m.kind) || m.kind === "pre" || SEQ_KINDS.includes(m.kind) || isVec(m.kind) ? t("result.kind_" + m.kind)
       : `${t("result.chart_location")} – ${t(b === "imr" ? "result.series_location_imr" : b === "median-r" ? "result.series_location_median" : "result.series_location_xbar")}`);
     if (vr) draw("#md-chart-var", vr, `${t("result.chart_variation")} – ${t("result.series_variation_" + b)}`);
@@ -1377,6 +1403,12 @@
       if (!lim.acceptance) box.appendChild(el("p", "", t("mon.limits_now", { rev: lim.revision, mu: sig(lim.mu, 6), sigma: sig(lim.sigma, 5) })));
       box.appendChild(el("p", "", row(t("result.chart_location"), lim.location)));
       box.appendChild(el("p", "", row(t("result.chart_variation"), lim.variation)));
+      if (SHAPE_KINDS.includes(v.monitor.kind) && lim.design) {
+        const d = lim.design;
+        box.appendChild(el("p", "muted", v.monitor.kind === "ext-xbar"
+          ? t("mon.limits_ext", { method: t("mon.ext_method_" + d.method), sin: sig(d.sigma_in, 5), sout: sig(d.sigma_out, 5), uin: sig(d.u_in, 4), uout: sig(d.u_out, 3) })
+          : t("mon.limits_pearson", { method: t("mon.pear_method_" + d.method), g1: sig(d.gamma1, 3), b2: sig(d.beta2, 3), s: sig(d.sigma_plot, 5), curve: d.curve || d.family })));
+      }
     }
     const table = el("table", "grid"), head = el("tr");
     ["mon.rev", "mon.col_time", "mon.col_by", "mon.source", "mon.reason"].forEach((k) => cell(head, t(k), "th")); table.appendChild(head);
@@ -1397,6 +1429,7 @@
     const kind = M.view.monitor.kind;
     if (SEQ_KINDS.includes(kind) && type !== "rate") Object.assign(source, kind === "cusum" ? { k: num("#nl-k"), fir: num("#nl-fir") } : { lambda: num("#nl-lambda") });
     if (kind === "mewma") source.lambda = num("#nl-lambda");
+    if (SHAPE_KINDS.includes(kind)) Object.assign(source, shapeExtra("nl", kind, type));
     await guarded(async () => {
       M.view = await post(`/api/monitors/${M.id}/limits`, { source, reason: $("#nl-reason").value });
       $("#nl-reason").value = ""; renderMonitor();
@@ -1415,6 +1448,7 @@
       const ok = SOURCES(M.view.monitor.kind).concat(M.view.monitor.kind === "pre" || M.view.monitor.kind === "zmr" ? [] : ["points"]);
       Array.from($("#nl-type").options).forEach((o) => { o.hidden = o.disabled = !ok.includes(o.value); });
       const vec = isVec(M.view.monitor.kind);
+      syncShapeFields("nl", M.view.monitor.kind, type);
       $$(".nl-parameters").forEach((e) => { e.hidden = type !== "parameters" || vec; });
       $$(".nl-mv").forEach((e) => { e.hidden = !(vec && type === "parameters"); });
       $$(".nl-obs").forEach((e) => { e.hidden = !(vec && type === "observations"); });
@@ -1519,7 +1553,8 @@
     if (kind === "imr" || kind === "c" || kind === "acc-x") $("#me-n").value = 1;
     else if (kind === "pre") $("#me-n").value = 2;
     else if (count) { if (!($("#me-n").dataset.kind && isCount($("#me-n").dataset.kind))) $("#me-n").value = 50; }
-    else if (Number($("#me-n").value) < 2 || Number($("#me-n").value) > (kind === "xbar-s" || kind === "acc-xbar" ? 25 : 10)) $("#me-n").value = 5;
+    else if (kind === "pearson") { if ($("#me-n").dataset.kind !== "pearson") $("#me-n").value = 1; }
+    else if (Number($("#me-n").value) < 2 || Number($("#me-n").value) > (kind === "xbar-s" || kind === "acc-xbar" || kind === "ext-xbar" ? 25 : 10)) $("#me-n").value = 5;
     if ((SEQ_KINDS.includes(kind) && !SEQ_KINDS.includes($("#me-n").dataset.kind || "")) || kind === "zmr"
       || (isVec(kind) && !isVec($("#me-n").dataset.kind || ""))) $("#me-n").value = 1;  // individual values unless asked otherwise
     $("#me-n").dataset.kind = kind;
@@ -1527,7 +1562,7 @@
     if (!$("#me-kind").disabled) $("#me-n").disabled = kind === "imr" || kind === "c" || kind === "acc-x" || kind === "pre" || kind === "zmr";
     if (isVec(kind)) $("#me-n-label").textContent = t("mon.f_m");
     const tol = isTol(kind);
-    $("#me-warn-label").hidden = tol || SEQ_KINDS.includes(kind) || isVec(kind); if (tol || SEQ_KINDS.includes(kind) || isVec(kind)) $("#me-warn").value = "";
+    $("#me-warn-label").hidden = tol || SEQ_KINDS.includes(kind) || isVec(kind) || SHAPE_KINDS.includes(kind); if (tol || SEQ_KINDS.includes(kind) || isVec(kind) || SHAPE_KINDS.includes(kind)) $("#me-warn").value = "";
     $("#me-accept-box").hidden = !ACC_KINDS.includes(kind);
     const seq = SEQ_KINDS.includes(kind);
     $("#me-seq-box").hidden = !(seq || kind === "mewma"); $("#me-k-label").hidden = $("#me-fir-label").hidden = kind !== "cusum"; $("#me-lambda-label").hidden = !(kind === "ewma" || kind === "mewma");
@@ -1539,7 +1574,8 @@
     $("#me-specs-box").hidden = count || kind === "zmr" || isVec(kind);
     if (SEQ_KINDS.includes(kind) && Number($("#me-n").value) > 25) $("#me-n").value = 1;
     const vec = isVec(kind);
-    $$(".mon-r-normal").forEach((e) => { e.hidden = count || tol || seq || vec; if (count || tol || seq || vec) $("input", e).checked = false; });
+    const shape = SHAPE_KINDS.includes(kind);
+    $$(".mon-r-normal").forEach((e) => { e.hidden = count || tol || seq || vec || shape; if (count || tol || seq || vec || shape) $("input", e).checked = false; });
     $$("#me-ocap tr[data-key]").forEach((tr) => { tr.hidden = tr.dataset.key !== "default" && !rulesOf(kind).includes(tr.dataset.key); });
     // sources that fit the kind
     const okSources = SOURCES(kind);
@@ -1550,6 +1586,7 @@
   function syncEditorSource() {
     const type = $("#me-src-type").value, kind = $("#me-kind").value;
     const vec = isVec(kind);
+    syncShapeFields("me", kind, type);
     $("#me-src-dataset").hidden = type !== "dataset"; $("#me-src-parameters").hidden = type !== "parameters" || vec;
     $("#me-mv-box").hidden = !(vec && type === "parameters"); $("#me-src-rows").hidden = type !== "observations";
     $("#me-src-parts").hidden = type !== "parts";
@@ -1561,7 +1598,7 @@
   function readMonitorEditor() {
     const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
     const editing = M.editing !== "new" ? M.view.monitor : null;
-    const warn = editing ? editing.warn_alpha : isTol($("#me-kind").value) || SEQ_KINDS.includes($("#me-kind").value) || isVec($("#me-kind").value) ? null : num("#me-warn");
+    const warn = editing ? editing.warn_alpha : isTol($("#me-kind").value) || SEQ_KINDS.includes($("#me-kind").value) || isVec($("#me-kind").value) || SHAPE_KINDS.includes($("#me-kind").value) ? null : num("#me-warn");
     const config = {
       name: $("#me-name").value, process: $("#me-process").value, characteristic: $("#me-characteristic").value, unit: $("#me-unit").value, line: $("#me-line").value,
       kind: editing ? editing.kind : $("#me-kind").value, n: editing ? editing.n : Number($("#me-n").value), warn_alpha: warn,
@@ -1586,6 +1623,7 @@
         if (SEQ_KINDS.includes(config.kind) && type === "parameters" || SEQ_KINDS.includes(config.kind) && type === "dataset") {
           Object.assign(source, config.kind === "cusum" ? { k: Number($("#me-k").value), fir: Number($("#me-fir").value) } : { lambda: Number($("#me-lambda").value) });
         }
+        if (SHAPE_KINDS.includes(config.kind) && (type === "parameters" || type === "dataset")) Object.assign(source, shapeExtra("me", config.kind, type));
         M.view = await post("/api/monitors", { config, source });
       } else {
         M.view = await api(`/api/monitors/${M.editing}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config }) });

@@ -499,6 +499,8 @@
           <option value="zmr" data-i18n="analysis.chart_zmr"></option>
           <option value="t2" data-i18n="analysis.chart_t2"></option>
           <option value="mewma" data-i18n="analysis.chart_mewma"></option>
+          <option value="ext-xbar" data-i18n="analysis.chart_ext-xbar"></option>
+          <option value="pearson" data-i18n="analysis.chart_pearson"></option>
         </select></label>
       <label><span data-i18n="mon.f_n" id="me-n-label"></span><input id="me-n" type="number" min="1" max="1000000" step="1" value="5"></label>
       <label><span data-i18n="mon.f_alpha"></span>
@@ -525,6 +527,18 @@
         <label class="wide"><span data-i18n="mon.mv_cov"></span><textarea id="me-mv-cov" rows="3"></textarea></label>
       </div>
       <label id="me-src-rows" class="wide" hidden><span data-i18n="mon.src_observations_rows"></span><textarea id="me-mv-rows" rows="5"></textarea></label>
+      <div id="me-shape-box" class="form-grid">
+      <p class="note me-shape" hidden id="me-shape-note"></p>
+      <label class="me-shape me-ext me-par" hidden><span data-i18n="mon.f_sigma_out"></span><input id="me-sigma-out" type="number" step="any" min="0"></label>
+      <label class="me-shape me-ext me-par me-data" hidden><span data-i18n="mon.f_u_out"></span><input id="me-u-out" type="number" step="any" min="0.1" max="4" value="1.5"></label>
+      <label class="me-shape me-ext me-data" hidden><span data-i18n="mon.f_ext_method"></span>
+        <select id="me-ext-method"><option value="anova" data-i18n="mon.ext_method_anova"></option><option value="extremes" data-i18n="mon.ext_method_extremes"></option></select></label>
+      <label class="me-shape me-pear me-par" hidden><span data-i18n="mon.f_skew"></span><input id="me-skew" type="number" step="any"></label>
+      <label class="me-shape me-pear me-par" hidden><span data-i18n="mon.f_kurt"></span><input id="me-kurt" type="number" step="any"></label>
+      <label class="me-shape me-pear me-par" hidden><span data-i18n="mon.f_sigma_within"></span><input id="me-sigma-within" type="number" step="any" min="0"></label>
+      <label class="me-shape me-pear me-data" hidden><span data-i18n="mon.f_pear_method"></span>
+        <select id="me-pear-method"><option value="pearson" data-i18n="mon.pear_method_pearson"></option><option value="fitted" data-i18n="mon.pear_method_fitted"></option></select></label>
+      </div>
       <div id="me-seq-box" class="form-grid" hidden>
         <label id="me-k-label"><span data-i18n="mon.f_cusum_k"></span><input id="me-k" type="number" min="0.05" max="3" step="any" value="0.5"></label>
         <label id="me-fir-label"><span data-i18n="mon.f_cusum_fir"></span><input id="me-fir" type="number" min="0" max="0.95" step="any" value="0"></label>
@@ -675,6 +689,16 @@
               <option value="parts" data-i18n="mon.src_parts"></option>
               <option value="observations" data-i18n="mon.src_observations"></option>
             </select></label>
+          <p class="note nl-shape" hidden id="nl-shape-note"></p>
+          <label class="nl-shape nl-ext nl-par" hidden><span data-i18n="mon.f_sigma_out"></span><input id="nl-sigma-out" type="number" step="any" min="0"></label>
+          <label class="nl-shape nl-ext nl-par nl-data" hidden><span data-i18n="mon.f_u_out"></span><input id="nl-u-out" type="number" step="any" min="0.1" max="4" value="1.5"></label>
+          <label class="nl-shape nl-ext nl-data" hidden><span data-i18n="mon.f_ext_method"></span>
+            <select id="nl-ext-method"><option value="anova" data-i18n="mon.ext_method_anova"></option><option value="extremes" data-i18n="mon.ext_method_extremes"></option></select></label>
+          <label class="nl-shape nl-pear nl-par" hidden><span data-i18n="mon.f_skew"></span><input id="nl-skew" type="number" step="any"></label>
+          <label class="nl-shape nl-pear nl-par" hidden><span data-i18n="mon.f_kurt"></span><input id="nl-kurt" type="number" step="any"></label>
+          <label class="nl-shape nl-pear nl-par" hidden><span data-i18n="mon.f_sigma_within"></span><input id="nl-sigma-within" type="number" step="any" min="0"></label>
+          <label class="nl-shape nl-pear nl-data" hidden><span data-i18n="mon.f_pear_method"></span>
+            <select id="nl-pear-method"><option value="pearson" data-i18n="mon.pear_method_pearson"></option><option value="fitted" data-i18n="mon.pear_method_fitted"></option></select></label>
           <label class="nl-seq nl-cusum" hidden><span data-i18n="mon.f_cusum_k"></span><input id="nl-k" type="number" min="0.05" max="3" step="any" value="0.5"></label>
           <label class="nl-seq nl-cusum" hidden><span data-i18n="mon.f_cusum_fir"></span><input id="nl-fir" type="number" min="0" max="0.95" step="any" value="0"></label>
           <label class="nl-seq nl-ewma nl-mewma" hidden><span data-i18n="mon.f_ewma_lambda"></span><input id="nl-lambda" type="number" min="0.02" max="1" step="any" value="0.2"></label>
