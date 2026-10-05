@@ -27,7 +27,21 @@ from spc.core.rules import RuleSet, evaluate
 
 SUBGROUP_KINDS = ("xbar-s", "xbar-r", "median-r")
 ATTRIBUTE_KINDS = ("p", "np", "c", "u")
-KINDS = (*SUBGROUP_KINDS, "imr", *ATTRIBUTE_KINDS)
+# tolerance related charts (draft 10.3.4 acceptance chart, 10.3.2.7 pre-control chart). They are named after the
+# variation chart that goes with them: the acceptance chart needs a stable variation, so it is watched as well.
+ACCEPT_KINDS = ("acc-xbar", "acc-median", "acc-x")
+PRE_KIND = "pre"
+TOLERANCE_KINDS = (*ACCEPT_KINDS, PRE_KIND)
+BASE_KIND = {"acc-xbar": "xbar-s", "acc-median": "median-r", "acc-x": "imr"}
+KINDS = (*SUBGROUP_KINDS, "imr", *ATTRIBUTE_KINDS, *ACCEPT_KINDS, PRE_KIND)
+PRE_RULES = ("pre_red", "pre_two_yellow_same_side", "pre_two_yellow_opposite")
+ACCEPT_DEFAULTS = {"accept_p": 0.01, "accept_pa": 0.99}  # draft 10.3.4: 1 % out of tolerance is detected with 99 %
+PRE_QUALIFY = 5  # consecutive parts in the green zone before a run is released (classical pre-control)
+
+
+def base_kind(kind: str) -> str:
+    """The kind of chart that computes the statistics of a monitor (the acceptance charts use those of the Shewhart charts)."""
+    return BASE_KIND.get(kind, kind)
 ATTRIBUTE_RULES = ("beyond_limits", "run", "trend")  # the criteria that make sense for counts: no sigma, no middle third
 MAX_COUNT_SIZE = 1_000_000
 STEPS = ("resample", "adjust_parameters", "verify_sample", "adjust_elements", "root_cause", "containment", "other")
@@ -81,16 +95,18 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         raise ValueError(f"kind must be one of {KINDS}")
     out["kind"] = d["kind"]
     kind = d["kind"]
-    n = d.get("n", 1 if kind in ("imr", "c") else None)
+    n = d.get("n", 1 if kind in ("imr", "c", "acc-x") else (2 if kind == PRE_KIND else None))
     if isinstance(n, bool) or not isinstance(n, int):
         raise ValueError("n must be a whole number")
-    if kind in ("imr", "c") and n != 1:
+    if kind in ("imr", "c", "acc-x") and n != 1:
         raise ValueError("this monitor takes one value per sample (a count per inspection unit, or an individual value): n must be 1")
-    if kind in SUBGROUP_KINDS and not 2 <= n <= MAX_N:
+    if kind == PRE_KIND and n != 2:
+        raise ValueError("a pre-control sample is two consecutive parts: n must be 2")
+    if kind in (*SUBGROUP_KINDS, "acc-xbar", "acc-median") and not 2 <= n <= MAX_N:
         raise ValueError(f"n must be between 2 and {MAX_N} for a subgroup chart")
     if kind == "xbar-r" and n >= 10:
         raise ValueError("the range chart is meant for subgroup sizes below 10")
-    if kind == "median-r" and n > 10:
+    if kind in ("median-r", "acc-median") and n > 10:
         raise ValueError("the median chart is defined for subgroup sizes 2 to 10")
     if kind in ("p", "np", "u") and not 1 <= n <= MAX_COUNT_SIZE:
         raise ValueError(f"n (the usual sample size) must be between 1 and {MAX_COUNT_SIZE}")
@@ -100,6 +116,8 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 1):
             raise ValueError(f"{key} must be between 0 and 1")
         out[key] = None if v is None else float(v)
+    if kind in TOLERANCE_KINDS and out["warn_alpha"] is not None:
+        raise ValueError("a tolerance related chart has no warning limits")
     if out["warn_alpha"] is not None and not out["warn_alpha"] > out["alpha"]:
         raise ValueError("warn_alpha must be larger than alpha: warning limits lie inside the control limits")
     try:
@@ -110,8 +128,13 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         extra = [name for name in RULE_NAMES if name not in ATTRIBUTE_RULES and out["rules"].get(name)]
         if extra:
             raise ValueError(f"for counts only the control limits, runs and trends apply (not {extra}): the distribution is not normal")
+    if kind in TOLERANCE_KINDS:
+        extra = [name for name in ("run_length", "trend_length", "middle_third", "two_of_three_beyond_2s", "four_of_five_beyond_1s",
+                                   "fifteen_within_1s") if out["rules"].get(name)]
+        if not out["rules"].get("beyond_limits") or extra:
+            raise ValueError("a tolerance related chart signals only when a limit is crossed: the zone criteria do not apply")
     specs = dict(d.get("specs") or {})
-    if set(specs) - {"lsl", "usl", "target_class", "model", "controlled_stable", "edition"}:
+    if set(specs) - {"lsl", "usl", "target_class", "model", "controlled_stable", "edition", "accept_p", "accept_pa"}:
         raise ValueError("specs: unknown setting(s)")
     for key in ("lsl", "usl"):
         if specs.get(key) is not None and (isinstance(specs[key], bool) or not isinstance(specs[key], (int, float)) or not math.isfinite(specs[key])):
@@ -129,11 +152,21 @@ def validate_config(data: Mapping[str, Any]) -> dict:
     out["specs"] = {"lsl": specs.get("lsl"), "usl": specs.get("usl"), "target_class": specs.get("target_class"),
                     "model": specs.get("model"), "controlled_stable": bool(specs.get("controlled_stable", False)),
                     "edition": specs.get("edition", "draft")}
+    if kind in TOLERANCE_KINDS and (specs.get("lsl") is None or specs.get("usl") is None):
+        raise ValueError("a tolerance related chart needs both specification limits")
+    if kind in ACCEPT_KINDS:
+        for key, lo, hi in (("accept_p", 0.0, 0.5), ("accept_pa", 0.5, 1.0)):
+            v = specs.get(key, ACCEPT_DEFAULTS[key])
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo < v < hi:
+                raise ValueError(f"specs.{key} must be between {lo} and {hi}")
+            out["specs"][key] = float(v)
+    elif any(specs.get(k) is not None for k in ("accept_p", "accept_pa")):
+        raise ValueError("specs.accept_p and accept_pa belong to the acceptance chart")
     ocap = dict(d.get("ocap") or {})
     if set(ocap) - {"default", "rules"}:
         raise ValueError("ocap: unknown setting(s)")
     rules = dict(ocap.get("rules") or {})
-    bad = [r for r in rules if r not in RULE_NAMES]
+    bad = [r for r in rules if r not in RULE_NAMES and r not in PRE_RULES]
     if bad:
         raise ValueError(f"ocap.rules: unknown criteria {bad}")
     out["ocap"] = {"default": _step_config(ocap.get("default"), "ocap.default"),
@@ -196,6 +229,80 @@ def limits_from_values(kind: str, n: int, alpha: float, warn_alpha: float | None
     return compute_limits(kind, n, alpha, warn_alpha, chart.mu_hat, chart.sigma_hat, chart.variation.center)
 
 
+# ---- acceptance chart (draft 10.3.4): the limits sit inside the tolerance, so that the accepted fraction out of tolerance p
+#      is detected with the probability P_A
+
+def acceptance_factor(kind: str, n: int, p: float, pa: float) -> float:
+    """k_A = u(1-p) + u(PA)/sqrt(n) for the mean, k_C = u(1-p) + c_n u(PA)/sqrt(n) for the median.
+    For individual values (n = 1) the printed k_E = u(1-p) + u(PA^(1/n)) equals k_A."""
+    from scipy.stats import norm
+    c = cn(n) if kind == "acc-median" else 1.0
+    return float(norm.ppf(1.0 - p) + c * norm.ppf(pa) / math.sqrt(n))
+
+
+def acceptance_limits(kind: str, n: int, alpha: float, lsl: float, usl: float, p: float, pa: float, sigma: float,
+                      var_center: float | None = None) -> dict:
+    """UCL = U - k sigma, LCL = L + k sigma, centre line = the target (middle of the tolerance). sigma is the within
+    variation: the root of the mean variance (mean chart), R-bar/d_n (median chart), MR-bar/d2 (individual values)."""
+    if not sigma > 0:
+        raise ValueError("the standard deviation of the reference must be positive")
+    k = acceptance_factor(kind, n, p, pa)
+    tol, target = usl - lsl, (usl + lsl) / 2.0
+    lcl, ucl = lsl + k * sigma, usl - k * sigma
+    if not lcl < ucl:
+        raise ValueError("the variation is too large for the tolerance: the acceptance limits would cross. Reduce the variation first")
+    out = compute_limits(base_kind(kind), n, alpha, None, target, sigma, var_center)
+    out["location"] = {"lcl": lcl, "cl": target, "ucl": ucl}
+    out["acceptance"] = {"k": k, "p": p, "pa": pa, "lsl": lsl, "usl": usl, "tolerance": tol, "sigma_over_tolerance": sigma / tol,
+                         "variation_small_enough": bool(sigma <= tol / 10.0)}  # the draft expects sigma <= T / 10
+    return out
+
+
+def acceptance_from_values(kind: str, n: int, alpha: float, specs: Mapping, matrix) -> dict:
+    """Acceptance limits with the within variation of reference data."""
+    ref = limits_from_values(base_kind(kind), n, alpha, None, matrix)
+    return acceptance_limits(kind, n, alpha, specs["lsl"], specs["usl"], specs["accept_p"], specs["accept_pa"], ref["sigma"],
+                             ref["variation"]["cl"])
+
+
+# ---- pre-control chart (draft 10.3.2.7: "a simple division of the tolerance, usually into three zones").
+#      The draft gives no rules. These are the classical ones: green = the middle half of the tolerance, yellow = the
+#      outer quarters, red = outside. Only for monitoring a start-up, never to control a process.
+
+def precontrol_limits(lsl: float, usl: float) -> dict:
+    tol = usl - lsl
+    if not tol > 0:
+        raise ValueError("the tolerance must be positive")
+    return {"mu": (lsl + usl) / 2.0, "sigma": None, "alpha": None, "warn_alpha": None, "lsl": lsl, "usl": usl, "tolerance": tol,
+            "location": {"lcl": lsl, "cl": (lsl + usl) / 2.0, "ucl": usl, "wlcl": lsl + tol / 4.0, "wucl": usl - tol / 4.0}}
+
+
+def pre_zone(limits: Mapping, x: float) -> str:
+    """'red', 'yellow_low', 'yellow_high' or 'green'. A value on a tolerance limit is still yellow."""
+    loc = limits["location"]
+    if x < loc["lcl"] or x > loc["ucl"]:
+        return "red"
+    if x < loc["wlcl"]:
+        return "yellow_low"
+    if x > loc["wucl"]:
+        return "yellow_high"
+    return "green"
+
+
+def check_pre_point(limits: Mapping, values) -> tuple[list, list]:
+    """A red part: stop. Two yellow parts on the same side: the location moved, adjust. Two yellow on opposite sides: the
+    variation grew. One yellow part only warns."""
+    zones = [pre_zone(limits, v) for v in values]
+    alarms, warnings = [], []
+    if "red" in zones:
+        alarms.append({"chart": "location", "rule": "pre_red"})
+    elif all(z.startswith("yellow") for z in zones):
+        alarms.append({"chart": "location", "rule": "pre_two_yellow_same_side" if len(set(zones)) == 1 else "pre_two_yellow_opposite"})
+    elif any(z.startswith("yellow") for z in zones):
+        warnings.append({"chart": "location", "rule": "yellow_zone"})
+    return alarms, warnings
+
+
 # ---- attribute charts (draft 10.3.6): exact binomial and Poisson limits, one chart, no variation chart
 
 def _center_in_plot_units(kind: str, n: int, rate: float) -> float:
@@ -252,7 +359,7 @@ def limits_from_counts(kind: str, n: int, alpha: float, warn_alpha: float | None
 def check_values(config: Mapping, values) -> list[float]:
     """The measured values of one sample, checked for the kind of monitor. Returns them as floats."""
     kind, n = config["kind"], config["n"]
-    need = 2 if kind in ("p", "u") else (n if kind in SUBGROUP_KINDS else 1)
+    need = 2 if kind in ("p", "u") else (n if kind in (*SUBGROUP_KINDS, *ACCEPT_KINDS, PRE_KIND) else 1)
     if not isinstance(values, (list, tuple)) or len(values) != need or not all(
             isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values):
         raise MonitorError("wrong_value_count", f"this monitor takes {need} value(s) per sample", need=need, n=need)
@@ -279,6 +386,9 @@ def statistic(kind: str, values, previous: float | None) -> tuple[float, float |
     x = np.asarray(values, dtype=float)
     if not np.all(np.isfinite(x)):
         raise ValueError("measured values must be finite numbers")
+    if kind == PRE_KIND:  # the part that lies furthest from the middle of the tolerance is the one that is plotted
+        raise ValueError("use pre_statistic")
+    kind = base_kind(kind)
     if kind in ("p", "u"):
         return float(x[0] / x[1]), None
     if kind in ("np", "c"):
@@ -290,6 +400,11 @@ def statistic(kind: str, values, previous: float | None) -> tuple[float, float |
     if kind == "median-r":
         return float(np.median(x)), float(x.max() - x.min())
     return float(x.mean()), float(x.max() - x.min())
+
+
+def pre_statistic(limits: Mapping, values) -> float:
+    mid = limits["location"]["cl"]
+    return float(max(values, key=lambda v: abs(v - mid)))
 
 
 def check_attribute_point(config: Mapping, limits: Mapping, history, loc: float, size: float | None):

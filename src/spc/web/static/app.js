@@ -1023,8 +1023,17 @@
   const COUNT_KINDS = ["p", "np", "c", "u"];
   const isCount = (kind) => COUNT_KINDS.includes(kind);
   const COUNT_RULES = ["beyond_limits", "run", "trend"];
+  const ACC_KINDS = ["acc-xbar", "acc-median", "acc-x"];
+  const isTol = (kind) => ACC_KINDS.includes(kind) || kind === "pre";
+  const BASE_KIND = { "acc-xbar": "xbar-s", "acc-median": "median-r", "acc-x": "imr" };
+  const baseKind = (kind) => BASE_KIND[kind] || kind;
+  const PRE_RULES = ["pre_red", "pre_two_yellow_same_side", "pre_two_yellow_opposite"];
+  // which rules, and which sources of limits, fit a kind of monitor
+  const rulesOf = (kind) => (isCount(kind) ? COUNT_RULES : ACC_KINDS.includes(kind) ? ["beyond_limits"] : kind === "pre" ? PRE_RULES : RULES);
+  const SOURCES = (kind) => (isCount(kind) ? ["rate", "counts"] : kind === "pre" ? ["tolerance"] : ["parameters", "dataset"]);
   const parseList = (text) => text.split(/[\s,;]+/).filter((x) => x !== "").map(Number);
   const RULES = ["beyond_limits", "run", "trend", "middle_third", "two_of_three_beyond_2s", "four_of_five_beyond_1s", "fifteen_within_1s"];
+  const ALL_RULES = RULES.concat(PRE_RULES);
   const showMonitorView = (which) => {
     ["#mon-list-view", "#mon-editor", "#mon-detail"].forEach((sel) => { $(sel).hidden = sel !== which; });
   };
@@ -1121,9 +1130,14 @@
       }
     }
     $("#md-entry-card").hidden = !m.active;
-    $("#md-chart-var").hidden = isCount(m.kind);
-    $("#md-no-spec").hidden = isCount(m.kind);
-    $("#md-ongoing-box").hidden = isCount(m.kind);
+    $("#md-chart-var").hidden = isCount(m.kind) || m.kind === "pre";
+    $("#md-no-spec").hidden = isCount(m.kind) || isTol(m.kind);
+    $("#md-ongoing-box").hidden = isCount(m.kind) || m.kind === "pre";
+    $("#md-pre-note").hidden = m.kind !== "pre";
+    const q = v.qualification;
+    $("#md-qual").hidden = !q;
+    if (q) { $("#md-qual").textContent = t(q.qualified ? "mon.qualified" : "mon.not_qualified", { greens: q.greens, needed: q.needed });
+      $("#md-qual").className = "strong " + (q.qualified ? "status-ok" : "status-warning"); }
     renderMonitorResult();
     drawMonitorCharts();
     renderMonitorPoints();
@@ -1168,11 +1182,12 @@
   }
   function drawMonitorCharts() {
     const m = M.view.monitor;
-    const loc = monitorPart("loc"), vr = isCount(m.kind) ? null : monitorPart("var");
+    const loc = monitorPart("loc"), vr = isCount(m.kind) || m.kind === "pre" ? null : monitorPart("var");
     const draw = (sel, part, title) => { if (part.values.length) drawChart($(sel), part, title); else $(sel).replaceChildren(el("p", "muted", t("mon.no_points"))); };
-    draw("#md-chart-loc", loc, isCount(m.kind) ? t("result.kind_" + m.kind)
-      : `${t("result.chart_location")} – ${t(m.kind === "imr" ? "result.series_location_imr" : m.kind === "median-r" ? "result.series_location_median" : "result.series_location_xbar")}`);
-    if (vr) draw("#md-chart-var", vr, `${t("result.chart_variation")} – ${t("result.series_variation_" + m.kind)}`);
+    const b = baseKind(m.kind);
+    draw("#md-chart-loc", loc, isCount(m.kind) || m.kind === "pre" ? t("result.kind_" + m.kind)
+      : `${t("result.chart_location")} – ${t(b === "imr" ? "result.series_location_imr" : b === "median-r" ? "result.series_location_median" : "result.series_location_xbar")}`);
+    if (vr) draw("#md-chart-var", vr, `${t("result.chart_variation")} – ${t("result.series_variation_" + b)}`);
   }
   function statusOf(p) {
     if (!p.valid) return [t("mon.status_invalid"), ""];
@@ -1262,6 +1277,8 @@
   function sourceText(s) {
     if (s.type === "dataset") return t("mon.src_text_dataset", { name: s.name || s.dataset_id, n: s.n_values });
     if (s.type === "points") return t("mon.src_text_points", { from: s.seq_from, to: s.seq_to, n: s.n_points });
+    if (s.type === "tolerance") return t("mon.src_text_tolerance", { lsl: sig(s.lsl, 6), usl: sig(s.usl, 6) });
+    if (s.type === "parameters" && s.mu === undefined) return t("mon.src_text_sigma", { sigma: sig(s.sigma, 5) });
     if (s.type === "rate") return t("mon.src_text_rate", { rate: sig(s.rate, 6) });
     if (s.type === "counts") return t("mon.src_text_counts", { n: s.n_samples });
     return t("mon.src_text_parameters", { mu: sig(s.mu, 6), sigma: sig(s.sigma, 5) });
@@ -1274,8 +1291,16 @@
       box.appendChild(el("p", "", t("mon.limits_now_count", { rev: lim.revision, center: sig(lim.center, 6) })));
       box.appendChild(el("p", "muted", t("mon.limits_per_size")));
       box.appendChild(el("p", "", row(t("result.kind_" + v.monitor.kind), lim.location)));
+    } else if (v.monitor.kind === "pre") {
+      box.appendChild(el("p", "", t("mon.limits_now_pre", { rev: lim.revision })));
+      box.appendChild(el("p", "", row(t("result.kind_pre"), lim.location)));
     } else {
-      box.appendChild(el("p", "", t("mon.limits_now", { rev: lim.revision, mu: sig(lim.mu, 6), sigma: sig(lim.sigma, 5) })));
+      if (lim.acceptance) {
+        const a = lim.acceptance;
+        box.appendChild(el("p", "", t("mon.limits_accept", { rev: lim.revision, k: sig(a.k, 5), p: sig(a.p * 100, 4), pa: sig(a.pa * 100, 4), sigma: sig(lim.sigma, 5), ratio: sig(a.sigma_over_tolerance, 3) })));
+        if (!a.variation_small_enough) box.appendChild(el("p", "status-warning", t("mon.accept_variation_warning")));
+      }
+      if (!lim.acceptance) box.appendChild(el("p", "", t("mon.limits_now", { rev: lim.revision, mu: sig(lim.mu, 6), sigma: sig(lim.sigma, 5) })));
       box.appendChild(el("p", "", row(t("result.chart_location"), lim.location)));
       box.appendChild(el("p", "", row(t("result.chart_variation"), lim.variation)));
     }
@@ -1289,9 +1314,10 @@
   async function setLimits() {
     const type = $("#nl-type").value, num = (id) => Number($(id).value);
     const source = type === "points" ? { type, seq_from: num("#nl-from"), seq_to: num("#nl-to") }
+      : type === "tolerance" ? { type }
       : type === "rate" ? { type, rate: num("#nl-rate") }
       : type === "counts" ? countsSource($("#nl-counts").value, $("#nl-sizes").value)
-      : type === "parameters" ? { type, mu: num("#nl-mu"), sigma: num("#nl-sigma") } : { type, dataset_id: $("#nl-dataset").value };
+      : type === "parameters" ? (isTol(M.view.monitor.kind) ? { type, sigma: num("#nl-sigma") } : { type, mu: num("#nl-mu"), sigma: num("#nl-sigma") }) : { type, dataset_id: $("#nl-dataset").value };
     await guarded(async () => {
       M.view = await post(`/api/monitors/${M.id}/limits`, { source, reason: $("#nl-reason").value });
       $("#nl-reason").value = ""; renderMonitor();
@@ -1307,8 +1333,10 @@
     if (type === "dataset" && !$("#nl-dataset").options.length) fillDatasetSelect($("#nl-dataset"));
     const count = M.view && isCount(M.view.monitor.kind);
     if (M.view) {  // only the sources that fit the kind of monitor
-      Array.from($("#nl-type").options).forEach((o) => { o.hidden = o.disabled = count ? ["parameters", "dataset"].includes(o.value) : ["rate", "counts"].includes(o.value); });
-      if ($("#nl-type").selectedOptions[0] && $("#nl-type").selectedOptions[0].disabled) { $("#nl-type").value = "points"; return syncSourceFields(); }
+      const ok = SOURCES(M.view.monitor.kind).concat(M.view.monitor.kind === "pre" ? [] : ["points"]);
+      Array.from($("#nl-type").options).forEach((o) => { o.hidden = o.disabled = !ok.includes(o.value); });
+      $("#nl-mu-label").hidden = type !== "parameters" || isTol(M.view.monitor.kind);
+      if ($("#nl-type").selectedOptions[0] && $("#nl-type").selectedOptions[0].disabled) { $("#nl-type").value = ok[0]; return syncSourceFields(); }
       const sizes = M.view.monitor.kind === "p" || M.view.monitor.kind === "u";
       $$(".nl-sizes").forEach((e) => { e.hidden = type !== "counts" || !sizes; });
     }
@@ -1363,7 +1391,7 @@
     const table = $("#me-ocap"); table.replaceChildren();
     const head = el("tr");
     ["mon.ocap_criterion", "mon.ocap_action", "mon.ocap_responsible", "mon.ocap_escalate", "mon.ocap_after"].forEach((k) => cell(head, t(k), "th")); table.appendChild(head);
-    ["default"].concat(RULES).forEach((key) => {
+    ["default"].concat(ALL_RULES).forEach((key) => {
       const c = key === "default" ? ocap.default : ocap.rules[key] || {};
       const tr = el("tr"); tr.dataset.key = key;
       cell(tr, key === "default" ? t("mon.ocap_default") : t("alarmrule." + key));
@@ -1392,6 +1420,8 @@
     ["#me-kind", "#me-n", "#me-alpha", "#me-warn"].forEach((s) => { $(s).disabled = !!monitor; });  // the shape is fixed once there are limits
     $("#me-source").hidden = !!monitor;
     $("#me-lsl").value = m.specs.lsl ?? ""; $("#me-usl").value = m.specs.usl ?? ""; $("#me-class").value = m.specs.target_class || ""; $("#me-model").value = m.specs.model || "";
+    $("#me-accept-p").value = m.specs.accept_p ? m.specs.accept_p * 100 : 1; $("#me-accept-pa").value = m.specs.accept_pa ? m.specs.accept_pa * 100 : 99;
+    ["#me-lsl", "#me-usl", "#me-accept-p", "#me-accept-pa"].forEach((sel) => { $(sel).disabled = !!monitor && isTol(m.kind); });  // the tolerance belongs to the limits
     fillRules("mon-r-", m.rules, false);
     ocapEditorRows(m.ocap);
     $("#me-ack").checked = m.require_ack; $("#me-active").checked = m.active;
@@ -1401,34 +1431,42 @@
   }
   function syncKindFields() {
     const kind = $("#me-kind").value, count = isCount(kind);
-    if (kind === "imr" || kind === "c") $("#me-n").value = 1;
+    if (kind === "imr" || kind === "c" || kind === "acc-x") $("#me-n").value = 1;
+    else if (kind === "pre") $("#me-n").value = 2;
     else if (count) { if (!($("#me-n").dataset.kind && isCount($("#me-n").dataset.kind))) $("#me-n").value = 50; }
-    else if (Number($("#me-n").value) < 2 || Number($("#me-n").value) > (kind === "xbar-s" ? 25 : 10)) $("#me-n").value = 5;
+    else if (Number($("#me-n").value) < 2 || Number($("#me-n").value) > (kind === "xbar-s" || kind === "acc-xbar" ? 25 : 10)) $("#me-n").value = 5;
     $("#me-n").dataset.kind = kind;
     $("#me-n-label").textContent = t(count ? (kind === "p" || kind === "u" ? "mon.f_n_typical" : "mon.f_n_size") : "mon.f_n");
-    if (!$("#me-kind").disabled) $("#me-n").disabled = kind === "imr" || kind === "c";
+    if (!$("#me-kind").disabled) $("#me-n").disabled = kind === "imr" || kind === "c" || kind === "acc-x" || kind === "pre";
+    const tol = isTol(kind);
+    $("#me-warn-label").hidden = tol; if (tol) $("#me-warn").value = "";
+    $("#me-accept-box").hidden = !ACC_KINDS.includes(kind);
+    $$(".mon-r-runtrend").forEach((e) => { e.hidden = tol; if (tol) $("input", e).checked = false; });
     $("#me-specs-box").hidden = count;
-    $$(".mon-r-normal").forEach((e) => { e.hidden = count; if (count) $("input", e).checked = false; });
-    $$("#me-ocap tr[data-key]").forEach((tr) => { tr.hidden = count && tr.dataset.key !== "default" && !COUNT_RULES.includes(tr.dataset.key); });
+    $$(".mon-r-normal").forEach((e) => { e.hidden = count || tol; if (count || tol) $("input", e).checked = false; });
+    $$("#me-ocap tr[data-key]").forEach((tr) => { tr.hidden = tr.dataset.key !== "default" && !rulesOf(kind).includes(tr.dataset.key); });
     // sources that fit the kind
-    Array.from($("#me-src-type").options).forEach((o) => { o.hidden = o.disabled = count ? ["parameters", "dataset"].includes(o.value) : ["rate", "counts"].includes(o.value); });
-    if ($("#me-src-type").selectedOptions[0] && $("#me-src-type").selectedOptions[0].disabled) $("#me-src-type").value = count ? "rate" : "parameters";
+    const okSources = SOURCES(kind);
+    Array.from($("#me-src-type").options).forEach((o) => { o.hidden = o.disabled = !okSources.includes(o.value); });
+    if ($("#me-src-type").selectedOptions[0] && $("#me-src-type").selectedOptions[0].disabled) $("#me-src-type").value = okSources[0];
     syncEditorSource();
   }
   function syncEditorSource() {
     const type = $("#me-src-type").value, kind = $("#me-kind").value;
     $("#me-src-dataset").hidden = type !== "dataset"; $("#me-src-parameters").hidden = type !== "parameters";
     $("#me-src-rate").hidden = type !== "rate"; $("#me-src-counts").hidden = type !== "counts";
+    $("#me-src-tolerance").hidden = type !== "tolerance";
+    $("#me-mu-label").hidden = isTol(kind);
     $("#me-sizes-box").hidden = !(kind === "p" || kind === "u");
   }
   function readMonitorEditor() {
     const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
     const editing = M.editing !== "new" ? M.view.monitor : null;
-    const warn = editing ? editing.warn_alpha : num("#me-warn");
+    const warn = editing ? editing.warn_alpha : isTol($("#me-kind").value) ? null : num("#me-warn");
     const config = {
       name: $("#me-name").value, process: $("#me-process").value, characteristic: $("#me-characteristic").value, unit: $("#me-unit").value, line: $("#me-line").value,
       kind: editing ? editing.kind : $("#me-kind").value, n: editing ? editing.n : Number($("#me-n").value), warn_alpha: warn,
-      specs: isCount($("#me-kind").value) || (editing && isCount(editing.kind)) ? {} : { lsl: num("#me-lsl"), usl: num("#me-usl"), target_class: $("#me-class").value || null, model: $("#me-model").value || null,
+      specs: isCount($("#me-kind").value) || (editing && isCount(editing.kind)) ? {} : { ...(ACC_KINDS.includes($("#me-kind").value) ? (editing ? { accept_p: editing.specs.accept_p, accept_pa: editing.specs.accept_pa } : { accept_p: num("#me-accept-p") / 100, accept_pa: num("#me-accept-pa") / 100 }) : {}), lsl: num("#me-lsl"), usl: num("#me-usl"), target_class: $("#me-class").value || null, model: $("#me-model").value || null,
         controlled_stable: editing ? editing.specs.controlled_stable : false, edition: editing ? editing.specs.edition : "draft" },
       rules: readRules("mon-r-"), ocap: readOcap(), require_ack: $("#me-ack").checked, active: $("#me-active").checked,
     };
@@ -1440,7 +1478,8 @@
       const config = readMonitorEditor();
       if (M.editing === "new") {
         const type = $("#me-src-type").value;
-        const source = type === "parameters" ? { type, mu: Number($("#me-mu").value), sigma: Number($("#me-sigma").value) }
+        const source = type === "parameters" ? (isTol(config.kind) ? { type, sigma: Number($("#me-sigma").value) } : { type, mu: Number($("#me-mu").value), sigma: Number($("#me-sigma").value) })
+          : type === "tolerance" ? { type }
           : type === "rate" ? { type, rate: Number($("#me-rate").value) }
           : type === "counts" ? countsSource($("#me-counts").value, $("#me-sizes").value) : { type, dataset_id: $("#me-dataset").value };
         M.view = await post("/api/monitors", { config, source });

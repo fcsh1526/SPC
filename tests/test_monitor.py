@@ -626,3 +626,84 @@ def test_a_median_monitor_end_to_end(env):
     assert r.json()["status"] in ("ok", "warning")
     r = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [10.5, 10.5, 10.5, 10.4, 10.6]})
     assert r.json()["status"] == "alarm"
+
+
+# ------------------------------------------------------------------ acceptance chart and pre-control chart
+
+@pytest.mark.parametrize("kind,n", [("acc-xbar", 5), ("acc-xbar", 2), ("acc-median", 5), ("acc-median", 9), ("acc-x", 1)])
+def test_the_acceptance_chart_finds_the_accepted_fraction_out_of_tolerance_with_the_stated_probability(kind, n):
+    """A process whose mean sits so that 1 % lie beyond U: a sample is beyond the UCL with probability P_A = 99 %."""
+    from scipy.stats import norm
+    from spc.monitor.model import acceptance_limits
+    rng = np.random.default_rng(8)
+    lsl, usl, sigma, p, pa = 9.0, 11.0, 0.12, 0.01, 0.99
+    lim = acceptance_limits(kind, n, ALPHA_3SIGMA, lsl, usl, p, pa, sigma)
+    assert lim["location"]["cl"] == 10.0 and lim["location"]["ucl"] < usl and lim["location"]["lcl"] > lsl
+    mu = usl - norm.ppf(1 - p) * sigma  # one per cent of the parts above U
+    x = rng.normal(mu, sigma, (200_000, n))
+    stat = np.median(x, axis=1) if kind == "acc-median" else x.mean(axis=1)
+    assert np.mean(stat > lim["location"]["ucl"]) == pytest.approx(pa, abs=0.004)
+    assert lim["acceptance"]["variation_small_enough"] and lim["variation"]["ucl"] > lim["variation"]["cl"]
+
+
+def test_acceptance_limits_refuse_a_variation_that_is_too_large_and_flag_one_above_a_tenth():
+    from spc.monitor.model import acceptance_limits
+    with pytest.raises(ValueError):
+        acceptance_limits("acc-xbar", 5, ALPHA_3SIGMA, 9.0, 11.0, 0.01, 0.99, 0.5)
+    assert acceptance_limits("acc-xbar", 5, ALPHA_3SIGMA, 9.0, 11.0, 0.01, 0.99, 0.25)["acceptance"]["variation_small_enough"] is False
+
+
+@pytest.mark.parametrize("change", [
+    {"specs": {}}, {"specs": {"lsl": 9}}, {"warn_alpha": 0.05}, {"rules": {"run_length": 7}}, {"specs": {"lsl": 9, "usl": 11, "accept_p": 0.7}},
+    {"specs": {"lsl": 9, "usl": 11, "accept_pa": 0.3}}, {"n": 1}, {"kind": "acc-x", "n": 3}, {"kind": "pre", "n": 3},
+])
+def test_bad_tolerance_chart_configurations_are_refused(change):
+    base = {"name": "x", "characteristic": "y", "kind": "acc-xbar", "n": 5, "specs": {"lsl": 9, "usl": 11}}
+    with pytest.raises(ValueError):
+        validate_config({**base, **change})
+    with pytest.raises(ValueError):
+        validate_config({"name": "x", "characteristic": "y", "kind": "p", "n": 5, "specs": {"accept_p": 0.01}})
+
+
+@pytest.mark.parametrize("values,rule,status", [
+    ([10.0, 10.1], None, "ok"), ([9.4, 10.0], "pre_red", "alarm"), ([10.6, 10.0], "pre_red", "alarm"),
+    ([9.7, 10.0], None, "warning"), ([10.4, 10.0], None, "warning"), ([10.4, 10.3], "pre_two_yellow_same_side", "alarm"),
+    ([9.6, 10.4], "pre_two_yellow_opposite", "alarm"), ([9.5, 10.5], "pre_two_yellow_opposite", "alarm"),
+    ([9.6, 10.8], "pre_red", "alarm"), ([9.75, 10.25], None, "ok"),
+])
+def test_pre_control_zones_follow_the_classical_rules(values, rule, status):
+    from spc.monitor.model import check_pre_point, precontrol_limits
+    lim = precontrol_limits(9.5, 10.5)  # green from 9.75 to 10.25
+    assert lim["location"]["wlcl"] == 9.75 and lim["location"]["wucl"] == 10.25
+    alarms, warnings = check_pre_point(lim, values)
+    assert [a["rule"] for a in alarms] == ([rule] if rule else [])
+    assert bool(warnings) == (status == "warning")
+
+
+def test_an_acceptance_monitor_and_a_pre_control_monitor_end_to_end(env):
+    app, c = env
+    cfg = {"name": "Boring tool", "characteristic": "bore", "kind": "acc-xbar", "n": 5, "specs": {"lsl": 9.0, "usl": 11.0}}
+    mid = make_monitor(c["eng"], cfg, {"type": "parameters", "sigma": 0.1})
+    view = c["eng"].get(f"/api/monitors/{mid}").json()
+    lim = view["limits"]
+    assert lim["location"]["cl"] == 10.0 and lim["acceptance"]["k"] == pytest.approx(2.326 + 2.326 / math.sqrt(5), abs=0.01)
+    ack(c["oper"], mid)
+    assert enter(c["oper"], mid, [10.3, 10.35, 10.3, 10.4, 10.3])["status"] == "ok"  # the location may move inside the limits
+    assert enter(c["oper"], mid, [10.8, 10.82, 10.8, 10.85, 10.8])["status"] == "alarm"
+    assert c["eng"].put(f"/api/monitors/{mid}", json={"config": {**cfg, "specs": {"lsl": 9.0, "usl": 12.0}}}).status_code == 409
+    assert c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code in (200, 409)
+
+    pre = make_monitor(c["eng"], {"name": "Start-up", "characteristic": "bore", "kind": "pre", "specs": {"lsl": 9.5, "usl": 10.5}},
+                       {"type": "tolerance"})
+    ack(c["oper"], pre)
+    for _ in range(3):
+        assert enter(c["oper"], pre, [10.0, 10.1])["status"] == "ok"
+    q = c["eng"].get(f"/api/monitors/{pre}").json()["qualification"]
+    assert q == {"needed": 5, "greens": 6, "qualified": True}
+    assert enter(c["oper"], pre, [10.4, 10.0])["status"] == "warning"
+    r = enter(c["oper"], pre, [10.4, 10.45])
+    assert r["status"] == "alarm" and r["point"]["alarms"][0]["rule"] == "pre_two_yellow_same_side"
+    assert c["eng"].get(f"/api/monitors/{pre}").json()["qualification"]["qualified"] is False
+    assert c["eng"].post(f"/api/monitors/{pre}/ongoing-report", json={}).status_code == 400
+    assert c["eng"].post("/api/monitors", json={"config": {"name": "z", "characteristic": "z", "kind": "pre", "specs": {"lsl": 1, "usl": 2}},
+                                                "source": PARAMS}).status_code == 400

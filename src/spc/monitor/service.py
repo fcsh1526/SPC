@@ -15,7 +15,8 @@ from spc.data import Dataset
 from spc.db.database import Database
 from spc.db.stores import DatasetStore, now_iso
 from spc.monitor.model import (
-    ACTION_STEPS, ATTRIBUTE_KINDS, EVENT_KINDS, OUTCOMES, STEPS, MonitorError, attribute_limits, band, check_attribute_point,
+    ACCEPT_KINDS, ACTION_STEPS, ATTRIBUTE_KINDS, EVENT_KINDS, PRE_KIND, PRE_QUALIFY, TOLERANCE_KINDS, acceptance_from_values,
+    acceptance_limits, base_kind, check_pre_point, pre_statistic, pre_zone, precontrol_limits, OUTCOMES, STEPS, MonitorError, attribute_limits, band, check_attribute_point,
     check_point, check_values, compute_limits, limits_from_counts, limits_from_values, ocap_for, statistic, validate_config,
 )
 from spc.core.constants import cn
@@ -76,6 +77,8 @@ class MonitorService:
         typ = source.get("type")
         if kind in ATTRIBUTE_KINDS:
             return self._attribute_limits_from(monitor, source)
+        if kind in TOLERANCE_KINDS:
+            return self._tolerance_limits_from(monitor, source)
         if typ == "parameters":
             mu, sigma = source.get("mu"), source.get("sigma")
             if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in (mu, sigma)):
@@ -110,6 +113,42 @@ class MonitorService:
                 raise MonitorError("bad_source", str(exc)) from None
             return limits, {"type": "points", "seq_from": lo, "seq_to": hi, "n_points": len(pts)}
         raise MonitorError("bad_source", "source.type must be dataset, parameters or points")
+
+    def _tolerance_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
+        """Acceptance chart: the within variation from expected sigma, a data set or points. Pre-control: the tolerance alone."""
+        kind, n, alpha, sp = monitor["kind"], monitor["n"], monitor["alpha"], monitor["specs"]
+        typ = source.get("type")
+        try:
+            if kind == PRE_KIND:
+                if typ != "tolerance":
+                    raise ValueError("pre-control limits come from the tolerance: source.type must be tolerance")
+                return precontrol_limits(sp["lsl"], sp["usl"]), {"type": "tolerance", "lsl": sp["lsl"], "usl": sp["usl"]}
+            base = base_kind(kind)
+            if typ == "parameters":
+                sigma = source.get("sigma")
+                if not isinstance(sigma, (int, float)) or isinstance(sigma, bool) or not math.isfinite(sigma):
+                    raise ValueError("sigma must be a number")
+                lim = acceptance_limits(kind, n, alpha, sp["lsl"], sp["usl"], sp["accept_p"], sp["accept_pa"], sigma)
+                return lim, {"type": "parameters", "sigma": sigma}
+            if typ == "dataset":
+                ds = self.datasets.get(source.get("dataset_id", ""))
+                if base == "imr":
+                    ref = ds.individuals()[0]
+                else:
+                    ref = ds.subgroups(size=None if ds.subgroup is not None else n, incomplete="drop").matrix
+                name = ds.source.name if ds.source else ""
+                return (acceptance_from_values(kind, n, alpha, sp, ref),
+                        {"type": "dataset", "dataset_id": source["dataset_id"], "name": name, "n_values": int(np.size(ref))})
+            if typ == "points":
+                lo, hi = source.get("seq_from"), source.get("seq_to")
+                if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (lo, hi)) or lo > hi:
+                    raise ValueError("seq_from and seq_to must be point numbers, seq_from <= seq_to")
+                pts = [p for p in self.store.points(monitor["id"], limit=100000, since_seq=lo) if p["seq"] <= hi and p["valid"]]
+                ref = [p["values"][0] for p in pts] if base == "imr" else [p["values"] for p in pts]
+                return (acceptance_from_values(kind, n, alpha, sp, ref), {"type": "points", "seq_from": lo, "seq_to": hi, "n_points": len(pts)})
+        except ValueError as exc:
+            raise MonitorError("bad_source", str(exc)) from None
+        raise MonitorError("bad_source", "source.type must be parameters, dataset or points for an acceptance chart")
 
     def _attribute_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
         """Limits of a count chart: from a reference level, from reference samples given as counts, or from points of this monitor."""
@@ -163,6 +202,10 @@ class MonitorService:
             raise MonitorError("invalid_input", str(exc)) from None
         if (config["kind"], config["n"]) != (old["kind"], old["n"]):
             raise MonitorError("monitor_shape_locked", "the chart type and the subgroup size cannot change: make a new monitor", 409)
+        if config["kind"] in TOLERANCE_KINDS and config["specs"] != {**old["specs"], "controlled_stable": config["specs"]["controlled_stable"],
+                                                                  "edition": config["specs"]["edition"], "target_class": config["specs"]["target_class"],
+                                                                  "model": config["specs"]["model"]}:
+            raise MonitorError("monitor_shape_locked", "the tolerance and the acceptance risks belong to the limits: make a new monitor", 409)
         if (config["alpha"], config["warn_alpha"]) != (old["alpha"], old["warn_alpha"]):
             raise MonitorError("monitor_shape_locked", "the risk of the limits changes with new limits: set new limits with a reason", 409)
         with self.db.tx():
@@ -215,9 +258,14 @@ class MonitorService:
             limits = self.store.limits(monitor_id)
             if limits is None:
                 raise MonitorError("no_limits", "this monitor has no limits yet", 409)
-            previous = self.store.previous_value(monitor_id) if monitor["kind"] == "imr" else None
-            loc, var = statistic(monitor["kind"], values, previous)
-            if monitor["kind"] in ATTRIBUTE_KINDS:
+            previous = self.store.previous_value(monitor_id) if base_kind(monitor["kind"]) == "imr" else None
+            if monitor["kind"] == PRE_KIND:
+                loc, var = pre_statistic(limits, values), None
+            else:
+                loc, var = statistic(monitor["kind"], values, previous)
+            if monitor["kind"] == PRE_KIND:
+                alarms, warnings = check_pre_point(limits, values)
+            elif monitor["kind"] in ATTRIBUTE_KINDS:
                 size = values[1] if monitor["kind"] in ("p", "u") else None
                 history = self.store.valid_counts(monitor_id, limits["revision"], HISTORY_FOR_RULES)
                 alarms, warnings = check_attribute_point(monitor, limits, history, loc, size)
@@ -359,7 +407,20 @@ class MonitorService:
             "points": self._with_bands(monitor, self.store.points(monitor_id, limit=limit)),
             "incident": None if inc is None else self.incident_view(monitor, inc),
             "acknowledged": self.store.has_ack(monitor_id, user.id, monitor["ocap_rev"]),
+            "qualification": self._qualification(monitor) if monitor["kind"] == PRE_KIND else None,
         }
+
+    def _qualification(self, monitor: dict) -> dict:
+        """Pre-control: a run is released after five consecutive parts in the green zone (since the latest limits)."""
+        limits = self.store.limits(monitor["id"])
+        greens = 0
+        for p in reversed([p for p in self.store.points(monitor["id"], limit=200) if p["valid"] and p["limits_rev"] == limits["revision"]]):
+            zones = [pre_zone(limits, v) for v in reversed(p["values"])]
+            for z in zones:
+                if z != "green":
+                    return {"needed": PRE_QUALIFY, "greens": greens, "qualified": greens >= PRE_QUALIFY}
+                greens += 1
+        return {"needed": PRE_QUALIFY, "greens": greens, "qualified": greens >= PRE_QUALIFY}
 
     def _with_bands(self, monitor: dict, pts: list[dict]) -> list[dict]:
         """Count charts: limits follow the sample size, so each point carries the band that applied to it."""
@@ -384,6 +445,8 @@ class MonitorService:
     def window_dataset(self, monitor: dict, window: int) -> tuple[Dataset, list[dict]]:
         if monitor["kind"] in ATTRIBUTE_KINDS:
             raise MonitorError("report_not_for_attribute", "the capability report needs measured values: counts have no capability index")
+        if monitor["kind"] == PRE_KIND:
+            raise MonitorError("report_not_for_precontrol", "a pre-control chart only monitors a start-up: it is no basis for a capability report")
         pts = [p for p in self.store.points(monitor["id"], limit=window) if p["valid"]]
         if len(pts) < MIN_ONGOING_POINTS:
             raise MonitorError("not_enough_points", f"the ongoing report needs at least {MIN_ONGOING_POINTS} valid points", 409, have=len(pts))
@@ -391,7 +454,7 @@ class MonitorService:
 
     def analysis_request(self, monitor: dict) -> AnalysisRequest:
         sp = monitor["specs"]
-        return AnalysisRequest(stage="production", chart=monitor["kind"], lsl=sp["lsl"], usl=sp["usl"], alpha=monitor["alpha"],
+        return AnalysisRequest(stage="production", chart=base_kind(monitor["kind"]), lsl=sp["lsl"], usl=sp["usl"], alpha=monitor["alpha"],
                                rules=dict(monitor["rules"]), model=sp["model"], controlled_stable=sp["controlled_stable"],
                                characteristic_class=sp["target_class"], edition=sp["edition"], customer=monitor["name"])
 
@@ -431,7 +494,7 @@ class MonitorService:
         for p in pts:
             for v in p["values"]:
                 values.append(v); labels.append(f"#{p['seq']}"); times.append(p["taken_at"].rstrip("Z"))
-        return Dataset.from_values(values, subgroup=None if monitor["kind"] == "imr" else labels, timestamp=times)
+        return Dataset.from_values(values, subgroup=None if base_kind(monitor["kind"]) == "imr" else labels, timestamp=times)
 
     @staticmethod
     def _quadrant(result: dict) -> dict:
@@ -451,9 +514,10 @@ class MonitorService:
         k = len(pts)
         alarm_points = sum(1 for p in pts if p["alarms"])
         expected = k * monitor["alpha"]
-        if monitor["kind"] == "xbar-s":
+        base = base_kind(monitor["kind"])
+        if base == "xbar-s":
             sigma = math.sqrt(statistics.fmean([p["var"] ** 2 for p in pts]))
-        elif monitor["kind"] in ("xbar-r", "median-r"):
+        elif base in ("xbar-r", "median-r"):
             from spc.core.constants import d2
             sigma = statistics.fmean([p["var"] for p in pts]) / d2(monitor["n"])
         else:
@@ -462,8 +526,9 @@ class MonitorService:
             sigma = statistics.fmean(mrs) / d2(2) if mrs else float("nan")
         ratio = sigma / limits["sigma"] if limits["sigma"] and math.isfinite(sigma) else None
         loc = [p["loc"] for p in pts]
-        se = limits["sigma"] * (cn(monitor["n"]) if monitor["kind"] == "median-r" else 1.0) / math.sqrt(monitor["n"])
-        shift = None if not loc else (statistics.fmean(loc) - limits["mu"]) / se
+        se = limits["sigma"] * (cn(monitor["n"]) if base == "median-r" else 1.0) / math.sqrt(monitor["n"])
+        # an acceptance chart lets the location move inside the tolerance: only the variation is reviewed
+        shift = None if not loc or monitor["kind"] in ACCEPT_KINDS else (statistics.fmean(loc) - limits["mu"]) / se
         # the order matters: a shifted location also causes alarms, and lower variation limits catch good news
         if ratio is not None and ratio < 0.8:
             verdict = "too_wide"
@@ -471,7 +536,7 @@ class MonitorService:
             verdict = "too_narrow"
         elif shift is not None and abs(shift) > 1.0:
             verdict = "location_moved"
-        elif alarm_points > max(3.0, 3 * expected):
+        elif alarm_points > max(3.0, 3 * expected) and monitor["kind"] not in ACCEPT_KINDS:
             verdict = "too_narrow"
         else:
             verdict = "ok"

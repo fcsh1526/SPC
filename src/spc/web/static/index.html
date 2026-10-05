@@ -490,11 +490,15 @@
           <option value="np" data-i18n="analysis.chart_np"></option>
           <option value="c" data-i18n="analysis.chart_c"></option>
           <option value="u" data-i18n="analysis.chart_u"></option>
+          <option value="acc-xbar" data-i18n="analysis.chart_acc-xbar"></option>
+          <option value="acc-median" data-i18n="analysis.chart_acc-median"></option>
+          <option value="acc-x" data-i18n="analysis.chart_acc-x"></option>
+          <option value="pre" data-i18n="analysis.chart_pre"></option>
         </select></label>
       <label><span data-i18n="mon.f_n" id="me-n-label"></span><input id="me-n" type="number" min="1" max="1000000" step="1" value="5"></label>
       <label><span data-i18n="mon.f_alpha"></span>
         <select id="me-alpha"><option value="" data-i18n="analysis.risk_3sigma"></option><option value="0.01" data-i18n="analysis.risk_99"></option></select></label>
-      <label><span data-i18n="mon.f_warn"></span><input id="me-warn" type="number" min="0" max="1" step="any" placeholder="0.05"></label>
+      <label id="me-warn-label"><span data-i18n="mon.f_warn"></span><input id="me-warn" type="number" min="0" max="1" step="any" placeholder="0.05"></label>
     </div>
     <p id="me-source-box"></p>
     <fieldset id="me-source">
@@ -505,20 +509,26 @@
           <option value="dataset" data-i18n="mon.src_dataset"></option>
           <option value="rate" data-i18n="mon.src_rate"></option>
           <option value="counts" data-i18n="mon.src_counts"></option>
+          <option value="tolerance" data-i18n="mon.src_tolerance"></option>
         </select></label>
+      <p id="me-src-tolerance" class="note" hidden data-i18n="mon.src_tolerance_note"></p>
       <label id="me-src-rate" hidden><span data-i18n="mon.src_rate_value"></span><input id="me-rate" type="number" step="any" min="0"></label>
       <div id="me-src-counts" class="form-grid" hidden>
         <label class="wide"><span data-i18n="mon.src_counts_list"></span><textarea id="me-counts" rows="2"></textarea></label>
         <label class="wide" id="me-sizes-box"><span data-i18n="mon.src_sizes_list"></span><textarea id="me-sizes" rows="2"></textarea></label>
       </div>
       <div id="me-src-parameters" class="form-grid">
-        <label><span data-i18n="mon.src_mu"></span><input id="me-mu" type="number" step="any"></label>
+        <label id="me-mu-label"><span data-i18n="mon.src_mu"></span><input id="me-mu" type="number" step="any"></label>
         <label><span data-i18n="mon.src_sigma"></span><input id="me-sigma" type="number" step="any" min="0"></label>
       </div>
       <label id="me-src-dataset" hidden><span data-i18n="mon.src_dataset_pick"></span><select id="me-dataset"></select></label>
     </fieldset>
     <fieldset id="me-specs-box">
       <legend data-i18n="mon.f_specs"></legend>
+      <div class="form-grid" id="me-accept-box" hidden>
+        <label><span data-i18n="mon.f_accept_p"></span><input id="me-accept-p" type="number" min="0.001" max="49" step="any" value="1"></label>
+        <label><span data-i18n="mon.f_accept_pa"></span><input id="me-accept-pa" type="number" min="51" max="99.999" step="any" value="99"></label>
+      </div>
       <p class="note" data-i18n="mon.specs_note"></p>
       <div class="form-grid">
         <label><span data-i18n="analysis.lsl"></span><input id="me-lsl" type="number" step="any"></label>
@@ -537,9 +547,9 @@
       <legend data-i18n="mon.f_rules"></legend>
       <div class="checks">
         <label class="check"><input id="mon-r-beyond" type="checkbox" checked><span data-i18n="analysis.rule_beyond_limits"></span></label>
-        <label class="check"><input id="mon-r-run" type="checkbox"><span data-i18n="analysis.rule_run"></span>
+        <label class="check mon-r-runtrend"><input id="mon-r-run" type="checkbox"><span data-i18n="analysis.rule_run"></span>
           <input id="mon-r-run-n" type="number" min="2" max="50" value="7" class="small"></label>
-        <label class="check"><input id="mon-r-trend" type="checkbox"><span data-i18n="analysis.rule_trend"></span>
+        <label class="check mon-r-runtrend"><input id="mon-r-trend" type="checkbox"><span data-i18n="analysis.rule_trend"></span>
           <input id="mon-r-trend-n" type="number" min="2" max="50" value="7" class="small"></label>
         <label class="check mon-r-normal"><input id="mon-r-middle" type="checkbox"><span data-i18n="analysis.rule_middle_third"></span></label>
         <label class="check mon-r-normal"><input id="mon-r-2of3" type="checkbox"><span data-i18n="analysis.rule_two_of_three"></span></label>
@@ -615,6 +625,8 @@
       <div id="md-result" role="status"></div>
     </div>
 
+    <p id="md-qual" class="strong" hidden></p>
+    <p id="md-pre-note" class="note" hidden data-i18n="mon.pre_note"></p>
     <div class="chart" id="md-chart-loc"></div>
     <div class="chart" id="md-chart-var"></div>
     <p class="muted" id="md-no-spec" data-i18n="mon.no_spec_note"></p>
@@ -636,13 +648,14 @@
               <option value="dataset" data-i18n="mon.src_dataset"></option>
               <option value="rate" data-i18n="mon.src_rate"></option>
               <option value="counts" data-i18n="mon.src_counts"></option>
+              <option value="tolerance" data-i18n="mon.src_tolerance"></option>
             </select></label>
           <label class="nl-rate" hidden><span data-i18n="mon.src_rate_value"></span><input id="nl-rate" type="number" step="any" min="0"></label>
           <label class="nl-counts wide" hidden><span data-i18n="mon.src_counts_list"></span><textarea id="nl-counts" rows="2"></textarea></label>
           <label class="nl-counts nl-sizes wide" hidden><span data-i18n="mon.src_sizes_list"></span><textarea id="nl-sizes" rows="2"></textarea></label>
           <label class="nl-points"><span data-i18n="mon.seq_from"></span><input id="nl-from" type="number" min="1" step="1"></label>
           <label class="nl-points"><span data-i18n="mon.seq_to"></span><input id="nl-to" type="number" min="1" step="1"></label>
-          <label class="nl-parameters" hidden><span data-i18n="mon.src_mu"></span><input id="nl-mu" type="number" step="any"></label>
+          <label class="nl-parameters" id="nl-mu-label" hidden><span data-i18n="mon.src_mu"></span><input id="nl-mu" type="number" step="any"></label>
           <label class="nl-parameters" hidden><span data-i18n="mon.src_sigma"></span><input id="nl-sigma" type="number" step="any" min="0"></label>
           <label class="nl-dataset" hidden><span data-i18n="mon.src_dataset_pick"></span><select id="nl-dataset"></select></label>
           <label class="wide"><span data-i18n="mon.reason"></span><input id="nl-reason" type="text" maxlength="2000"></label>
