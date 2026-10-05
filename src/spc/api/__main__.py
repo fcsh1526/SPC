@@ -9,6 +9,7 @@ import uvicorn
 
 from spc.api.app import create_app
 from spc.db import Database
+from spc.monitor.notify import WebhookNotifier
 
 
 def main() -> None:
@@ -18,9 +19,12 @@ def main() -> None:
     parser.add_argument("--db", default=os.environ.get("SPC_DB", "spc.sqlite3"), help="SQLite file (env SPC_DB)")
     parser.add_argument("--secure-cookies", action="store_true",
                         help="mark the session cookie Secure. Use it when the site is served over https (also behind a proxy)")
+    parser.add_argument("--alert-webhook", default=os.environ.get("SPC_ALERT_WEBHOOK", ""),
+                        help="URL that receives a JSON POST when an SPC monitor opens an incident (env SPC_ALERT_WEBHOOK)")
     args = parser.parse_args()
     db = Database(args.db)
-    app = create_app(db, secure_cookies=True if args.secure_cookies else None)
+    notifiers = [WebhookNotifier(args.alert_webhook)] if args.alert_webhook else []
+    app = create_app(db, secure_cookies=True if args.secure_cookies else None, notifiers=notifiers)
     if app.state.auth.user_count() == 0:
         print(f"No users yet. Create the first administrator:  spc-admin --db {args.db} create-user NAME --role admin")
     if args.host not in ("127.0.0.1", "localhost", "::1") and not args.secure_cookies:

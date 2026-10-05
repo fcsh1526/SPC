@@ -1,7 +1,8 @@
 """Users, roles, sessions and login throttling.
 
-Roles:  viewer   reads datasets, analyses and reports
-        engineer viewer + imports data, marks values, makes reports, deletes own datasets
+Roles:  viewer   reads datasets, analyses, reports and the SPC monitors
+        operator viewer + works at the line: enters measurements into SPC monitors and follows the out-of-control action plan
+        engineer operator + imports data, marks values, makes reports, sets up monitors, deletes own datasets
         admin    engineer + manages users, reads the audit trail, deletes any dataset
 
 Sessions: a random token in an HttpOnly cookie. The database keeps only its SHA-256, so a copy of the
@@ -26,7 +27,7 @@ from spc.auth.passwords import DEFAULT_COST, check_policy, hash_password, verify
 from spc.db.database import Database
 from spc.db.stores import now_iso
 
-ROLES = ("viewer", "engineer", "admin")
+ROLES = ("viewer", "operator", "engineer", "admin")
 MAX_FAILURES = 5
 LOCK_SECONDS = 15 * 60
 IDLE_SECONDS = 2 * 60 * 60

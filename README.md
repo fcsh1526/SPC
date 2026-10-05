@@ -69,6 +69,17 @@ In the analysis form, choose a distribution (or "choose automatically") and a me
 - Few values (under 50) make the tail quantiles uncertain. The result warns about it. The empirical method needs 2000 values and supports only `.G`.
 - Through the API: `distribution`, `method`, `bootstrap_n` and `seed` in the analysis body. Results for a normal distribution (`distribution: "normal"`, the default) are unchanged.
 
+## SPC at the line (control loop 1)
+
+The tab "SPC at the line" holds SPC monitors: control charts that control a running process, as opposed to the analysis chart of a study.
+- **Fixed limits.** They come from reference data, or from expected mean and standard deviation, and stay until an engineer sets new ones with a reason (a new limits revision with its history). Every sample you enter is checked at once against them and the enabled stability criteria. Warning limits are optional. Specification limits are never drawn on this chart.
+- **Roles.** Operators enter samples and work through the action plan. Engineers set monitors up. Viewers only look.
+- **Action plan (OCAP).** Each monitor holds what the operator does per violated criterion, who is responsible, and when to escalate. Everybody confirms that they know the plan before they can enter a sample, and again after a change of the plan.
+- **A violation opens one incident.** Follow the steps of the draft: measure again to make sure the sample is valid (an invalid sample, declared with a reason, ends the incident), adjust process parameters, adjust process elements, check with a new sample, and if that does not help go to the root cause analysis and product containment. An incident is closed as "recovered" only after a documented action AND a new valid sample that meets all criteria. An incident that is not escalated in time is marked overdue. Everything is logged with person and time, and is in the audit trail.
+- **Notification.** The page and the badge in the navigation show open incidents. With `spc-serve --alert-webhook URL` (or `SPC_ALERT_WEBHOOK`) the program also posts a JSON message to that URL when an incident opens.
+- **Ongoing performance and capability.** Index of the latest samples (named Pp/Ppk or Cp/Cpk by the stability evidence), the four quadrants of the draft, the trend over earlier windows, a check whether the fixed limits still fit, and the response times of the action plan. One click makes a normal study report of the window.
+- The first release covers X-bar-s, X-bar-R and I-MR monitors. Attribute and median monitors are not done.
+
 ## Customer profiles
 
 A profile holds what one customer agreed on and how that customer's report looks. Administrators make them in the Administration tab. Everybody can pick one in the analysis form.

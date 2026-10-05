@@ -54,6 +54,7 @@
   <button role="tab" data-tab="import" data-needs="engineer" aria-selected="true" data-i18n="nav.import"></button>
   <button role="tab" data-tab="data" aria-selected="false" aria-disabled="true" data-i18n="nav.data"></button>
   <button role="tab" data-tab="analysis" aria-selected="false" aria-disabled="true" data-i18n="nav.analysis"></button>
+  <button role="tab" data-tab="monitor" aria-selected="false"><span data-i18n="nav.monitor"></span> <span id="alert-badge" class="badge" hidden></span></button>
   <button role="tab" data-tab="saved" aria-selected="false" data-i18n="nav.saved"></button>
   <button role="tab" data-tab="tools" aria-selected="false" data-i18n="nav.tools"></button>
   <button role="tab" data-tab="admin" data-needs="admin" aria-selected="false" data-i18n="nav.admin"></button>
@@ -460,6 +461,189 @@
   </div>
 </section>
 
+<!-- SPC at the line -->
+<section id="tab-monitor" class="panel" hidden>
+  <h2 data-i18n="mon.title"></h2>
+  <div id="mon-list-view">
+    <p class="note" data-i18n="mon.intro"></p>
+    <p id="mon-alerts" class="muted"></p>
+    <div class="scroll"><table id="mon-list" class="grid"></table></div>
+    <p data-needs="engineer"><button id="mon-new" class="primary" data-i18n="mon.new"></button></p>
+  </div>
+
+  <div id="mon-editor" class="card" hidden>
+    <h3 id="mon-editor-title"></h3>
+    <div class="form-grid">
+      <label><span data-i18n="mon.f_name"></span><input id="me-name" type="text" maxlength="100"></label>
+      <label><span data-i18n="mon.f_process"></span><input id="me-process" type="text" maxlength="200"></label>
+      <label><span data-i18n="mon.f_characteristic"></span><input id="me-characteristic" type="text" maxlength="200"></label>
+      <label><span data-i18n="mon.f_unit"></span><input id="me-unit" type="text" maxlength="40"></label>
+      <label><span data-i18n="mon.f_line"></span><input id="me-line" type="text" maxlength="200"></label>
+      <label><span data-i18n="mon.f_kind"></span>
+        <select id="me-kind">
+          <option value="xbar-s" data-i18n="analysis.chart_xbar-s"></option>
+          <option value="xbar-r" data-i18n="analysis.chart_xbar-r"></option>
+          <option value="imr" data-i18n="analysis.chart_imr"></option>
+        </select></label>
+      <label><span data-i18n="mon.f_n"></span><input id="me-n" type="number" min="1" max="25" step="1" value="5"></label>
+      <label><span data-i18n="mon.f_alpha"></span>
+        <select id="me-alpha"><option value="" data-i18n="analysis.risk_3sigma"></option><option value="0.01" data-i18n="analysis.risk_99"></option></select></label>
+      <label><span data-i18n="mon.f_warn"></span><input id="me-warn" type="number" min="0" max="1" step="any" placeholder="0.05"></label>
+    </div>
+    <p id="me-source-box"></p>
+    <fieldset id="me-source">
+      <legend data-i18n="mon.f_source"></legend>
+      <label><span data-i18n="mon.src_type"></span>
+        <select id="me-src-type">
+          <option value="parameters" data-i18n="mon.src_parameters"></option>
+          <option value="dataset" data-i18n="mon.src_dataset"></option>
+        </select></label>
+      <div id="me-src-parameters" class="form-grid">
+        <label><span data-i18n="mon.src_mu"></span><input id="me-mu" type="number" step="any"></label>
+        <label><span data-i18n="mon.src_sigma"></span><input id="me-sigma" type="number" step="any" min="0"></label>
+      </div>
+      <label id="me-src-dataset" hidden><span data-i18n="mon.src_dataset_pick"></span><select id="me-dataset"></select></label>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="mon.f_specs"></legend>
+      <p class="note" data-i18n="mon.specs_note"></p>
+      <div class="form-grid">
+        <label><span data-i18n="analysis.lsl"></span><input id="me-lsl" type="number" step="any"></label>
+        <label><span data-i18n="analysis.usl"></span><input id="me-usl" type="number" step="any"></label>
+        <label><span data-i18n="analysis.class"></span>
+          <select id="me-class"><option value="" data-i18n="analysis.class_none"></option>
+            <option value="critical" data-i18n="analysis.class_critical"></option><option value="major" data-i18n="analysis.class_major"></option>
+            <option value="minor" data-i18n="analysis.class_minor"></option><option value="others" data-i18n="analysis.class_others"></option></select></label>
+        <label><span data-i18n="analysis.model"></span>
+          <select id="me-model"><option value="" data-i18n="analysis.model_none"></option>
+            <option value="A1">A1</option><option value="A2">A2</option><option value="B">B</option><option value="C1">C1</option>
+            <option value="C2">C2</option><option value="C3">C3</option><option value="C4">C4</option><option value="D">D</option></select></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="mon.f_rules"></legend>
+      <div class="checks">
+        <label class="check"><input id="mon-r-beyond" type="checkbox" checked><span data-i18n="analysis.rule_beyond_limits"></span></label>
+        <label class="check"><input id="mon-r-run" type="checkbox"><span data-i18n="analysis.rule_run"></span>
+          <input id="mon-r-run-n" type="number" min="2" max="50" value="7" class="small"></label>
+        <label class="check"><input id="mon-r-trend" type="checkbox"><span data-i18n="analysis.rule_trend"></span>
+          <input id="mon-r-trend-n" type="number" min="2" max="50" value="7" class="small"></label>
+        <label class="check"><input id="mon-r-middle" type="checkbox"><span data-i18n="analysis.rule_middle_third"></span></label>
+        <label class="check"><input id="mon-r-2of3" type="checkbox"><span data-i18n="analysis.rule_two_of_three"></span></label>
+        <label class="check"><input id="mon-r-4of5" type="checkbox"><span data-i18n="analysis.rule_four_of_five"></span></label>
+        <label class="check"><input id="mon-r-15" type="checkbox"><span data-i18n="analysis.rule_fifteen"></span></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="mon.f_ocap"></legend>
+      <p class="note" data-i18n="mon.ocap_note"></p>
+      <div class="scroll"><table id="me-ocap" class="grid"></table></div>
+      <label class="check"><input id="me-ack" type="checkbox" checked><span data-i18n="mon.f_require_ack"></span></label>
+      <label class="check"><input id="me-active" type="checkbox" checked><span data-i18n="mon.f_active"></span></label>
+    </fieldset>
+    <p class="row"><button id="me-save" class="primary" data-i18n="mon.save"></button><button id="me-cancel" data-i18n="admin.pf_cancel"></button></p>
+  </div>
+
+  <div id="mon-detail" hidden>
+    <p class="row"><button id="mon-back" data-i18n="mon.back"></button><button id="mon-edit" data-needs="engineer" data-i18n="mon.edit"></button>
+      <button id="mon-refresh" data-i18n="mon.refresh"></button></p>
+    <h3 id="md-title"></h3>
+    <p id="md-sub" class="muted"></p>
+    <div id="md-ack" class="card" hidden>
+      <p class="strong" data-i18n="mon.ack_needed"></p>
+      <div id="md-plan"></div>
+      <p data-needs="operator"><button id="md-ack-btn" class="primary" data-i18n="mon.ack_button"></button></p>
+    </div>
+
+    <div id="md-incident" class="card incident" hidden>
+      <h3 id="mi-title"></h3>
+      <p id="mi-line" class="strong"></p>
+      <div class="scroll"><table id="mi-instructions" class="grid"></table></div>
+      <ul id="mi-events" class="log"></ul>
+      <div data-needs="operator">
+        <div class="form-grid">
+          <label><span data-i18n="mon.step"></span>
+            <select id="mi-step">
+              <option value="adjust_parameters" data-i18n="mon.step_adjust_parameters"></option>
+              <option value="adjust_elements" data-i18n="mon.step_adjust_elements"></option>
+              <option value="containment" data-i18n="mon.step_containment"></option>
+              <option value="root_cause" data-i18n="mon.step_root_cause"></option>
+              <option value="other" data-i18n="mon.step_other"></option>
+            </select></label>
+          <label class="wide"><span data-i18n="mon.event_text"></span><input id="mi-text" type="text" maxlength="2000"></label>
+        </div>
+        <p class="row">
+          <button id="mi-ack" data-i18n="mon.take_over"></button>
+          <button id="mi-action" class="primary" data-i18n="mon.log_action"></button>
+          <button id="mi-observation" data-i18n="mon.log_observation"></button>
+          <button id="mi-escalate" data-i18n="mon.escalate"></button>
+        </p>
+        <div class="form-grid">
+          <label><span data-i18n="mon.outcome"></span>
+            <select id="mi-outcome">
+              <option value="recovered" data-i18n="mon.outcome_recovered"></option>
+              <option value="escalated" data-i18n="mon.outcome_escalated"></option>
+              <option value="invalid_sample" data-i18n="mon.outcome_invalid_sample"></option>
+            </select></label>
+          <label class="wide"><span data-i18n="mon.outcome_text"></span><input id="mi-close-text" type="text" maxlength="2000"></label>
+        </div>
+        <p><button id="mi-close" data-i18n="mon.close_incident"></button></p>
+      </div>
+    </div>
+
+    <div class="card" data-needs="operator" id="md-entry-card">
+      <h3 data-i18n="mon.entry"></h3>
+      <div id="md-values" class="row"></div>
+      <div class="form-grid">
+        <label><span data-i18n="mon.label"></span><input id="md-label" type="text" maxlength="100"></label>
+        <label><span data-i18n="mon.taken_at"></span><input id="md-taken" type="datetime-local"></label>
+      </div>
+      <p class="row"><button id="md-submit" class="primary" data-i18n="mon.submit"></button></p>
+      <div id="md-result" role="status"></div>
+    </div>
+
+    <div class="chart" id="md-chart-loc"></div>
+    <div class="chart" id="md-chart-var"></div>
+    <p class="muted" data-i18n="mon.no_spec_note"></p>
+
+    <h4 data-i18n="mon.points"></h4>
+    <div class="scroll"><table id="md-points" class="grid"></table></div>
+
+    <details>
+      <summary data-i18n="mon.limits"></summary>
+      <div id="md-limits"></div>
+      <div data-needs="engineer" class="card">
+        <h4 data-i18n="mon.new_limits"></h4>
+        <p class="note" data-i18n="mon.new_limits_note"></p>
+        <div class="form-grid">
+          <label><span data-i18n="mon.src_type"></span>
+            <select id="nl-type">
+              <option value="points" data-i18n="mon.src_points"></option>
+              <option value="parameters" data-i18n="mon.src_parameters"></option>
+              <option value="dataset" data-i18n="mon.src_dataset"></option>
+            </select></label>
+          <label class="nl-points"><span data-i18n="mon.seq_from"></span><input id="nl-from" type="number" min="1" step="1"></label>
+          <label class="nl-points"><span data-i18n="mon.seq_to"></span><input id="nl-to" type="number" min="1" step="1"></label>
+          <label class="nl-parameters" hidden><span data-i18n="mon.src_mu"></span><input id="nl-mu" type="number" step="any"></label>
+          <label class="nl-parameters" hidden><span data-i18n="mon.src_sigma"></span><input id="nl-sigma" type="number" step="any" min="0"></label>
+          <label class="nl-dataset" hidden><span data-i18n="mon.src_dataset_pick"></span><select id="nl-dataset"></select></label>
+          <label class="wide"><span data-i18n="mon.reason"></span><input id="nl-reason" type="text" maxlength="2000"></label>
+        </div>
+        <p><button id="nl-save" class="primary" data-i18n="mon.set_limits"></button></p>
+      </div>
+    </details>
+
+    <details id="md-ongoing-box">
+      <summary data-i18n="mon.ongoing"></summary>
+      <p class="note" data-i18n="mon.ongoing_note"></p>
+      <p class="row"><label><span data-i18n="mon.window"></span><input id="og-window" type="number" min="10" max="2000" step="1" value="125" class="small"></label>
+        <button id="og-show" class="primary" data-i18n="mon.ongoing_show"></button>
+        <button id="og-report" data-needs="engineer" data-i18n="mon.ongoing_report"></button></p>
+      <div id="og-out"></div>
+    </details>
+  </div>
+</section>
+
 <!-- saved -->
 <section id="tab-saved" class="panel" hidden>
   <h2 data-i18n="saved.title"></h2>
@@ -503,6 +687,7 @@
       <label><span data-i18n="admin.col_role"></span>
         <select id="nu-role">
           <option value="viewer" data-i18n="role.viewer"></option>
+          <option value="operator" data-i18n="role.operator"></option>
           <option value="engineer" data-i18n="role.engineer" selected></option>
           <option value="admin" data-i18n="role.admin"></option>
         </select></label>

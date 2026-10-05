@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE users (
@@ -21,7 +21,7 @@ CREATE TABLE users (
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
     display_name  TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL,
-    role          TEXT NOT NULL CHECK (role IN ('viewer', 'engineer', 'admin')),
+    role          TEXT NOT NULL CHECK (role IN ('viewer', 'operator', 'engineer', 'admin')),
     active        INTEGER NOT NULL DEFAULT 1,
     must_change   INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
@@ -71,6 +71,83 @@ CREATE TABLE profiles (
     updated_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
 );
+CREATE TABLE monitors (
+    id            INTEGER PRIMARY KEY,
+    name          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    config        TEXT NOT NULL,
+    revision      INTEGER NOT NULL DEFAULT 1,
+    limits_rev    INTEGER NOT NULL DEFAULT 0,
+    ocap_rev      INTEGER NOT NULL DEFAULT 1,
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_by    INTEGER REFERENCES users(id),
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+CREATE TABLE monitor_limits (
+    id         INTEGER PRIMARY KEY,
+    monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    revision   INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    reason     TEXT NOT NULL,
+    source     TEXT NOT NULL,
+    data       TEXT NOT NULL,
+    UNIQUE (monitor_id, revision)
+);
+CREATE TABLE monitor_points (
+    id             INTEGER PRIMARY KEY,
+    monitor_id     INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    seq            INTEGER NOT NULL,
+    limits_rev     INTEGER NOT NULL,
+    taken_at       TEXT NOT NULL,
+    entered_at     TEXT NOT NULL,
+    entered_by     TEXT NOT NULL,
+    label          TEXT NOT NULL DEFAULT '',
+    tags           TEXT NOT NULL DEFAULT '{}',
+    vals           TEXT NOT NULL,
+    loc            REAL NOT NULL,
+    var            REAL,
+    valid          INTEGER NOT NULL DEFAULT 1,
+    invalid_reason TEXT NOT NULL DEFAULT '',
+    invalid_by     TEXT NOT NULL DEFAULT '',
+    invalid_at     TEXT NOT NULL DEFAULT '',
+    alarms         TEXT NOT NULL DEFAULT '[]',
+    warnings       TEXT NOT NULL DEFAULT '[]',
+    incident_id    INTEGER,
+    UNIQUE (monitor_id, seq)
+);
+CREATE INDEX monitor_points_time ON monitor_points(monitor_id, taken_at);
+CREATE TABLE monitor_incidents (
+    id           INTEGER PRIMARY KEY,
+    monitor_id   INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    opened_at    TEXT NOT NULL,
+    point_seq    INTEGER NOT NULL,
+    rules        TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'open',
+    acked_by     TEXT NOT NULL DEFAULT '',
+    acked_at     TEXT NOT NULL DEFAULT '',
+    closed_at    TEXT NOT NULL DEFAULT '',
+    closed_by    TEXT NOT NULL DEFAULT '',
+    outcome      TEXT NOT NULL DEFAULT '',
+    outcome_text TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE monitor_events (
+    id          INTEGER PRIMARY KEY,
+    monitor_id  INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    incident_id INTEGER REFERENCES monitor_incidents(id) ON DELETE CASCADE,
+    at          TEXT NOT NULL,
+    by_label    TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    step        TEXT NOT NULL DEFAULT '',
+    text        TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE monitor_acks (
+    monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    ocap_rev   INTEGER NOT NULL,
+    at         TEXT NOT NULL,
+    PRIMARY KEY (monitor_id, user_id, ocap_rev)
+);
 CREATE TABLE audit (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     ts        TEXT NOT NULL,
@@ -83,6 +160,11 @@ CREATE TABLE audit (
     hash      TEXT NOT NULL
 );
 """
+
+
+def _monitor_tables() -> str:
+    start = SCHEMA.index("CREATE TABLE monitors")
+    return SCHEMA[start : SCHEMA.index("CREATE TABLE audit (")]
 
 
 MIGRATION_1_TO_2 = """
@@ -127,13 +209,40 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version == 1:  # version 2 adds the customer profiles
-            self._conn.execute("BEGIN IMMEDIATE")
-            self._conn.execute(MIGRATION_1_TO_2)
-            self._conn.execute("PRAGMA user_version = 2")
-            self._conn.execute("COMMIT")
+        elif version in (1, 2):
+            if version == 1:  # version 2 adds the customer profiles
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute(MIGRATION_1_TO_2)
+                self._conn.execute("PRAGMA user_version = 2")
+                self._conn.execute("COMMIT")
+            self._migrate_2_to_3()
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")
+
+    def _migrate_2_to_3(self) -> None:
+        """Version 3 adds the SPC monitors and the role 'operator'. A CHECK cannot be changed in SQLite, so the
+        users table is built again. Foreign keys are off while that happens (the documented way), and checked after."""
+        self._conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            users = SCHEMA[SCHEMA.index("CREATE TABLE users") : SCHEMA.index("CREATE TABLE sessions")].replace("CREATE TABLE users", "CREATE TABLE users_new", 1)
+            self._conn.execute(users)
+            self._conn.execute("INSERT INTO users_new SELECT * FROM users")
+            self._conn.execute("DROP TABLE users")
+            self._conn.execute("ALTER TABLE users_new RENAME TO users")
+            for statement in _monitor_tables().split(";"):
+                if statement.strip():
+                    self._conn.execute(statement)
+            problems = self._conn.execute("PRAGMA foreign_key_check").fetchall()
+            if problems:
+                raise RuntimeError(f"foreign key problems after the migration: {len(problems)}")
+            self._conn.execute("PRAGMA user_version = 3")
+            self._conn.execute("COMMIT")
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        finally:
+            self._conn.execute("PRAGMA foreign_keys = ON")
 
     @contextmanager
     def tx(self):

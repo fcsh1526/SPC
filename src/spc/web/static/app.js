@@ -16,6 +16,7 @@
     lastAnalysisBody: null, reportOut: null, reportLangTouched: false, archiveOut: null,
     user: null, csrf: "", mustChange: false,
     profiles: [], profile: null, defaultTargets: null, editing: null, logo: "",
+    mon: { list: [], id: null, view: null, last: null, editing: null, timer: null },
   };
 
   // ---------------------------------------------------------------- small helpers
@@ -150,6 +151,7 @@
     if (state.mustChange) name = "password";  // nothing else works until the password is changed
     $$("nav.tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
     $$("main > section").forEach((s) => { s.hidden = s.id !== "tab-" + name; });
+    if (name === "monitor") loadMonitors();
     if (name === "saved") loadSaved();
     if (name === "admin") loadAdmin();
     if (name === "password") renderPasswordPanel();
@@ -460,7 +462,7 @@
     const W = 960, H = 280, ml = 70, mr = 150, mt = 16, mb = 34;
     const n = part.values.length;
     const flat = (v) => (Array.isArray(v) ? v : [v]);  // limits are one number, or one per point after a restart
-    const ys = part.values.concat(flat(part.lcl), flat(part.ucl), flat(part.center)).filter((v) => v !== null);
+    const ys = part.values.concat(flat(part.lcl), flat(part.ucl), flat(part.center), flat(part.wlcl ?? null), flat(part.wucl ?? null)).filter((v) => v !== null);
     let lo = Math.min(...ys), hi = Math.max(...ys);
     if (hi === lo) { hi += 1; lo -= 1; }
     const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
@@ -485,6 +487,10 @@
     const phaseSet = new Set(part.phases || []);
     (part.restarts || []).forEach((i) => {  // a restart sits between two points; a new phase also has its own limits
       root.appendChild(svg("line", { class: "restart" + (phaseSet.has(i) ? " phase" : ""), x1: X(i) - half, y1: mt, x2: X(i) - half, y2: H - mb }));
+    });
+    [["warning", part.wucl, t("mon.warning_limit")], ["warning", part.wlcl, t("mon.warning_limit")]].forEach(([cls, v]) => {
+      if (v === null || v === undefined) return;
+      root.appendChild(svg("line", { class: cls, x1: ml, y1: Y(v), x2: W - mr, y2: Y(v) }));
     });
     [["limit", part.ucl, t("result.ucl")], ["center", part.center, t("result.cl")], ["limit", part.lcl, t("result.lcl")]].forEach(([cls, v, name]) => {
       if (v === null) return;
@@ -772,7 +778,7 @@
     $("#login").hidden = true; $("#app").hidden = false; $("#userbox").hidden = false;
     $("#login-user").value = ""; $("#login-pass").value = "";
     renderUserBox();
-    if (!state.mustChange) loadProfiles();
+    if (!state.mustChange) { loadProfiles(); startAlertPolling(); }
     showTab(state.mustChange ? "password" : (me.user.role === "viewer" ? "saved" : "import"));
   }
   function renderUserBox() {
@@ -1006,6 +1012,399 @@
     reader.readAsDataURL(file);
   }
 
+  // ---------------------------------------------------------------- SPC at the line (control loop 1)
+  const M = state.mon;
+  const RULES = ["beyond_limits", "run", "trend", "middle_third", "two_of_three_beyond_2s", "four_of_five_beyond_1s", "fifteen_within_1s"];
+  const showMonitorView = (which) => {
+    ["#mon-list-view", "#mon-editor", "#mon-detail"].forEach((sel) => { $(sel).hidden = sel !== which; });
+  };
+  function startAlertPolling() {
+    clearInterval(M.timer);
+    const poll = async () => {
+      if (!state.user) return;
+      try { renderAlerts(await api("/api/alerts")); } catch (e) { /* the next poll tries again */ }
+    };
+    poll();
+    M.timer = setInterval(poll, 20000);
+  }
+  function renderAlerts(a) {
+    const badge = $("#alert-badge");
+    badge.hidden = !a.open;
+    badge.textContent = String(a.open);
+    badge.title = t("mon.alerts_line", { open: a.open, unack: a.unacknowledged, overdue: a.overdue });
+    $("#mon-alerts").textContent = a.open ? t("mon.alerts_line", { open: a.open, unack: a.unacknowledged, overdue: a.overdue }) : t("mon.alerts_none");
+    $("#mon-alerts").className = a.open ? "strong status-alarm" : "muted";
+  }
+  async function loadMonitors() {
+    if (M.id && !$("#mon-detail").hidden) return;  // an open monitor stays open when the tab is shown again
+    await guarded(async () => {
+      M.list = (await api("/api/monitors")).monitors;
+      renderMonitorList();
+      showMonitorView("#mon-list-view");
+    });
+  }
+  function renderMonitorList() {
+    const table = $("#mon-list"); table.replaceChildren();
+    const head = el("tr");
+    ["mon.col_name", "mon.col_chart", "mon.col_line", "mon.col_limits", "mon.col_last", "mon.col_incidents", ""].forEach((k) => cell(head, k ? t(k) : "", "th"));
+    table.appendChild(head);
+    if (!M.list.length) { const tr = el("tr"); const c = cell(tr, t("mon.none")); c.colSpan = 7; table.appendChild(tr); }
+    M.list.forEach((m) => {
+      const tr = el("tr");
+      cell(tr, m.name); cell(tr, `${t("result.kind_" + m.kind)}${m.n > 1 ? ", n = " + m.n : ""}`); cell(tr, m.line);
+      cell(tr, `#${m.limits_rev}`);
+      cell(tr, m.last_point ? `#${m.last_point.seq} · ${when(m.last_point.taken_at)}` : "–");
+      const inc = cell(tr, m.open_incidents ? t("mon.open_incidents", { n: m.open_incidents }) : "–");
+      if (m.open_incidents) inc.className = "status-alarm";
+      const actions = cell(tr, "");
+      const open = el("button", "", t("mon.open")); open.addEventListener("click", () => openMonitor(m.id));
+      actions.appendChild(open);
+      if (!m.active) actions.appendChild(el("span", "muted", " " + t("mon.inactive")));
+      table.appendChild(tr);
+    });
+  }
+  async function openMonitor(id, keepResult) {
+    await guarded(async () => {
+      M.id = id;
+      M.view = await api(`/api/monitors/${id}`);
+      if (!keepResult) M.last = null;
+      renderMonitor();
+      showMonitorView("#mon-detail");
+    });
+  }
+  function ocapTable(table, instructions) {
+    table.replaceChildren();
+    const head = el("tr");
+    ["mon.ocap_criterion", "mon.ocap_action", "mon.ocap_responsible", "mon.ocap_escalate", "mon.ocap_after"].forEach((k) => cell(head, t(k), "th"));
+    table.appendChild(head);
+    instructions.forEach((i) => {
+      const tr = el("tr");
+      cell(tr, t(i.rule === "default" ? "mon.ocap_default" : "alarmrule." + i.rule)); cell(tr, i.operator_action || "–"); cell(tr, i.responsible || "–");
+      cell(tr, i.escalate_to || "–"); cell(tr, i.escalate_after_min ? `${i.escalate_after_min} min` : "–");
+      table.appendChild(tr);
+    });
+  }
+  function renderMonitor() {
+    const v = M.view, m = v.monitor, lim = v.limits;
+    $("#md-title").textContent = m.name;
+    $("#md-sub").textContent = t("mon.sub", { process: m.process || "–", characteristic: m.characteristic, unit: m.unit || "–", line: m.line || "–",
+      chart: t("result.kind_" + m.kind), n: m.n, rev: lim.revision, by: lim.created_by, at: when(lim.created_at) });
+    // the action plan must be known
+    const plan = [{ rule: "default", ...m.ocap.default }].concat(Object.entries(m.ocap.rules).map(([rule, c]) => ({ rule, ...c })));
+    $("#md-ack").hidden = !(m.require_ack && !v.acknowledged);
+    ocapTable($("#md-plan").firstChild || $("#md-plan").appendChild(el("table", "grid")), plan);
+    renderIncident();
+    // entry fields follow the subgroup size
+    const box = $("#md-values");
+    if (box.dataset.n !== String(m.n) || box.dataset.id !== String(m.id)) {
+      box.replaceChildren(); box.dataset.n = String(m.n); box.dataset.id = String(m.id);
+      for (let i = 0; i < m.n; i++) {
+        const input = el("input"); input.type = "number"; input.step = "any"; input.id = "md-v" + i;
+        input.setAttribute("aria-label", t("mon.value_n", { i: i + 1 }));
+        input.placeholder = String(i + 1);
+        input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitPoint(); } });
+        box.appendChild(input);
+      }
+    }
+    $("#md-entry-card").hidden = !m.active;
+    renderMonitorResult();
+    drawMonitorCharts();
+    renderMonitorPoints();
+    renderLimits();
+  }
+  function renderIncident() {
+    const inc = M.view.incident, card = $("#md-incident");
+    card.hidden = !inc;
+    if (!inc) return;
+    $("#mi-title").textContent = t("mon.incident_title", { id: inc.id, at: when(inc.opened_at), seq: inc.point_seq });
+    const rules = inc.rules.map((r) => `${t("mon.chart_" + r.chart)}: ${t("alarmrule." + r.rule)}`).join("; ");
+    $("#mi-line").textContent = `${rules} · ${inc.acked_by ? t("mon.taken_over_by", { by: inc.acked_by, at: when(inc.acked_at) }) : t("mon.not_taken_over")}` +
+      (inc.overdue ? " · " + t("mon.overdue", { min: inc.escalate_after_min }) : "");
+    $("#mi-line").className = "strong " + (inc.overdue ? "status-alarm" : "");
+    ocapTable($("#mi-instructions"), inc.instructions);
+    const ul = $("#mi-events"); ul.replaceChildren();
+    inc.events.forEach((e) => {
+      const what = e.kind === "action" || e.kind === "observation" ? `${t("mon.kind_" + e.kind)} (${t("mon.step_" + e.step)})` : t("mon.kind_" + e.kind);
+      const li = el("li", "", `${when(e.at)} · ${e.by} · ${what}${e.text ? ": " : ""}`);
+      if (e.text) li.appendChild(el("span", "", e.text));
+      ul.appendChild(li);
+    });
+  }
+  function monitorPart(which) {
+    const v = M.view, lim = v.limits[which === "loc" ? "location" : "variation"];
+    const rows = v.points.filter((p) => p.valid && (which === "loc" || p.var !== null));
+    const key = which === "loc" ? "location" : "variation";
+    return {
+      values: rows.map((p) => (which === "loc" ? p.loc : p.var)),
+      labels: rows.map((p) => p.label || `#${p.seq}`),
+      lcl: lim.lcl, center: lim.cl, ucl: lim.ucl, wlcl: lim.wlcl ?? null, wucl: lim.wucl ?? null,
+      alarms: rows.map((p, i) => ({ index: i, hit: p.alarms.some((a) => a.chart === key) })).filter((a) => a.hit),
+    };
+  }
+  function drawMonitorCharts() {
+    const m = M.view.monitor;
+    const loc = monitorPart("loc"), vr = monitorPart("var");
+    const draw = (sel, part, title) => { if (part.values.length) drawChart($(sel), part, title); else $(sel).replaceChildren(el("p", "muted", t("mon.no_points"))); };
+    draw("#md-chart-loc", loc, `${t("result.chart_location")} – ${t(m.kind === "imr" ? "result.series_location_imr" : "result.series_location_xbar")}`);
+    draw("#md-chart-var", vr, `${t("result.chart_variation")} – ${t("result.series_variation_" + m.kind)}`);
+  }
+  function statusOf(p) {
+    if (!p.valid) return [t("mon.status_invalid"), ""];
+    if (p.alarms.length) return [p.alarms.map((a) => t("alarmrule." + a.rule)).join(", "), "status-alarm"];
+    if (p.warnings.length) return [t("mon.status_warning"), "status-warning"];
+    return [t("mon.status_ok"), "status-ok"];
+  }
+  function renderMonitorPoints() {
+    const table = $("#md-points"); table.replaceChildren();
+    const head = el("tr");
+    ["mon.col_no", "mon.col_time", "mon.col_label", "mon.col_values", "mon.col_loc", "mon.col_var", "mon.col_status", "mon.col_by", ""].forEach((k) => cell(head, k ? t(k) : "", "th"));
+    table.appendChild(head);
+    M.view.points.slice(-30).reverse().forEach((p) => {
+      const tr = el("tr", p.valid ? "" : "invalid-point");
+      cell(tr, String(p.seq)); cell(tr, when(p.taken_at)); cell(tr, p.label); cell(tr, p.values.map((x) => sig(x, 5)).join(" "));
+      cell(tr, sig(p.loc, 5)); cell(tr, p.var === null ? "–" : sig(p.var, 4));
+      const [text, cls] = statusOf(p);
+      const s = cell(tr, text); s.className = cls; if (p.invalid) s.title = `${p.invalid.reason} (${p.invalid.by})`;
+      cell(tr, p.entered_by);
+      const actions = cell(tr, "");
+      if (p.valid && state.user.role !== "viewer") {
+        const b = el("button", "", t("mon.invalidate"));
+        b.addEventListener("click", async () => {
+          const reason = window.prompt(t("mon.invalidate_prompt", { seq: p.seq }));
+          if (!reason) return;
+          await guarded(async () => { await post(`/api/monitors/${M.id}/points/${p.seq}/invalid`, { reason }); });
+          openMonitor(M.id);
+        });
+        actions.appendChild(b);
+      }
+      table.appendChild(tr);
+    });
+  }
+  function renderMonitorResult() {
+    const box = $("#md-result"); box.replaceChildren();
+    const r = M.last;
+    if (!r) return;
+    const div = el("div", { ok: "ok-box", warning: "warn-box", alarm: "alarm-box" }[r.status]);
+    div.appendChild(el("p", "strong status-" + r.status, t("mon.result_" + r.status, { seq: r.point.seq })));
+    if (r.verification) div.appendChild(el("p", "", t("mon.verification_note")));
+    if (r.status === "alarm") {
+      div.appendChild(el("p", "", r.point.alarms.map((a) => `${t("mon.chart_" + a.chart)}: ${t("alarmrule." + a.rule)}`).join("; ")));
+      const table = el("table", "grid"); ocapTable(table, r.instructions); div.appendChild(table);
+      div.appendChild(el("p", "strong", t("mon.next_step")));
+    }
+    box.appendChild(div);
+  }
+  async function submitPoint() {
+    const m = M.view.monitor;
+    const values = [];
+    for (let i = 0; i < m.n; i++) {
+      const raw = $("#md-v" + i).value.trim();
+      if (raw === "") return showError({ code: "wrong_value_count", message: "", params: { n: m.n } });
+      values.push(Number(raw));
+    }
+    const body = { values, label: $("#md-label").value };
+    const taken = $("#md-taken").value;
+    if (taken) body.taken_at = new Date(taken).toISOString();
+    await guarded(async () => {
+      M.last = await post(`/api/monitors/${M.id}/points`, body);
+      $$("#md-values input").forEach((i) => { i.value = ""; });
+      $("#md-label").value = ""; $("#md-taken").value = "";
+      M.view = await api(`/api/monitors/${M.id}`);
+      renderMonitor();
+      startAlertPolling();
+      const first = $("#md-v0"); if (first) first.focus();
+    });
+  }
+  async function incidentAction(kind) {
+    const inc = M.view.incident;
+    const body = { kind, step: kind === "action" ? $("#mi-step").value : "other", text: $("#mi-text").value };
+    await guarded(async () => {
+      await post(`/api/monitors/${M.id}/incidents/${inc.id}/events`, body);
+      $("#mi-text").value = "";
+      M.view = await api(`/api/monitors/${M.id}`); renderMonitor(); startAlertPolling();
+    });
+  }
+  async function closeIncident() {
+    const inc = M.view.incident;
+    await guarded(async () => {
+      await post(`/api/monitors/${M.id}/incidents/${inc.id}/close`, { outcome: $("#mi-outcome").value, text: $("#mi-close-text").value });
+      $("#mi-close-text").value = ""; M.last = null;
+      M.view = await api(`/api/monitors/${M.id}`); renderMonitor(); startAlertPolling();
+    });
+  }
+  function sourceText(s) {
+    if (s.type === "dataset") return t("mon.src_text_dataset", { name: s.name || s.dataset_id, n: s.n_values });
+    if (s.type === "points") return t("mon.src_text_points", { from: s.seq_from, to: s.seq_to, n: s.n_points });
+    return t("mon.src_text_parameters", { mu: sig(s.mu, 6), sigma: sig(s.sigma, 5) });
+  }
+  function renderLimits() {
+    const v = M.view, lim = v.limits, box = $("#md-limits");
+    box.replaceChildren();
+    const row = (label, o) => `${label}: ${sig(o.lcl, 6)} / ${sig(o.cl, 6)} / ${sig(o.ucl, 6)}` + (o.wlcl !== undefined ? ` (${t("mon.warning_limit")} ${sig(o.wlcl, 6)} / ${sig(o.wucl, 6)})` : "");
+    box.appendChild(el("p", "", t("mon.limits_now", { rev: lim.revision, mu: sig(lim.mu, 6), sigma: sig(lim.sigma, 5) })));
+    box.appendChild(el("p", "", row(t("result.chart_location"), lim.location)));
+    box.appendChild(el("p", "", row(t("result.chart_variation"), lim.variation)));
+    const table = el("table", "grid"), head = el("tr");
+    ["mon.rev", "mon.col_time", "mon.col_by", "mon.source", "mon.reason"].forEach((k) => cell(head, t(k), "th")); table.appendChild(head);
+    v.limits_history.forEach((h) => {
+      const tr = el("tr"); cell(tr, `#${h.revision}`); cell(tr, when(h.created_at)); cell(tr, h.created_by); cell(tr, sourceText(h.source)); cell(tr, h.reason); table.appendChild(tr);
+    });
+    const wrap = el("div", "scroll"); wrap.appendChild(table); box.appendChild(wrap);
+  }
+  async function setLimits() {
+    const type = $("#nl-type").value, num = (id) => Number($(id).value);
+    const source = type === "points" ? { type, seq_from: num("#nl-from"), seq_to: num("#nl-to") }
+      : type === "parameters" ? { type, mu: num("#nl-mu"), sigma: num("#nl-sigma") } : { type, dataset_id: $("#nl-dataset").value };
+    await guarded(async () => {
+      M.view = await post(`/api/monitors/${M.id}/limits`, { source, reason: $("#nl-reason").value });
+      $("#nl-reason").value = ""; renderMonitor();
+    });
+  }
+  async function fillDatasetSelect(select) {
+    select.replaceChildren();
+    try { (await api("/api/datasets")).datasets.forEach((d) => { const o = el("option", "", `${d.name} (${d.n_total})`); o.value = d.id; select.appendChild(o); }); } catch (e) { /* none */ }
+  }
+  function syncSourceFields() {
+    const type = $("#nl-type").value;
+    ["points", "parameters", "dataset"].forEach((k) => $$(".nl-" + k).forEach((e) => { e.hidden = k !== type; }));
+    if (type === "dataset" && !$("#nl-dataset").options.length) fillDatasetSelect($("#nl-dataset"));
+  }
+  // ---- ongoing performance and capability (draft 10.4)
+  async function showOngoing() {
+    const window_ = Number($("#og-window").value) || 125;
+    await guarded(async () => {
+      const o = await api(`/api/monitors/${M.id}/ongoing?window=${window_}`);
+      const out = $("#og-out"); out.replaceChildren();
+      const w = o.window, r = o.result;
+      out.appendChild(el("p", "muted", t("mon.og_window", { n: w.points, from: w.from_seq, to: w.to_seq, a: when(w.from), b: when(w.to) })));
+      if (r.indices) {
+        const names = `${r.names.pk} = ${fmt(r.indices.pk)}` + (r.indices.p !== null ? ` · ${r.names.p} = ${fmt(r.indices.p)}` : "");
+        out.appendChild(el("p", "strong", `${names} · ${t("result.class_" + r.stability.class)}`));
+        if (r.targets && !r.targets.blocked) out.appendChild(el("p", "", t("mon.og_targets", { p: fmt(r.targets.p), pk: fmt(r.targets.pk), verdict: t("result.verdict_" + (r.targets.verdict_pk || "none")) })));
+      } else out.appendChild(el("p", "muted", t("mon.og_no_spec")));
+      out.appendChild(el("p", "strong", o.quadrant.number ? t("mon.quadrant_" + o.quadrant.number) : t("mon.quadrant_unknown")));
+      out.appendChild(el("p", "muted", t("mon.quadrant_note")));
+      if (o.trend.length) {
+        const table = el("table", "grid"), head = el("tr");
+        ["mon.og_end", "mon.og_index", "mon.og_stability", "mon.og_quadrant"].forEach((k) => cell(head, t(k), "th")); table.appendChild(head);
+        o.trend.forEach((x) => { const tr = el("tr"); cell(tr, `#${x.end_seq}`); cell(tr, `${x.name_pk} ${fmt(x.pk)}`); cell(tr, t("result.class_" + x.stability)); cell(tr, x.quadrant.number ? ["", "I", "II", "III", "IV"][x.quadrant.number] : "–"); table.appendChild(tr); });
+        const wrap = el("div", "scroll"); wrap.appendChild(table); out.appendChild(wrap);
+      }
+      const lr = o.limits_review;
+      out.appendChild(el("p", lr.verdict === "ok" ? "status-ok" : "status-warning", t("mon.review_" + lr.verdict, {
+        ratio: lr.sigma_ratio === null ? "–" : fmt(lr.sigma_ratio), alarms: lr.alarm_points, expected: fmt(lr.expected_alarm_points, 1), shift: lr.location_shift_in_se === null ? "–" : fmt(lr.location_shift_in_se) })));
+      const rs = o.response;
+      const fmtSec = (s) => (s === null || s === undefined ? "–" : s < 120 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`);
+      out.appendChild(el("p", "muted", t("mon.og_response", { n: rs.incidents, open: rs.open, overdue: rs.overdue,
+        ack: rs.to_ack ? fmtSec(rs.to_ack.median) : "–", action: rs.to_action ? fmtSec(rs.to_action.median) : "–", close: rs.to_close ? fmtSec(rs.to_close.median) : "–" })));
+    });
+  }
+  async function ongoingReport() {
+    await guarded(async () => {
+      const r = await post(`/api/monitors/${M.id}/ongoing-report`, { window: Number($("#og-window").value) || 125, language: state.lang });
+      const out = $("#og-out");
+      const p = el("p", "row");
+      p.appendChild(el("span", "strong ok", t("report.created", { id: r.id })));
+      p.appendChild(linkButton(t("report.open"), r.urls.html, true)); p.appendChild(linkButton(t("report.download"), r.urls.download));
+      p.appendChild(linkButton(t("report.excel"), `${r.urls.html}/report.xlsx`)); out.prepend(p);
+    });
+  }
+  // ---- set up a monitor
+  function ocapEditorRows(ocap) {
+    const table = $("#me-ocap"); table.replaceChildren();
+    const head = el("tr");
+    ["mon.ocap_criterion", "mon.ocap_action", "mon.ocap_responsible", "mon.ocap_escalate", "mon.ocap_after"].forEach((k) => cell(head, t(k), "th")); table.appendChild(head);
+    ["default"].concat(RULES).forEach((key) => {
+      const c = key === "default" ? ocap.default : ocap.rules[key] || {};
+      const tr = el("tr"); tr.dataset.key = key;
+      cell(tr, key === "default" ? t("mon.ocap_default") : t("alarmrule." + key));
+      ["operator_action", "responsible", "escalate_to"].forEach((f) => { const td = el("td"), i = el("input"); i.type = "text"; i.maxLength = f === "operator_action" ? 2000 : 200; i.value = c[f] || ""; i.dataset.f = f; td.appendChild(i); tr.appendChild(td); });
+      const td = el("td"), i = el("input", "small"); i.type = "number"; i.min = "0"; i.max = "10080"; i.step = "1"; i.value = c.escalate_after_min || 0; i.dataset.f = "escalate_after_min"; td.appendChild(i); tr.appendChild(td);
+      table.appendChild(tr);
+    });
+  }
+  function readOcap() {
+    const out = { default: {}, rules: {} };
+    $$("#me-ocap tr[data-key]").forEach((tr) => {
+      const c = {}; $$("input", tr).forEach((i) => { c[i.dataset.f] = i.dataset.f === "escalate_after_min" ? Number(i.value) || 0 : i.value; });
+      if (tr.dataset.key === "default") out.default = c;
+      else if (c.operator_action || c.responsible || c.escalate_to || c.escalate_after_min) out.rules[tr.dataset.key] = c;
+    });
+    return out;
+  }
+  async function openMonitorEditor(monitor) {
+    M.editing = monitor ? monitor.id : "new";
+    const m = monitor || { name: "", process: "", characteristic: "", unit: "", line: "", kind: "xbar-s", n: 5, alpha: null, warn_alpha: 0.05,
+      specs: {}, rules: { beyond_limits: true }, ocap: { default: {}, rules: {} }, require_ack: true, active: true };
+    $("#mon-editor-title").textContent = monitor ? t("mon.edit_title", { name: m.name }) : t("mon.new");
+    ["name", "process", "characteristic", "unit", "line"].forEach((k) => { $("#me-" + k).value = m[k] || ""; });
+    $("#me-kind").value = m.kind; $("#me-n").value = m.n; $("#me-alpha").value = m.alpha && Math.abs(m.alpha - 0.01) < 1e-12 ? "0.01" : "";
+    $("#me-warn").value = m.warn_alpha ?? "";
+    ["#me-kind", "#me-n", "#me-alpha", "#me-warn"].forEach((s) => { $(s).disabled = !!monitor; });  // the shape is fixed once there are limits
+    $("#me-source").hidden = !!monitor;
+    $("#me-lsl").value = m.specs.lsl ?? ""; $("#me-usl").value = m.specs.usl ?? ""; $("#me-class").value = m.specs.target_class || ""; $("#me-model").value = m.specs.model || "";
+    fillRules("mon-r-", m.rules, false);
+    ocapEditorRows(m.ocap);
+    $("#me-ack").checked = m.require_ack; $("#me-active").checked = m.active;
+    syncKindFields();
+    if (!monitor) await fillDatasetSelect($("#me-dataset"));
+    showMonitorView("#mon-editor");
+  }
+  function syncKindFields() {
+    if ($("#me-kind").value === "imr") $("#me-n").value = 1;
+    else if (Number($("#me-n").value) < 2) $("#me-n").value = 5;
+    if (!$("#me-kind").disabled) $("#me-n").disabled = $("#me-kind").value === "imr";
+  }
+  function readMonitorEditor() {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const editing = M.editing !== "new" ? M.view.monitor : null;
+    const warn = editing ? editing.warn_alpha : num("#me-warn");
+    const config = {
+      name: $("#me-name").value, process: $("#me-process").value, characteristic: $("#me-characteristic").value, unit: $("#me-unit").value, line: $("#me-line").value,
+      kind: editing ? editing.kind : $("#me-kind").value, n: editing ? editing.n : Number($("#me-n").value), warn_alpha: warn,
+      specs: { lsl: num("#me-lsl"), usl: num("#me-usl"), target_class: $("#me-class").value || null, model: $("#me-model").value || null,
+        controlled_stable: editing ? editing.specs.controlled_stable : false, edition: editing ? editing.specs.edition : "draft" },
+      rules: readRules("mon-r-"), ocap: readOcap(), require_ack: $("#me-ack").checked, active: $("#me-active").checked,
+    };
+    if (editing) config.alpha = editing.alpha; else if ($("#me-alpha").value) config.alpha = Number($("#me-alpha").value);
+    return config;
+  }
+  async function saveMonitor() {
+    await guarded(async () => {
+      const config = readMonitorEditor();
+      if (M.editing === "new") {
+        const type = $("#me-src-type").value;
+        const source = type === "parameters" ? { type, mu: Number($("#me-mu").value), sigma: Number($("#me-sigma").value) } : { type, dataset_id: $("#me-dataset").value };
+        M.view = await post("/api/monitors", { config, source });
+      } else {
+        M.view = await api(`/api/monitors/${M.editing}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config }) });
+      }
+      M.id = M.view.monitor.id; M.last = null;
+      renderMonitor(); showMonitorView("#mon-detail");
+    });
+  }
+  function wireMonitor() {
+    $("#mon-new").addEventListener("click", () => openMonitorEditor(null));
+    $("#me-cancel").addEventListener("click", () => showMonitorView(M.id && M.editing !== "new" ? "#mon-detail" : "#mon-list-view"));
+    $("#me-save").addEventListener("click", saveMonitor);
+    $("#me-kind").addEventListener("change", syncKindFields);
+    $("#me-src-type").addEventListener("change", () => { const d = $("#me-src-type").value === "dataset"; $("#me-src-dataset").hidden = !d; $("#me-src-parameters").hidden = d; });
+    $("#mon-back").addEventListener("click", () => { M.id = null; M.view = null; loadMonitors(); });
+    $("#mon-edit").addEventListener("click", () => openMonitorEditor(M.view.monitor));
+    $("#mon-refresh").addEventListener("click", () => openMonitor(M.id, true));
+    $("#md-ack-btn").addEventListener("click", () => guarded(async () => { await post(`/api/monitors/${M.id}/ack`, {}); M.view = await api(`/api/monitors/${M.id}`); renderMonitor(); }));
+    $("#md-submit").addEventListener("click", submitPoint);
+    $("#mi-ack").addEventListener("click", () => incidentAction("ack"));
+    $("#mi-action").addEventListener("click", () => incidentAction("action"));
+    $("#mi-observation").addEventListener("click", () => incidentAction("observation"));
+    $("#mi-escalate").addEventListener("click", () => incidentAction("escalation"));
+    $("#mi-close").addEventListener("click", closeIncident);
+    $("#nl-type").addEventListener("change", syncSourceFields); syncSourceFields();
+    $("#nl-save").addEventListener("click", setLimits);
+    $("#og-show").addEventListener("click", showOngoing);
+    $("#og-report").addEventListener("click", ongoingReport);
+  }
+
   // ---------------------------------------------------------------- saved data and reports
   function cell(tr, text, tag = "td") { const c = el(tag, "", text); tr.appendChild(c); return c; }
   function linkButton(label, href, newTab) {
@@ -1080,7 +1479,7 @@
       const tr = el("tr");
       cell(tr, u.username); cell(tr, u.display_name);
       const roleCell = cell(tr, ""), role = el("select");
-      ["viewer", "engineer", "admin"].forEach((r) => { const o = el("option", "", t("role." + r)); o.value = r; role.appendChild(o); });
+      ["viewer", "operator", "engineer", "admin"].forEach((r) => { const o = el("option", "", t("role." + r)); o.value = r; role.appendChild(o); });
       role.value = u.role;
       role.addEventListener("change", () => updateUser(u.id, { role: role.value }));
       roleCell.appendChild(role);
@@ -1151,6 +1550,8 @@
     if (state.dataset) renderData();
     if (state.result) renderResult();
     renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
+    if (state.user && M.view && !$("#mon-detail").hidden) renderMonitor();
+    if (state.user && !$("#mon-list-view").hidden && !$("#tab-monitor").hidden) renderMonitorList();
     if (state.user && state.profile) { onProfileChange(); }
     if (state.user && !$("#tab-saved").hidden) loadSaved();
     if (state.user && !$("#tab-admin").hidden) loadAdmin();
@@ -1188,6 +1589,7 @@
     $("#pw-btn").addEventListener("click", () => showTab("password"));
     $("#password-form").addEventListener("submit", (e) => { e.preventDefault(); doChangePassword(); });
     $("#nu-create").addEventListener("click", createUser);
+    wireMonitor();
     $("#a-profile").addEventListener("change", onProfileChange);
     $("#pf-new").addEventListener("click", () => openProfileEditor(null));
     $("#pf-save").addEventListener("click", saveProfile);

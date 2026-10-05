@@ -165,3 +165,47 @@ class ProfileBody(Strict):
     name: str = Field(min_length=1, max_length=100)
     analysis: dict = Field(default_factory=dict)
     report: dict = Field(default_factory=dict)
+
+
+class MonitorCreateBody(Strict):
+    """config: see spc.monitor.model.validate_config. source: {type: dataset|parameters, ...} for the first limits."""
+
+    config: dict
+    source: dict
+
+
+class MonitorConfigBody(Strict):
+    config: dict
+
+
+class LimitsBody(Strict):
+    source: dict
+    reason: str = Field(max_length=2000)
+
+
+class PointBody(Strict):
+    values: list[float] = Field(min_length=1, max_length=25)
+    label: str = Field(default="", max_length=100)
+    tags: dict[str, str] = Field(default_factory=dict, max_length=6)
+    taken_at: str | None = Field(default=None, max_length=40)
+
+
+class ReasonBody(Strict):
+    reason: str = Field(max_length=2000)
+
+
+class EventBody(Strict):
+    kind: Literal["ack", "action", "observation", "escalation"]
+    step: str = Field(default="", max_length=40)
+    text: str = Field(default="", max_length=2000)
+
+
+class CloseBody(Strict):
+    outcome: Literal["recovered", "invalid_sample", "escalated"]
+    text: str = Field(default="", max_length=2000)
+
+
+class OngoingReportBody(Strict):
+    window: int = Field(default=125, ge=10, le=2000)
+    language: Literal["zh-TW", "en"] = "en"
+    meta: ReportMetaBody = Field(default_factory=ReportMetaBody)

@@ -12,6 +12,7 @@ CHEAP = {"n": 2**4, "r": 1, "p": 1}
 
 
 def make_app(db=None, max_upload=200_000, clock=None, **kwargs):
+    """Extra keyword arguments go to create_app (secure_cookies, notifiers)."""
     db = Database() if db is None else db
     auth = AuthService(db, cost=CHEAP, **({"clock": clock} if clock else {}))
     existing = {u.username for u in auth.list_users()}

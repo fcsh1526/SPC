@@ -610,3 +610,134 @@ def test_customer_profile_from_editor_to_report(server, browser, tmp_path):
     assert report.locator("section.el h2 .no", has_text="22").count() == 0  # element 22 is switched off in the profile
     assert problems == [], problems
     ctx.close()
+
+
+def test_spc_monitor_at_the_line_from_set_up_to_the_action_plan(server, browser, app):
+    import numpy as np
+
+    expect = playwright_sync.expect
+    users = {u.username: u for u in app.state.auth.list_users()}
+    if "oper" not in users:
+        app.state.auth.create_user("oper", PASSWORD, "operator", "Olga Operator")
+    problems = []
+
+    # an engineer sets the monitor up
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    eng = ctx.new_page()
+    eng.on("pageerror", lambda e: problems.append(str(e)))
+    eng.goto(server)
+    sign_in(eng)
+    eng.click("nav.tabs button[data-tab=monitor]")
+    eng.click("#mon-new")
+    eng.fill("#me-name", "Shaft diameter L1")
+    eng.fill("#me-process", "turning")
+    eng.fill("#me-characteristic", "diameter")
+    eng.fill("#me-unit", "mm")
+    eng.fill("#me-line", "L1")
+    eng.fill("#me-mu", "10")
+    eng.fill("#me-sigma", "0.1")
+    eng.fill("#me-lsl", "9.5")
+    eng.fill("#me-usl", "10.5")
+    eng.select_option("#me-class", "major")
+    eng.select_option("#me-model", "A1")
+    eng.locator("#me-ocap tr[data-key=default] input").nth(0).fill("Measure again, then call the shift leader")
+    eng.locator("#me-ocap tr[data-key=default] input").nth(1).fill("Shift leader")
+    eng.click("#me-save")
+    expect(eng.locator("#md-title")).to_have_text("Shaft diameter L1")
+    expect(eng.locator("#md-sub")).to_contain_text("limits revision 1")
+    eng.locator("#md-limits").locator("xpath=ancestor::details").locator("summary").click()
+    expect(eng.locator("#md-limits")).to_contain_text("Limits revision 1")
+    expect(eng.locator("#md-limits")).to_contain_text("parameters: mean 10, standard deviation 0.1")
+    ctx.close()
+
+    # the operator works at the line
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    op = ctx.new_page()
+    op.on("pageerror", lambda e: problems.append(str(e)))
+    op.goto(server)
+    sign_in(op, "oper")
+    expect(op.locator("#mon-new")).to_be_hidden()  # an operator does not set monitors up
+    op.click("nav.tabs button[data-tab=monitor]")
+    op.click("#mon-list button:has-text('Open')")
+    expect(op.locator("#mon-edit")).to_be_hidden()
+    expect(op.locator("#md-ack")).to_be_visible()
+    expect(op.locator("#md-plan")).to_contain_text("Measure again, then call the shift leader")
+
+    def enter(values):
+        for i, v in enumerate(values):
+            op.fill(f"#md-v{i}", str(v))
+        op.click("#md-submit")
+
+    enter([10.0, 10.05, 9.97, 10.04, 9.98])
+    expect(op.locator("#errors")).to_contain_text("Confirm first that you know the action plan")  # not before the confirmation
+    op.click("#errors button")
+    op.click("#md-ack-btn")
+    expect(op.locator("#md-ack")).to_be_hidden()
+    enter([10.0, 10.05, 9.97, 10.04, 9.98])
+    expect(op.locator("#md-result .ok-box")).to_contain_text("within the limits")
+    enter([10.4, 10.5, 10.45, 10.55, 10.5])
+    expect(op.locator("#md-result .alarm-box")).to_contain_text("OUT OF CONTROL")
+    expect(op.locator("#md-result .alarm-box")).to_contain_text("Shift leader")
+    expect(op.locator("#md-incident")).to_be_visible()
+    expect(op.locator("#alert-badge")).to_have_text("1")
+    expect(op.locator("#mi-line")).to_contain_text("nobody has taken it over yet")
+
+    # the chart shows the fixed control limits and the warning limits, and never the specification
+    expect(op.locator("#md-chart-loc svg line.limit")).to_have_count(2)
+    expect(op.locator("#md-chart-loc svg line.warning")).to_have_count(2)
+    expect(op.locator("#md-chart-loc svg circle.alarm")).to_have_count(1)
+    chart_text = op.locator("#md-chart-loc").inner_text() + op.locator("#md-chart-var").inner_text()
+    assert "USL" not in chart_text and "LSL" not in chart_text and "10.5" not in op.locator("#md-chart-loc svg text.limit-label").all_text_contents()
+
+    op.click("#mi-close")  # nothing was done yet
+    expect(op.locator("#errors")).to_contain_text("Log the corrective action first")
+    op.click("#errors button")
+    op.click("#mi-ack")
+    expect(op.locator("#mi-line")).to_contain_text("taken over by Olga Operator (oper)")
+    op.select_option("#mi-step", "adjust_parameters")
+    op.fill("#mi-text", "Raised the feed by 2 %")
+    op.click("#mi-action")
+    expect(op.locator("#mi-events")).to_contain_text("Raised the feed by 2 %")
+    op.fill("#mi-close-text", "Control is back")
+    op.click("#mi-close")
+    expect(op.locator("#errors")).to_contain_text("new sample after the last action")  # proof is needed
+    op.click("#errors button")
+    enter([9.96, 10.06, 10.0, 10.08, 9.97])
+    expect(op.locator("#md-result")).to_contain_text("verification")
+    op.click("#mi-close")
+    expect(op.locator("#md-incident")).to_be_hidden()
+    expect(op.locator("#alert-badge")).to_be_hidden()
+
+    # a sample that was measured wrongly is declared invalid, with a reason
+    enter([10.0, 10.05, 9.97, 10.04, 9.98])
+    op.once("dialog", lambda d: d.accept("gauge not zeroed"))
+    op.locator("#md-points tr").nth(1).locator("button").click()  # the newest sample is on the first row
+    expect(op.locator("#md-points tr.invalid-point")).to_have_count(1)
+    expect(op.locator("#md-points tr.invalid-point td").nth(6)).to_have_text("invalid")
+    ctx.close()
+
+    # the ongoing report needs some more samples
+    rng = np.random.default_rng(31)
+    operator = app.state.auth.get_user(next(u.id for u in app.state.auth.list_users() if u.username == "oper"))
+    mid = app.state.monitors.store.list()[-1]["id"]
+    for _ in range(14):
+        app.state.monitors.add_point(mid, [float(v) for v in rng.normal(10, 0.1, 5)], "", {}, None, operator)
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=monitor]")
+    page.click("#mon-list button:has-text('Open')")
+    page.locator("#md-ongoing-box summary").click()
+    page.fill("#og-window", "40")
+    page.click("#og-show")
+    expect(page.locator("#og-out")).to_contain_text("Quadrant")
+    expect(page.locator("#og-out")).to_contain_text("Response of the action plan: 1 incidents")
+    page.click("#og-report")
+    expect(page.locator("#og-out")).to_contain_text("was created")
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#md-title")).to_have_text("Shaft diameter L1")
+    expect(page.locator("nav.tabs button[data-tab=monitor]")).to_contain_text("現場 SPC")
+    assert problems == [], problems
+    ctx.close()

@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from spc import __version__
 from spc.api.accounts import add_account_routes
+from spc.api.monitors import add_monitor_routes
 from spc.api.errors import ApiError, error_response as _error
 from spc.api.schemas import (
     AnalyzeBody,
@@ -34,6 +35,10 @@ from spc.api.schemas import (
     TargetBody,
 )
 from spc.auth import Audit, AuthError, AuthService, User
+from spc.monitor.model import MonitorError
+from spc.monitor.notify import Notifier
+from spc.monitor.service import MonitorService
+from spc.monitor.store import IncidentNotFound, MonitorNameTaken, MonitorNotFound
 from spc.core.arl_oc import alarm_probability, arl, required_subgroup_size
 from spc.core.capability import Stage, TargetAdjustmentNotAllowed, required_targets
 from spc.core.charts import attribute as attr
@@ -101,6 +106,7 @@ def create_app(
     max_upload: int = MAX_UPLOAD_BYTES,
     secure_cookies: bool | None = None,
     auth: AuthService | None = None,
+    notifiers: list[Notifier] | None = None,
 ) -> FastAPI:
     """`db` defaults to a private in-memory database. `secure_cookies` None means: Secure when the request is https."""
     db = Database() if db is None else db
@@ -130,7 +136,7 @@ def create_app(
 
         return check
 
-    reader, writer, admin = require("viewer"), require("engineer"), require("admin")
+    reader, operator, writer, admin = require("viewer"), require("operator"), require("engineer"), require("admin")
 
     app = FastAPI(title="SPC", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json",
                   dependencies=[Depends(authenticate)])
@@ -139,6 +145,8 @@ def create_app(
     profiles = ProfileStore(db)
     app.state.db, app.state.auth, app.state.audit, app.state.store, app.state.reports = db, auth, audit, store, reports
     app.state.profiles = profiles
+    monitors = MonitorService(db, audit, store, notifiers or [])
+    app.state.monitors = monitors
 
     # ------------------------------------------------------------------ plumbing
 
@@ -178,6 +186,22 @@ def create_app(
     @app.exception_handler(DatasetNotFound)
     async def _missing(_: Request, exc: DatasetNotFound):
         return _error(404, "dataset_not_found", "dataset not found")
+
+    @app.exception_handler(MonitorError)
+    async def _monitor_error(_: Request, exc: MonitorError):
+        return _error(exc.status, exc.code, str(exc), exc.params)
+
+    @app.exception_handler(MonitorNotFound)
+    async def _monitor_missing(_: Request, exc: MonitorNotFound):
+        return _error(404, "monitor_not_found", "monitor not found")
+
+    @app.exception_handler(IncidentNotFound)
+    async def _incident_missing(_: Request, exc: IncidentNotFound):
+        return _error(404, "incident_not_found", "incident not found")
+
+    @app.exception_handler(MonitorNameTaken)
+    async def _monitor_taken(_: Request, exc: MonitorNameTaken):
+        return _error(409, "monitor_name_taken", "a monitor with this name exists already")
 
     @app.exception_handler(ProfileNotFound)
     async def _profile_missing(_: Request, exc: ProfileNotFound):
@@ -222,6 +246,7 @@ def create_app(
                 "session": None if info is None else {"user": info.user.to_json(), "csrf": info.csrf}}
 
     add_account_routes(app, auth, audit, admin, secure_cookies)
+    add_monitor_routes(app, monitors, store, reports, audit, db, reader, operator, writer, admin)
 
     # ------------------------------------------------------------------ import
 
