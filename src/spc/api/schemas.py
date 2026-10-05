@@ -184,7 +184,8 @@ class LimitsBody(Strict):
 
 
 class PointBody(Strict):
-    values: list[float] = Field(min_length=1, max_length=25)
+    values: list[float] = Field(min_length=1, max_length=100)
+    part: str | None = Field(default=None, max_length=40)  # the product of a short-run (Z-MR) monitor
     label: str = Field(default="", max_length=100)
     tags: dict[str, str] = Field(default_factory=dict, max_length=6)
     taken_at: str | None = Field(default=None, max_length=40)

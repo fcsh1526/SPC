@@ -21,6 +21,7 @@ import numpy as np
 from scipy.stats import chi2
 
 from spc.core.charts.attribute import exact_limits
+from spc.core.charts import multivariate as mv
 from spc.core.charts.sequential import arl_table, cusum_h, cusum_step, ewma_half_width, ewma_l
 from spc.core.charts.variable import imr, median_r, xbar_r, xbar_s
 from spc.core.constants import ALPHA_3SIGMA, c4, cn, d2, u_quantile, w_quantile
@@ -38,7 +39,13 @@ BASE_KIND = {"acc-xbar": "xbar-s", "acc-median": "median-r", "acc-x": "imr"}
 SEQ_KINDS = ("cusum", "ewma")
 SEQ_RULES = ("shift_up", "shift_down")
 SEQ_DEFAULTS = {"k": 0.5, "lambda": 0.2, "fir": 0.0}  # reference value k (in standard errors), EWMA weight, head start (share of h)
-KINDS = (*SUBGROUP_KINDS, "imr", *ATTRIBUTE_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS)
+# short runs (draft 10.3.2.9): Z-MR, the values of several products are standardised with the target and the standard
+# deviation of their product. Several related characteristics (draft 10.3.2.8): Hotelling's T2 and MEWMA.
+ZMR_KIND = "zmr"
+VECTOR_KINDS = ("t2", "mewma")
+MAX_PARTS = 500
+BASE_KIND["zmr"] = "imr"
+KINDS = (*SUBGROUP_KINDS, "imr", *ATTRIBUTE_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS, ZMR_KIND, *VECTOR_KINDS)
 PRE_RULES = ("pre_red", "pre_two_yellow_same_side", "pre_two_yellow_opposite")
 ACCEPT_DEFAULTS = {"accept_p": 0.01, "accept_pa": 0.99}  # draft 10.3.4: 1 % out of tolerance is detected with 99 %
 PRE_QUALIFY = 5  # consecutive parts in the green zone before a run is released (classical pre-control)
@@ -100,10 +107,10 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         raise ValueError(f"kind must be one of {KINDS}")
     out["kind"] = d["kind"]
     kind = d["kind"]
-    n = d.get("n", 1 if kind in ("imr", "c", "acc-x") else (2 if kind == PRE_KIND else (1 if kind in SEQ_KINDS else None)))
+    n = d.get("n", 1 if kind in ("imr", "c", "acc-x", ZMR_KIND, *SEQ_KINDS, *VECTOR_KINDS) else (2 if kind == PRE_KIND else None))
     if isinstance(n, bool) or not isinstance(n, int):
         raise ValueError("n must be a whole number")
-    if kind in ("imr", "c", "acc-x") and n != 1:
+    if kind in ("imr", "c", "acc-x", ZMR_KIND) and n != 1:
         raise ValueError("this monitor takes one value per sample (a count per inspection unit, or an individual value): n must be 1")
     if kind == PRE_KIND and n != 2:
         raise ValueError("a pre-control sample is two consecutive parts: n must be 2")
@@ -115,6 +122,8 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         raise ValueError("the median chart is defined for subgroup sizes 2 to 10")
     if kind in ("p", "np", "u") and not 1 <= n <= MAX_COUNT_SIZE:
         raise ValueError(f"n (the usual sample size) must be between 1 and {MAX_COUNT_SIZE}")
+    if kind in VECTOR_KINDS and not 1 <= n <= 10:
+        raise ValueError("n, the number of observations of the characteristics in a sample, must be between 1 and 10")
     if kind in SEQ_KINDS and not 1 <= n <= MAX_N:
         raise ValueError(f"n must be between 1 and {MAX_N}: the plotted value is the mean of the sample")
     out["n"] = n
@@ -123,7 +132,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 1):
             raise ValueError(f"{key} must be between 0 and 1")
         out[key] = None if v is None else float(v)
-    if kind in (*TOLERANCE_KINDS, *SEQ_KINDS) and out["warn_alpha"] is not None:
+    if kind in (*TOLERANCE_KINDS, *SEQ_KINDS, *VECTOR_KINDS) and out["warn_alpha"] is not None:
         raise ValueError("this chart has no warning limits")
     if out["warn_alpha"] is not None and not out["warn_alpha"] > out["alpha"]:
         raise ValueError("warn_alpha must be larger than alpha: warning limits lie inside the control limits")
@@ -135,7 +144,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         extra = [name for name in RULE_NAMES if name not in ATTRIBUTE_RULES and out["rules"].get(name)]
         if extra:
             raise ValueError(f"for counts only the control limits, runs and trends apply (not {extra}): the distribution is not normal")
-    if kind in (*TOLERANCE_KINDS, *SEQ_KINDS):
+    if kind in (*TOLERANCE_KINDS, *SEQ_KINDS, *VECTOR_KINDS):
         extra = [name for name in ("run_length", "trend_length", "middle_third", "two_of_three_beyond_2s", "four_of_five_beyond_1s",
                                    "fifteen_within_1s") if out["rules"].get(name)]
         if not out["rules"].get("beyond_limits") or extra:
@@ -154,8 +163,8 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         raise ValueError("specs.model must be one of A1 .. D")
     if specs.get("edition", "draft") not in ("draft", "final"):
         raise ValueError("specs.edition must be 'draft' or 'final'")
-    if kind in ATTRIBUTE_KINDS and any(specs.get(k) is not None for k in ("lsl", "usl", "target_class", "model")):
-        raise ValueError("an attribute monitor has no specification limits and no capability indices")
+    if kind in (*ATTRIBUTE_KINDS, ZMR_KIND, *VECTOR_KINDS) and any(specs.get(k) is not None for k in ("lsl", "usl", "target_class", "model")):
+        raise ValueError("this monitor has no specification limits and no capability indices: counts, mixed products and several characteristics have no single tolerance")
     out["specs"] = {"lsl": specs.get("lsl"), "usl": specs.get("usl"), "target_class": specs.get("target_class"),
                     "model": specs.get("model"), "controlled_stable": bool(specs.get("controlled_stable", False)),
                     "edition": specs.get("edition", "draft")}
@@ -375,6 +384,95 @@ def check_sequential_point(kind: str, limits: Mapping, prev: Mapping | None, mea
     return z, float(i), alarms, []
 
 
+# ---- Z-MR for short runs. The limits revision holds the table of the products: code -> target and standard deviation.
+
+def zmr_limits(alpha: float, warn_alpha: float | None, parts) -> dict:
+    if not isinstance(parts, list) or not 1 <= len(parts) <= MAX_PARTS:
+        raise ValueError(f"the table needs 1 to {MAX_PARTS} products")
+    table: dict[str, dict[str, float]] = {}
+    for row in parts:
+        if not isinstance(row, dict) or set(row) - {"code", "mu", "sigma"}:
+            raise ValueError("every product needs a code, a target mu and a standard deviation sigma")
+        code, mu, sigma = row.get("code"), row.get("mu"), row.get("sigma")
+        if not isinstance(code, str) or not 0 < len(code.strip()) <= 40:
+            raise ValueError("a product code is a text of 1 to 40 characters")
+        if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in (mu, sigma)) or not sigma > 0:
+            raise ValueError(f"product {code!r}: mu must be a number and sigma a positive number")
+        if code.strip() in table:
+            raise ValueError(f"product {code.strip()!r} is listed twice")
+        table[code.strip()] = {"mu": float(mu), "sigma": float(sigma)}
+    out = compute_limits("imr", 1, alpha, warn_alpha, 0.0, 1.0)  # Z values: target 0, standard deviation 1
+    out["parts"] = table
+    return out
+
+
+def zmr_z(limits: Mapping, part: str | None, x: float) -> float:
+    if part is None or not str(part).strip():
+        raise MonitorError("part_required", "name the product of this measurement")
+    row = limits["parts"].get(str(part).strip())
+    if row is None:
+        raise MonitorError("unknown_part", f"product {part!r} is not in the table of this monitor", part=str(part))
+    return (x - row["mu"]) / row["sigma"]
+
+
+# ---- Hotelling's T2 and MEWMA. The limits revision holds the reference (names, mean, covariance, N) and the limit.
+#      Sample values are given row by row: m observations of p characteristics. The point stores T2 (or Q) in `loc`.
+
+def _vector_names(names, p: int) -> list[str]:
+    if names is None:
+        return [f"x{i + 1}" for i in range(p)]
+    if not isinstance(names, list) or len(names) != p or not all(isinstance(v, str) and 0 < len(v.strip()) <= 40 for v in names) \
+            or len({v.strip() for v in names}) != p:
+        raise ValueError(f"names: {p} different texts of 1 to 40 characters, one per characteristic")
+    return [v.strip() for v in names]
+
+
+def estimate_reference(rows):
+    mu, cov, n = mv.estimate(rows)
+    return mu, cov, n
+
+
+def vector_limits(kind: str, m: int, alpha: float, names, mu, cov, n_ref: int | None, lam: float | None = None) -> dict:
+    cov_a = mv.check_covariance(cov)
+    mu_a = np.asarray(mu, dtype=float)
+    if mu_a.ndim != 1 or mu_a.size != cov_a.shape[0] or not np.all(np.isfinite(mu_a)):
+        raise ValueError("the target needs one finite number per characteristic")
+    p = int(mu_a.size)
+    out: dict[str, Any] = {"mu": None, "sigma": None, "alpha": alpha, "warn_alpha": None, "p": p, "names": _vector_names(names, p),
+                           "target": mu_a.tolist(), "cov": cov_a.tolist(), "n_ref": n_ref, "arl0": 1.0 / alpha}
+    if kind == "t2":
+        out["design"] = {"estimated": n_ref is not None}
+        out["location"] = {"lcl": None, "cl": mv.hotelling_center(p, n_ref), "ucl": mv.hotelling_ucl(p, alpha, n_ref)}
+    else:
+        lam = 0.1 if lam is None else lam
+        if not 0.02 <= lam <= 1.0:
+            raise ValueError("lambda, the weight of the newest sample, must be between 0.02 and 1")
+        out["design"] = {"lambda": float(lam), "h_simulated": True}
+        out["location"] = {"lcl": None, "cl": None, "ucl": mv.mewma_h(p, float(lam), round(1.0 / alpha, 4))}
+    return out
+
+
+def check_vector_point(kind: str, limits: Mapping, m: int, earlier, values) -> tuple[float, list, list]:
+    """(T2 or Q, alarms, warnings). `earlier`: the sample means of the run so far (MEWMA only), oldest first."""
+    p = limits["p"]
+    x = np.asarray(values, dtype=float).reshape(m, p)
+    xbar = x.mean(axis=0)
+    mu, cov = np.asarray(limits["target"]), np.asarray(limits["cov"])
+    detail = None
+    if kind == "t2":
+        loc = mv.t2_value(xbar, mu, cov, m, limits["n_ref"])
+    else:
+        loc = mv.mewma_q([*earlier, xbar], mu, cov, m, limits["design"]["lambda"])
+    alarms = []
+    if loc > limits["location"]["ucl"]:
+        scale_n = limits["n_ref"] if kind == "t2" else None
+        contrib = mv.contributions(xbar, mu, cov, m, scale_n) if kind == "t2" else None
+        z = ((xbar - mu) / np.sqrt(np.diag(cov) / m)).tolist()
+        detail = {"names": limits["names"], "z": z, "contribution": contrib}
+        alarms.append({"chart": "location", "rule": "beyond_limits", "detail": detail})
+    return loc, alarms, []
+
+
 # ---- attribute charts (draft 10.3.6): exact binomial and Poisson limits, one chart, no variation chart
 
 def _center_in_plot_units(kind: str, n: int, rate: float) -> float:
@@ -431,6 +529,11 @@ def limits_from_counts(kind: str, n: int, alpha: float, warn_alpha: float | None
 def check_values(config: Mapping, values) -> list[float]:
     """The measured values of one sample, checked for the kind of monitor. Returns them as floats."""
     kind, n = config["kind"], config["n"]
+    if kind in VECTOR_KINDS:  # the number depends on the characteristics of the limits: the service counts
+        if not isinstance(values, (list, tuple)) or not 2 <= len(values) <= 100 or not all(
+                isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values):
+            raise MonitorError("wrong_value_count", "give finite numbers: m rows of one value per characteristic")
+        return [float(v) for v in values]
     need = 2 if kind in ("p", "u") else (n if kind in (*SUBGROUP_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS) else 1)
     if not isinstance(values, (list, tuple)) or len(values) != need or not all(
             isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values):

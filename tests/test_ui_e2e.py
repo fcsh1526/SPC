@@ -908,3 +908,66 @@ def test_cusum_and_ewma_monitors_in_the_browser(server, browser, app):
     expect(page.locator("#md-seq-note")).to_contain_text("有記憶的管制圖")
     assert problems == [], problems
     ctx.close()
+
+
+def test_short_run_and_multivariate_monitors_in_the_browser(server, browser, app):
+    expect = playwright_sync.expect
+    problems = []
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=monitor]")
+
+    def start(name, kind):
+        page.click("#mon-new")
+        page.fill("#me-name", name)
+        page.fill("#me-characteristic", "dimensions")
+        page.select_option("#me-kind", kind)
+        page.locator("#me-ocap tr[data-key=default] input").nth(0).fill("Check the setup")
+        page.locator("#me-ocap tr[data-key=default] input").nth(1).fill("Setter")
+
+    start("Job shop", "zmr")
+    expect(page.locator("#me-specs-box")).to_be_hidden()
+    expect(page.locator("#me-src-parts")).to_be_visible()
+    page.fill("#me-parts", "A-100; 10.0; 0.1\nB-200; 55.0; 0.5")
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Job shop")
+    expect(page.locator("#md-zmr-note")).to_be_visible()
+    expect(page.locator("#md-ongoing-box")).to_be_hidden()
+    page.click("#md-ack-btn")
+    page.select_option("#md-part", "A-100")
+    page.fill("#md-v0", "10.05")
+    page.click("#md-submit")
+    expect(page.locator("#md-result .ok-box")).to_be_visible()
+    page.select_option("#md-part", "B-200")
+    page.fill("#md-v0", "57")
+    page.click("#md-submit")
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("OUT OF CONTROL")
+    expect(page.locator("#md-chart-var")).to_be_visible()
+    page.locator("#md-limits").locator("xpath=ancestor::details").locator("summary").click()
+    expect(page.locator("#md-limits")).to_contain_text("B-200")
+    page.click("#mon-back")
+
+    start("Housing", "t2")
+    expect(page.locator("#me-mv-box")).to_be_visible()
+    expect(page.locator("#me-warn-label")).to_be_hidden()
+    page.fill("#me-mv-names", "length, width")
+    page.fill("#me-mv-mu", "10, 5")
+    page.fill("#me-mv-cov", "0.04 0.018\n0.018 0.0225")
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Housing")
+    expect(page.locator("#md-mv-note")).to_be_visible()
+    expect(page.locator("#md-chart-var")).to_be_hidden()
+    expect(page.locator("#md-values input")).to_have_count(2)
+    page.click("#md-ack-btn")
+    page.fill("#md-v0", "10.02"); page.fill("#md-v1", "5.01"); page.click("#md-submit")
+    expect(page.locator("#md-result .ok-box")).to_be_visible()
+    page.fill("#md-v0", "10.4"); page.fill("#md-v1", "4.7"); page.click("#md-submit")  # each value alone within 3 sigma
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("Which characteristics carry the signal")
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("length")
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#md-mv-note")).to_contain_text("多個特性")
+    assert problems == [], problems
+    ctx.close()

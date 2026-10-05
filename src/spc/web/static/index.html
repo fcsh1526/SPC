@@ -496,6 +496,9 @@
           <option value="pre" data-i18n="analysis.chart_pre"></option>
           <option value="cusum" data-i18n="analysis.chart_cusum"></option>
           <option value="ewma" data-i18n="analysis.chart_ewma"></option>
+          <option value="zmr" data-i18n="analysis.chart_zmr"></option>
+          <option value="t2" data-i18n="analysis.chart_t2"></option>
+          <option value="mewma" data-i18n="analysis.chart_mewma"></option>
         </select></label>
       <label><span data-i18n="mon.f_n" id="me-n-label"></span><input id="me-n" type="number" min="1" max="1000000" step="1" value="5"></label>
       <label><span data-i18n="mon.f_alpha"></span>
@@ -512,7 +515,16 @@
           <option value="rate" data-i18n="mon.src_rate"></option>
           <option value="counts" data-i18n="mon.src_counts"></option>
           <option value="tolerance" data-i18n="mon.src_tolerance"></option>
+          <option value="parts" data-i18n="mon.src_parts"></option>
+          <option value="observations" data-i18n="mon.src_observations"></option>
         </select></label>
+      <label id="me-src-parts" class="wide" hidden><span data-i18n="mon.src_parts_list"></span><textarea id="me-parts" rows="4" placeholder="A-100; 10.0; 0.1"></textarea></label>
+      <div id="me-mv-box" class="form-grid" hidden>
+        <label class="wide"><span data-i18n="mon.mv_names"></span><input id="me-mv-names" type="text" placeholder="length, width, depth"></label>
+        <label class="wide"><span data-i18n="mon.mv_mu"></span><input id="me-mv-mu" type="text" placeholder="10, 5, 2"></label>
+        <label class="wide"><span data-i18n="mon.mv_cov"></span><textarea id="me-mv-cov" rows="3"></textarea></label>
+      </div>
+      <label id="me-src-rows" class="wide" hidden><span data-i18n="mon.src_observations_rows"></span><textarea id="me-mv-rows" rows="5"></textarea></label>
       <div id="me-seq-box" class="form-grid" hidden>
         <label id="me-k-label"><span data-i18n="mon.f_cusum_k"></span><input id="me-k" type="number" min="0.05" max="3" step="any" value="0.5"></label>
         <label id="me-fir-label"><span data-i18n="mon.f_cusum_fir"></span><input id="me-fir" type="number" min="0" max="0.95" step="any" value="0"></label>
@@ -623,6 +635,7 @@
 
     <div class="card" data-needs="operator" id="md-entry-card">
       <h3 data-i18n="mon.entry"></h3>
+      <label id="md-part-label" hidden><span data-i18n="mon.part"></span><select id="md-part"></select></label>
       <div id="md-values" class="row"></div>
       <div class="form-grid">
         <label><span data-i18n="mon.label"></span><input id="md-label" type="text" maxlength="100"></label>
@@ -633,6 +646,8 @@
     </div>
 
     <p id="md-qual" class="strong" hidden></p>
+    <p id="md-zmr-note" class="note" hidden data-i18n="mon.zmr_note"></p>
+    <p id="md-mv-note" class="note" hidden data-i18n="mon.mv_note"></p>
     <p id="md-seq-note" class="note" hidden data-i18n="mon.seq_note"></p>
     <p id="md-pre-note" class="note" hidden data-i18n="mon.pre_note"></p>
     <div class="chart" id="md-chart-loc"></div>
@@ -657,10 +672,17 @@
               <option value="rate" data-i18n="mon.src_rate"></option>
               <option value="counts" data-i18n="mon.src_counts"></option>
               <option value="tolerance" data-i18n="mon.src_tolerance"></option>
+              <option value="parts" data-i18n="mon.src_parts"></option>
+              <option value="observations" data-i18n="mon.src_observations"></option>
             </select></label>
           <label class="nl-seq nl-cusum" hidden><span data-i18n="mon.f_cusum_k"></span><input id="nl-k" type="number" min="0.05" max="3" step="any" value="0.5"></label>
           <label class="nl-seq nl-cusum" hidden><span data-i18n="mon.f_cusum_fir"></span><input id="nl-fir" type="number" min="0" max="0.95" step="any" value="0"></label>
-          <label class="nl-seq nl-ewma" hidden><span data-i18n="mon.f_ewma_lambda"></span><input id="nl-lambda" type="number" min="0.02" max="1" step="any" value="0.2"></label>
+          <label class="nl-seq nl-ewma nl-mewma" hidden><span data-i18n="mon.f_ewma_lambda"></span><input id="nl-lambda" type="number" min="0.02" max="1" step="any" value="0.2"></label>
+          <label class="nl-parts wide" hidden><span data-i18n="mon.src_parts_list"></span><textarea id="nl-parts" rows="4"></textarea></label>
+          <label class="nl-mv wide" hidden><span data-i18n="mon.mv_names"></span><input id="nl-mv-names" type="text"></label>
+          <label class="nl-mv wide" hidden><span data-i18n="mon.mv_mu"></span><input id="nl-mv-mu" type="text"></label>
+          <label class="nl-mv wide" hidden><span data-i18n="mon.mv_cov"></span><textarea id="nl-mv-cov" rows="3"></textarea></label>
+          <label class="nl-obs wide" hidden><span data-i18n="mon.src_observations_rows"></span><textarea id="nl-mv-rows" rows="5"></textarea></label>
           <label class="nl-rate" hidden><span data-i18n="mon.src_rate_value"></span><input id="nl-rate" type="number" step="any" min="0"></label>
           <label class="nl-counts wide" hidden><span data-i18n="mon.src_counts_list"></span><textarea id="nl-counts" rows="2"></textarea></label>
           <label class="nl-counts nl-sizes wide" hidden><span data-i18n="mon.src_sizes_list"></span><textarea id="nl-sizes" rows="2"></textarea></label>

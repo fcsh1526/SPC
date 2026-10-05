@@ -56,7 +56,7 @@ def add_monitor_routes(app: FastAPI, svc: MonitorService, datasets: DatasetStore
 
     @app.post("/api/monitors/{mid}/points")
     def add_point(mid: int, body: PointBody, user: User = Depends(operator)):
-        return svc.add_point(mid, body.values, body.label, body.tags, body.taken_at, user)
+        return svc.add_point(mid, body.values, body.label, body.tags, body.taken_at, user, body.part)
 
     @app.get("/api/monitors/{mid}/points")
     def points(mid: int, limit: int = Query(100, ge=1, le=2000), before: int | None = Query(None, ge=1), _: User = Depends(reader)):

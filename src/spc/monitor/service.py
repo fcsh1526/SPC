@@ -15,6 +15,7 @@ from spc.data import Dataset
 from spc.db.database import Database
 from spc.db.stores import DatasetStore, now_iso
 from spc.monitor.model import (
+    VECTOR_KINDS, ZMR_KIND, check_vector_point, estimate_reference, vector_limits, zmr_limits, zmr_z,
     ACCEPT_KINDS, ACTION_STEPS, SEQ_KINDS, check_sequential_point, ewma_band, sequential_limits, ATTRIBUTE_KINDS, EVENT_KINDS, PRE_KIND, PRE_QUALIFY, TOLERANCE_KINDS, acceptance_from_values,
     acceptance_limits, base_kind, check_pre_point, pre_statistic, pre_zone, precontrol_limits, OUTCOMES, STEPS, MonitorError, attribute_limits, band, check_attribute_point,
     check_point, check_values, compute_limits, limits_from_counts, limits_from_values, ocap_for, statistic, validate_config,
@@ -81,6 +82,10 @@ class MonitorService:
             return self._tolerance_limits_from(monitor, source)
         if kind in SEQ_KINDS:
             return self._sequential_limits_from(monitor, source)
+        if kind == ZMR_KIND:
+            return self._zmr_limits_from(monitor, source)
+        if kind in VECTOR_KINDS:
+            return self._vector_limits_from(monitor, source)
         if typ == "parameters":
             mu, sigma = source.get("mu"), source.get("sigma")
             if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in (mu, sigma)):
@@ -160,6 +165,59 @@ class MonitorService:
         except ValueError as exc:
             raise MonitorError("bad_source", str(exc)) from None
         raise MonitorError("bad_source", "source.type must be parameters, dataset or points")
+
+    def _zmr_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
+        """Short runs: a table of products, each with its target and standard deviation."""
+        if source.get("type") != "parts":
+            raise MonitorError("bad_source", "source.type must be parts: a table of products with target and standard deviation")
+        try:
+            limits = zmr_limits(monitor["alpha"], monitor["warn_alpha"], source.get("parts"))
+        except ValueError as exc:
+            raise MonitorError("bad_source", str(exc)) from None
+        return limits, {"type": "parts", "n_parts": len(limits["parts"])}
+
+    def _vector_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
+        """T2 and MEWMA: the target and covariance of the characteristics, given or estimated from observations (or points of this monitor)."""
+        kind, m, alpha = monitor["kind"], monitor["n"], monitor["alpha"]
+        typ = source.get("type")
+        lam = source.get("lambda")
+        if lam is not None and (isinstance(lam, bool) or not isinstance(lam, (int, float)) or not math.isfinite(lam)):
+            raise MonitorError("bad_source", "lambda must be a number")
+        try:
+            if typ == "parameters":
+                limits = vector_limits(kind, m, alpha, source.get("names"), source.get("mu"), source.get("cov"), None, lam)
+                described = {"type": "parameters", "p": limits["p"]}
+            elif typ in ("observations", "points"):
+                if typ == "observations":
+                    rows = source.get("rows")
+                    described = {"type": "observations"}
+                else:
+                    lo, hi = source.get("seq_from"), source.get("seq_to")
+                    if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (lo, hi)) or lo > hi:
+                        raise ValueError("seq_from and seq_to must be point numbers, seq_from <= seq_to")
+                    prev = self.store.limits(monitor["id"]) if monitor.get("limits_rev") else None
+                    if prev is None:
+                        raise ValueError("a new monitor has no points yet")
+                    pp = prev["p"]
+                    rows = []
+                    for pt in self.store.points(monitor["id"], limit=100000, since_seq=lo):
+                        if pt["seq"] <= hi and pt["valid"]:
+                            rows += [pt["values"][i:i + pp] for i in range(0, len(pt["values"]), pp)]
+                    described = {"type": "points", "seq_from": lo, "seq_to": hi}
+                    source = {**source, "names": prev["names"]}
+                mu, cov, n_ref = estimate_reference(rows)
+                limits = vector_limits(kind, m, alpha, source.get("names"), mu, cov, n_ref if kind == "t2" else None, lam)
+                described["n_observations"] = n_ref
+            else:
+                raise ValueError("source.type must be parameters, observations or points")
+            old = self.store.limits(monitor["id"]) if monitor.get("limits_rev") else None
+            if old is not None and old.get("p") != limits["p"]:
+                raise ValueError(f"the number of characteristics cannot change ({old.get('p')}): make a new monitor")
+        except ValueError as exc:
+            raise MonitorError("bad_source", str(exc)) from None
+        if limits["design"].get("lambda") is not None:
+            described["lambda"] = limits["design"]["lambda"]
+        return limits, described
 
     def _tolerance_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
         """Acceptance chart: the within variation from expected sigma, a data set or points. Pre-control: the tolerance alone."""
@@ -288,11 +346,13 @@ class MonitorService:
             out.append({"rule": a["rule"], **ocap_for(monitor, a["rule"])})
         return out
 
-    def add_point(self, monitor_id: int, values, label: str, tags: dict, taken_at: str | None, user) -> dict:
+    def add_point(self, monitor_id: int, values, label: str, tags: dict, taken_at: str | None, user, part: str | None = None) -> dict:
         monitor = self.store.get(monitor_id)
         if not monitor["active"]:
             raise MonitorError("monitor_inactive", "this monitor is switched off", 409)
         values = check_values(monitor, values)
+        if monitor["kind"] == ZMR_KIND:
+            tags = {**tags, "part": str(part or "").strip()}
         if len(label) > 100:
             raise MonitorError("invalid_input", "the label is longer than 100 characters")
         count, klen, vlen = TAG_LIMITS
@@ -306,14 +366,32 @@ class MonitorService:
             if limits is None:
                 raise MonitorError("no_limits", "this monitor has no limits yet", 409)
             previous = self.store.previous_value(monitor_id) if base_kind(monitor["kind"]) == "imr" else None
-            if monitor["kind"] in SEQ_KINDS:
+            if monitor["kind"] == ZMR_KIND:
+                z = zmr_z(limits, tags["part"], values[0])
+                loc, var = statistic("imr", [z], previous)
+                hist_loc, hist_var = self.store.valid_history(monitor_id, limits["revision"], HISTORY_FOR_RULES)
+                alarms, warnings = check_point(monitor, limits, hist_loc, hist_var, loc, var)
+            elif monitor["kind"] in VECTOR_KINDS:
+                p_now = limits["p"]
+                if len(values) != monitor["n"] * p_now:
+                    raise MonitorError("wrong_value_count", f"give {monitor['n']} row(s) of {p_now} value(s)", n=monitor["n"] * p_now)
+                earlier = []
+                if monitor["kind"] == "mewma":  # the state is recomputed from the run, so declared invalid samples drop out correctly
+                    for vals, signalled in self.store.run_points(monitor_id, limits["revision"]):
+                        if signalled:
+                            break
+                        earlier.append(np.asarray(vals, dtype=float).reshape(monitor["n"], p_now).mean(axis=0))
+                    earlier.reverse()
+                loc, alarms, warnings = check_vector_point(monitor["kind"], limits, monitor["n"], earlier, values)
+                var = None
+            elif monitor["kind"] in SEQ_KINDS:
                 state = self.store.run_state(monitor_id, limits["revision"])
                 loc, var, alarms, warnings = check_sequential_point(monitor["kind"], limits, state, float(np.mean(values)))
             elif monitor["kind"] == PRE_KIND:
                 loc, var = pre_statistic(limits, values), None
             else:
                 loc, var = statistic(monitor["kind"], values, previous)
-            if monitor["kind"] in SEQ_KINDS:
+            if monitor["kind"] in (*SEQ_KINDS, ZMR_KIND, *VECTOR_KINDS):
                 pass
             elif monitor["kind"] == PRE_KIND:
                 alarms, warnings = check_pre_point(limits, values)
@@ -504,6 +582,8 @@ class MonitorService:
     def window_dataset(self, monitor: dict, window: int) -> tuple[Dataset, list[dict]]:
         if monitor["kind"] in ATTRIBUTE_KINDS:
             raise MonitorError("report_not_for_attribute", "the capability report needs measured values: counts have no capability index")
+        if monitor["kind"] in (ZMR_KIND, *VECTOR_KINDS):
+            raise MonitorError("report_not_for_this_chart", "mixed products and several characteristics have no single capability: the report is not available")
         if monitor["kind"] == PRE_KIND:
             raise MonitorError("report_not_for_precontrol", "a pre-control chart only monitors a start-up: it is no basis for a capability report")
         pts = [p for p in self.store.points(monitor["id"], limit=window) if p["valid"]]

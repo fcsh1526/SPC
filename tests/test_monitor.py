@@ -813,3 +813,126 @@ def test_an_ewma_monitor_has_limits_that_widen_from_the_start(env):
             break
     assert r["status"] == "alarm" and r["point"]["alarms"][0]["rule"] == "shift_up"
     assert c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code in (200, 409)
+
+
+# ------------------------------------------------------------------ short runs (Z-MR) and several characteristics
+
+PARTS = {"type": "parts", "parts": [{"code": "A-100", "mu": 10.0, "sigma": 0.1}, {"code": "B-200", "mu": 55.0, "sigma": 0.5}]}
+
+
+def test_the_zmr_monitor_standardises_each_product_and_keeps_one_set_of_limits(env):
+    app, c = env
+    mid = make_monitor(c["eng"], {"name": "Job shop", "characteristic": "diameter", "kind": "zmr"}, PARTS)
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    assert lim["location"]["cl"] == 0.0 and lim["parts"]["B-200"]["sigma"] == 0.5 and lim["sigma"] == 1.0
+    ack(c["oper"], mid)
+    r = enter(c["oper"], mid, [10.05], part="A-100")
+    assert r["point"]["loc"] == pytest.approx(0.5) and r["point"]["tags"]["part"] == "A-100"
+    r = enter(c["oper"], mid, [54.75], part="B-200")  # z = -0.5: product changes, the chart goes on
+    assert r["point"]["loc"] == pytest.approx(-0.5) and r["point"]["var"] == pytest.approx(1.0)
+    assert enter(c["oper"], mid, [10.0], part="A-100")["status"] == "ok"
+    big = enter(c["oper"], mid, [56.0], part="B-200")  # z = 2... not yet
+    assert big["point"]["loc"] == pytest.approx(2.0)
+    r = enter(c["oper"], mid, [57.0], part="B-200")  # z = 4
+    assert r["status"] == "alarm"
+    for body, code in (({"values": [10.0]}, "part_required"), ({"values": [10.0], "part": "Z-9"}, "unknown_part")):
+        assert err(c["oper"].post(f"/api/monitors/{mid}/points", json=body))["code"] == code
+    assert c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code == 409 or c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code == 400
+    bad = {"type": "parts", "parts": [{"code": "A", "mu": 1, "sigma": 0}]}
+    assert c["eng"].post("/api/monitors", json={"config": {"name": "x", "characteristic": "y", "kind": "zmr"}, "source": bad}).status_code == 400
+    assert c["eng"].post("/api/monitors", json={"config": {"name": "x", "characteristic": "y", "kind": "zmr", "specs": {"lsl": 1, "usl": 2}},
+                                                "source": PARTS}).status_code == 400
+
+
+def _cov(p, rho=0.6):
+    return [[1.0 if i == j else rho for j in range(p)] for i in range(p)]
+
+
+@pytest.mark.parametrize("p,m,n_ref", [(2, 1, None), (3, 4, None), (3, 1, 60), (4, 3, 100)])
+def test_hotelling_limit_has_the_stated_false_alarm_rate(p, m, n_ref):
+    from spc.core.charts import multivariate as mv
+    rng = np.random.default_rng(12)
+    cov = np.array(_cov(p))
+    alpha = 0.01
+    if n_ref is None:
+        mu, S = np.zeros(p), cov
+    else:  # phase I estimate from n_ref observations; the limit allows for its uncertainty (checked over many such estimates)
+        mu, S = None, None
+    ucl = mv.hotelling_ucl(p, alpha, n_ref)
+    hits, total = 0, 0
+    for _ in range(300 if n_ref else 1):
+        if n_ref:
+            ref = rng.multivariate_normal(np.zeros(p), cov, n_ref)
+            mu, S, _n = mv.estimate(ref) if n_ref >= max(20, 3 * p) else (ref.mean(0), np.cov(ref, rowvar=False), n_ref)
+        x = rng.multivariate_normal(np.zeros(p), cov, (1500 if n_ref else 300_000, m))
+        xbar = x.mean(axis=1)
+        d = xbar - mu
+        t2 = mv._scale(m, n_ref) * np.einsum("ij,ij->i", d @ np.linalg.inv(S), d)
+        hits += np.sum(t2 > ucl)
+        total += t2.size
+    assert hits / total == pytest.approx(alpha, rel=0.12)
+
+
+def test_t2_contributions_point_at_the_characteristic_that_moved():
+    from spc.core.charts import multivariate as mv
+    cov = np.array(_cov(3, 0.3))
+    d = mv.contributions(np.array([0.1, 3.5, -0.1]), np.zeros(3), cov, 1, None)
+    assert int(np.argmax(d)) == 1 and d[1] > 5 * max(d[0], d[2])
+    # a combination that is unusual although each value alone is not: against the correlation
+    cov2 = np.array(_cov(2, 0.9))
+    both = mv.t2_value(np.array([2.0, -2.0]), np.zeros(2), cov2, 1, None)
+    alone = mv.t2_value(np.array([2.0, 2.0]), np.zeros(2), cov2, 1, None)
+    assert both > 5 * alone
+
+
+def test_the_mewma_limit_agrees_with_the_published_value_and_the_calibration():
+    from spc.core.charts import multivariate as mv
+    # Lowry et al. 1992: p = 2, lambda = 0.1, in-control ARL 200: h = 8.66 for the steady state covariance
+    assert mv._mean_run_length(2, 0.1, 8.66, 20000, 5, 6000, exact=False) == pytest.approx(200.0, rel=0.06)
+    h = mv.mewma_h(2, 0.1, 200.0)  # with the covariance at the i-th sample the limit has to be a little larger
+    assert 8.66 < h < 9.0
+    assert mv._mean_run_length(2, 0.1, h, 20000, 6, 6000) == pytest.approx(200.0, rel=0.06)
+
+
+MV_PARAMS = {"type": "parameters", "names": ["length", "width", "depth"], "mu": [10.0, 5.0, 2.0], "cov": [[0.04, 0.018, 0.0], [0.018, 0.0225, 0.0], [0.0, 0.0, 0.01]]}
+
+
+def test_a_t2_monitor_end_to_end_and_the_run_checks(env):
+    app, c = env
+    mid = make_monitor(c["eng"], {"name": "Housing", "characteristic": "dimensions", "kind": "t2", "n": 1}, MV_PARAMS)
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    assert lim["p"] == 3 and lim["names"] == ["length", "width", "depth"] and lim["location"]["ucl"] == pytest.approx(14.16, abs=0.05)
+    ack(c["oper"], mid)
+    assert enter(c["oper"], mid, [10.02, 5.01, 2.0])["status"] == "ok"
+    # each value alone is inside 3 sigma, together against the correlation they are not
+    r = enter(c["oper"], mid, [10.34, 4.72, 2.0])
+    assert r["status"] == "alarm" and r["point"]["alarms"][0]["detail"]["contribution"] is not None
+    assert err(c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [1.0, 2.0]}))["code"] == "wrong_value_count"
+    assert c["eng"].post(f"/api/monitors/{mid}/limits", json={"source": {**MV_PARAMS, "names": ["a", "b"], "mu": [1, 2],
+                                                                           "cov": [[1, 0], [0, 1]]}, "reason": "x"}).status_code == 400
+    assert c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code in (400, 409)
+    bad = {**MV_PARAMS, "cov": [[1, 2, 0], [2, 1, 0], [0, 0, 1]]}
+    assert c["eng"].post("/api/monitors", json={"config": {"name": "bad", "characteristic": "x", "kind": "t2"}, "source": bad}).status_code == 400
+
+
+def test_t2_limits_from_reference_observations_and_a_mewma_monitor(env):
+    app, c = env
+    rng = np.random.default_rng(3)
+    rows = rng.multivariate_normal([10, 5], [[0.04, 0.012], [0.012, 0.0225]], 60).tolist()
+    mid = make_monitor(c["eng"], {"name": "Pair", "characteristic": "pair", "kind": "t2", "n": 2}, {"type": "observations", "rows": rows})
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    assert lim["n_ref"] == 60 and lim["design"]["estimated"] is True and lim["location"]["ucl"] > 9.0
+    mw = make_monitor(c["eng"], {"name": "Pair MEWMA", "characteristic": "pair", "kind": "mewma", "n": 1},
+                      {"type": "parameters", "mu": [10, 5], "cov": [[0.04, 0.012], [0.012, 0.0225]], "lambda": 0.1})
+    ack(c["oper"], mw)
+    assert enter(c["oper"], mw, [10.0, 5.0])["status"] == "ok"
+    status = []
+    for _ in range(40):  # a small lasting shift of both characteristics
+        status.append(enter(c["oper"], mw, [10.2, 5.12])["status"])
+        if status[-1] == "alarm":
+            break
+    assert status[-1] == "alarm" and len(status) < 40
+    nxt = enter(c["oper"], mw, [10.0, 5.0])  # starts again after the signal
+    assert nxt["status"] != "alarm" and nxt["point"]["loc"] < 1.0
+    too_few = {"type": "observations", "rows": rows[:10]}
+    assert c["eng"].post("/api/monitors", json={"config": {"name": "few", "characteristic": "x", "kind": "t2"}, "source": too_few}).status_code == 400

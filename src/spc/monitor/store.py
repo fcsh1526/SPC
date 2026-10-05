@@ -152,6 +152,13 @@ class MonitorStore:
             (monitor_id, limits_rev, limit))[::-1]
         return [(r["loc"], (json.loads(r["vals"]) + [None])[1]) for r in rows]
 
+    def run_points(self, monitor_id: int, limits_rev: int, limit: int = 3000) -> list[tuple[list, bool]]:
+        """(values, signalled) of the latest valid points of a limits revision, newest first (charts that are recomputed from the run)."""
+        rows = self.db.all(
+            "SELECT vals, alarms FROM monitor_points WHERE monitor_id = ? AND limits_rev = ? AND valid = 1 ORDER BY seq DESC LIMIT ?",
+            (monitor_id, limits_rev, limit))
+        return [(json.loads(r["vals"]), bool(json.loads(r["alarms"]))) for r in rows]
+
     def run_state(self, monitor_id: int, limits_rev: int):
         """The statistics of the last valid point, if the chart has not signalled on it (then it starts again): {'loc', 'var'}."""
         r = self.db.one(
