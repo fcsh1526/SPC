@@ -178,6 +178,12 @@
 <section id="tab-analysis" class="panel" hidden>
   <h2 data-i18n="analysis.title"></h2>
   <form id="analysis-form">
+    <fieldset id="profile-box">
+      <legend data-i18n="analysis.profile"></legend>
+      <p class="note" data-i18n="analysis.profile_hint"></p>
+      <select id="a-profile"><option value="" data-i18n="analysis.profile_none"></option></select>
+      <p id="a-profile-line" class="note" hidden></p>
+    </fieldset>
     <div class="form-grid">
       <label class="wide"><span data-i18n="analysis.stage"></span>
         <select id="a-stage">
@@ -349,6 +355,7 @@
     <div class="card">
       <h3 data-i18n="result.params_title"></h3>
       <p id="r-params" class="muted"></p>
+      <p id="r-profile" class="muted"></p>
       <p id="r-fingerprint" class="muted"></p>
       <p id="r-hash" class="muted"></p>
     </div>
@@ -376,6 +383,11 @@
         <label><span data-i18n="report.uncertainty"></span><input id="rp-uncertainty" type="number" step="any" min="0"></label>
         <label><span data-i18n="report.coverage"></span><input id="rp-coverage_factor" type="number" step="any" min="1" value="2"></label>
         <label class="wide"><span data-i18n="report.recommendations"></span><textarea id="rp-recommendations" rows="3" maxlength="2000"></textarea></label>
+        <div class="wide" id="rp-extra" hidden>
+          <h4 data-i18n="report.extra_title"></h4>
+          <div id="rp-extra-fields" class="form-grid"></div>
+        </div>
+        <p class="wide muted" id="rp-required-hint" hidden data-i18n="report.required_hint"></p>
       </div>
       <p class="row">
         <button id="rp-create" class="primary" data-i18n="report.create"></button>
@@ -497,6 +509,76 @@
       <label><span data-i18n="admin.initial_password"></span><input id="nu-pass" type="password" maxlength="1024" autocomplete="new-password"></label>
     </div>
     <p class="row"><button id="nu-create" class="primary" data-i18n="admin.create"></button></p>
+  </div>
+  <h3 data-i18n="admin.profiles"></h3>
+  <p class="note" data-i18n="admin.profiles_note"></p>
+  <div class="scroll"><table id="profile-list" class="grid"></table></div>
+  <p><button id="pf-new" data-i18n="admin.profile_new"></button></p>
+  <div id="pf-editor" class="card" hidden>
+    <h3 id="pf-title-line"></h3>
+    <label class="wide"><span data-i18n="admin.pf_name"></span><input id="pf-name" type="text" maxlength="100"></label>
+    <fieldset>
+      <legend data-i18n="admin.pf_analysis"></legend>
+      <p class="note" data-i18n="admin.pf_blank"></p>
+      <div class="form-grid">
+        <label><span data-i18n="admin.pf_alpha"></span><input id="pf-alpha" type="number" step="any" min="0" max="1"></label>
+        <label><span data-i18n="admin.pf_est"></span><input id="pf-est" type="number" step="any" min="0" max="1"></label>
+        <label><span data-i18n="admin.pf_tgt"></span><input id="pf-tgt" type="number" step="any" min="0" max="1"></label>
+        <label><span data-i18n="admin.pf_stab"></span><input id="pf-stab" type="number" step="any" min="0" max="1"></label>
+        <label><span data-i18n="admin.pf_edition"></span>
+          <select id="pf-edition"><option value="" data-i18n="admin.pf_default"></option>
+            <option value="draft" data-i18n="analysis.edition_draft"></option><option value="final" data-i18n="analysis.edition_final"></option></select></label>
+        <label><span data-i18n="admin.pf_mode"></span>
+          <select id="pf-mode"><option value="" data-i18n="admin.pf_default"></option>
+            <option value="random_range" data-i18n="analysis.mode_random_range"></option><option value="strict" data-i18n="analysis.mode_strict"></option></select></label>
+      </div>
+      <label class="check"><input id="pf-rules-on" type="checkbox"><span data-i18n="admin.pf_rules_on"></span></label>
+      <div id="pf-rules" class="checks">
+        <label class="check"><input id="pf-r-beyond" type="checkbox" checked><span data-i18n="analysis.rule_beyond_limits"></span></label>
+        <label class="check"><input id="pf-r-run" type="checkbox"><span data-i18n="analysis.rule_run"></span>
+          <input id="pf-r-run-n" type="number" min="2" max="50" value="7" class="small"></label>
+        <label class="check"><input id="pf-r-trend" type="checkbox"><span data-i18n="analysis.rule_trend"></span>
+          <input id="pf-r-trend-n" type="number" min="2" max="50" value="7" class="small"></label>
+        <label class="check"><input id="pf-r-middle" type="checkbox"><span data-i18n="analysis.rule_middle_third"></span></label>
+        <label class="check"><input id="pf-r-2of3" type="checkbox"><span data-i18n="analysis.rule_two_of_three"></span></label>
+        <label class="check"><input id="pf-r-4of5" type="checkbox"><span data-i18n="analysis.rule_four_of_five"></span></label>
+        <label class="check"><input id="pf-r-15" type="checkbox"><span data-i18n="analysis.rule_fifteen"></span></label>
+      </div>
+      <p class="note" data-i18n="admin.pf_targets"></p>
+      <div class="scroll"><table id="pf-targets" class="grid"></table></div>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="admin.pf_report"></legend>
+      <div class="form-grid">
+        <label><span data-i18n="admin.pf_org"></span><input id="pf-org" type="text" maxlength="200"></label>
+        <label><span data-i18n="admin.pf_title"></span><input id="pf-title" type="text" maxlength="200"></label>
+        <label><span data-i18n="admin.pf_form"></span><input id="pf-form" type="text" maxlength="100"></label>
+        <label><span data-i18n="admin.pf_rev"></span><input id="pf-rev" type="text" maxlength="50"></label>
+        <label class="wide"><span data-i18n="admin.pf_footer"></span><input id="pf-footer" type="text" maxlength="500"></label>
+        <label><span data-i18n="admin.pf_lang"></span>
+          <select id="pf-lang"><option value="" data-i18n="admin.pf_lang_any"></option>
+            <option value="zh-TW">繁體中文</option><option value="en">English</option></select></label>
+        <label class="check"><input id="pf-accent-on" type="checkbox"><span data-i18n="admin.pf_accent_on"></span>
+          <input id="pf-accent" type="color" value="#1f5fbf"></label>
+      </div>
+      <p class="row">
+        <label class="filebtn"><input type="file" id="pf-logo-file" accept="image/png,image/jpeg"><span data-i18n="admin.pf_logo"></span></label>
+        <img id="pf-logo-preview" class="logo-preview" alt="" hidden>
+        <button id="pf-logo-remove" hidden data-i18n="admin.pf_logo_remove"></button>
+      </p>
+      <label class="check"><input id="pf-el21" type="checkbox" checked><span data-i18n="admin.pf_el21"></span></label>
+      <label class="check"><input id="pf-el22" type="checkbox" checked><span data-i18n="admin.pf_el22"></span></label>
+      <h4 data-i18n="admin.pf_required"></h4>
+      <div id="pf-required" class="checks"></div>
+      <h4 data-i18n="admin.pf_extra"></h4>
+      <div id="pf-extra"></div>
+      <p><button id="pf-extra-add" data-i18n="admin.pf_extra_add"></button></p>
+    </fieldset>
+    <p class="row">
+      <button id="pf-save" class="primary" data-i18n="admin.pf_save"></button>
+      <button id="pf-cancel" data-i18n="admin.pf_cancel"></button>
+    </p>
+    <p id="pf-msg" class="strong ok"></p>
   </div>
   <h3 data-i18n="admin.audit"></h3>
   <p class="note" data-i18n="admin.audit_note"></p>

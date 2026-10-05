@@ -30,10 +30,12 @@ def app():
     return make_app(max_upload=20 * 1024 * 1024)
 
 
-def sign_in(page, user="eng", password=PASSWORD):
+def sign_in(page, user="eng", password=PASSWORD, wait=True):
     page.fill("#login-user", user)
     page.fill("#login-pass", password)
     page.click("#login-form button[type=submit]")
+    if wait:  # the next step must not run before the session exists (a person cannot be that fast either)
+        page.wait_for_selector("#user-label", state="visible")
 
 
 @pytest.fixture(scope="module")
@@ -255,7 +257,7 @@ def test_wrong_password_logout_and_a_reload_keep_the_data_private(server, browse
     ctx = browser.new_context(locale="en")
     page = ctx.new_page()
     page.goto(server)
-    sign_in(page, "eng", "not the password!!")
+    sign_in(page, "eng", "not the password!!", wait=False)
     expect(page.locator("#errors")).to_contain_text("User name or password is wrong")
     assert page.locator("#app").is_hidden()
     page.click("#errors button")
@@ -519,4 +521,92 @@ def test_excel_downloads_in_the_browser(server, browser, tmp_path):
 
     page.click("nav.tabs button[data-tab=saved]")
     expect(page.locator("#saved-reports a", has_text="Excel").first).to_be_visible()  # earlier tests made reports too
+    ctx.close()
+
+
+def test_customer_profile_from_editor_to_report(server, browser, tmp_path):
+    expect = playwright_sync.expect
+    admin_ctx = browser.new_context(viewport={"width": 1200, "height": 1000}, locale="en")
+    admin = admin_ctx.new_page()
+    problems = []
+    admin.on("pageerror", lambda e: problems.append(str(e)))
+    admin.goto(server)
+    sign_in(admin, "admin")
+    admin.click("nav.tabs button[data-tab=admin]")
+    admin.click("#pf-new")
+    admin.fill("#pf-name", "Globex")
+    admin.fill("#pf-org", "Globex QA")
+    admin.fill("#pf-form", "G-12")
+    admin.fill("#pf-rev", "B")
+    admin.fill("#pf-alpha", "0.01")
+    admin.fill("#pf-t-production-major-p", "2.0")
+    admin.click("#pf-save")  # a cell with only one of the two numbers is refused
+    expect(admin.locator("#errors")).to_contain_text("both targets")
+    admin.click("#errors button")
+    admin.fill("#pf-t-production-major-pk", "1.8")
+    admin.check("#pf-req-part_number")
+    admin.click("#pf-extra-add")
+    row = admin.locator("#pf-extra .row").first
+    row.locator("input[type=text]").nth(0).fill("drawing_no")
+    row.locator("input[type=text]").nth(1).fill("Drawing number")
+    row.locator("input[type=text]").nth(2).fill("圖面編號")
+    row.locator("input[type=checkbox]").check()
+    admin.uncheck("#pf-el22")
+    admin.click("#pf-save")
+    expect(admin.locator("#pf-msg")).to_contain_text("saved, revision 1")
+    expect(admin.locator("#profile-list")).to_contain_text("Globex")
+    admin.fill("#pf-rev", "C")  # a change raises the revision
+    admin.click("#pf-save")
+    expect(admin.locator("#pf-msg")).to_contain_text("revision 2")
+    admin_ctx.close()
+
+    ctx = browser.new_context(viewport={"width": 1200, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.set_input_files("#file", str(sample(tmp_path)))
+    page.select_option("#col-value", "直徑")
+    page.select_option("#col-subgroup", "批號")
+    page.click("#import-btn")
+    page.click("#suspect-btn")
+    page.click("#suspect-select")
+    page.fill("#reason", "typing error")
+    page.click("#mark-btn")
+    page.click("#to-analysis")
+    page.select_option("#a-profile", label="Globex")
+    expect(page.locator("#a-alpha")).to_be_disabled()  # fixed by the profile
+    expect(page.locator("#a-customer")).to_have_value("Globex")
+    expect(page.locator("#a-profile-line")).to_contain_text("risk α")
+    expect(page.locator("#a-profile-line")).to_contain_text("target values")
+    page.fill("#a-lsl", "9.5")
+    page.fill("#a-usl", "10.5")
+    page.select_option("#a-model", "A1")
+    page.select_option("#a-class", "major")
+    page.click("#run-btn")
+    expect(page.locator("#r-profile")).to_contain_text("Globex, revision 2")
+    # the customer's 2.0 / 1.8, raised a little for 120 values instead of 125; the draft's 1.33 would not show
+    expect(page.locator("#r-targets")).to_contain_text("2.01")
+    expect(page.locator("#r-targets")).to_contain_text("1.81")
+    expect(page.locator("#r-targets")).not_to_contain_text("1.33")
+
+    expect(page.locator("#rp-extra")).to_be_visible()
+    expect(page.locator("label.required", has_text="Part no.")).to_have_count(1)
+    expect(page.locator("label.required", has_text="Drawing number")).to_have_count(1)
+    page.click("#rp-create")
+    expect(page.locator("#errors")).to_contain_text("requires these fields")
+    expect(page.locator("#errors")).to_contain_text("Drawing number")
+    page.click("#errors button")
+    page.fill("#rp-part_number", "P-7")
+    page.fill("#rp-x-drawing_no", "D-100")
+    page.select_option("#rp-language", "en")
+    page.click("#rp-create")
+    expect(page.locator("#rp-created")).to_contain_text("was created")
+    report = ctx.new_page()
+    report.goto(server.rstrip("/") + page.locator("#rp-open").get_attribute("href"))
+    content = report.content()
+    assert "Globex QA" in content and "G-12" in content and "Rev. C" in content and "D-100" in content
+    expect(report.locator("h1")).to_have_text("Process study report")
+    assert report.locator("section.el h2 .no", has_text="22").count() == 0  # element 22 is switched off in the profile
+    assert problems == [], problems
     ctx.close()

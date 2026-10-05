@@ -42,6 +42,7 @@ class Report:
     generated_at: str
     report_id: str
     archive_digest: str = ""
+    profile: dict | None = None  # snapshot of the customer profile used: {profile_id, name, revision, report, deviations}
 
 
 def _stamp(t) -> str:
@@ -93,6 +94,7 @@ def build_report(
     report_id: str,
     archive_digest: str = "",
     outcome=None,
+    profile: dict | None = None,
 ) -> Report:
     meta.validate()
     outcome = outcome or analyze_detailed(dataset, request)
@@ -268,4 +270,4 @@ def build_report(
         "stability_mode": r["params"]["stability_mode"], "customer": r["params"].get("customer"),
         "source": r["source"],
     }
-    return Report(lang, meta, request, r, facts, figures, conclusions, marked, trace, generated_at, report_id, archive_digest)
+    return Report(lang, meta, request, r, facts, figures, conclusions, marked, trace, generated_at, report_id, archive_digest, profile)

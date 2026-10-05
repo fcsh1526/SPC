@@ -43,6 +43,7 @@ from spc.core.rules import RuleResult, RuleSet, Violation, evaluate
 from spc.core.stability import Stability, assess_analysis_chart, classify_stability
 from spc.data import Dataset
 from spc.params import AnalysisParams
+from spc.profile import table_for_service
 
 CHARTS = ("auto", "xbar-s", "xbar-r", "imr")
 STAGES = ("machine", "preliminary", "production")
@@ -72,6 +73,7 @@ class AnalysisRequest:
     method: str = "G"  # "G" or "Z", used when the distribution is not normal
     bootstrap_n: int = 200  # resamples for the interval of a non-normal index. 0 = no interval
     seed: int = 20260701
+    target_table: dict | None = None  # complete table stage -> class -> [p, pk] of a customer profile; None = draft values
     moving_n: int = 1  # I-MR only: size of the moving sample (1 = plain individuals chart). Restarts come from the data
 
 
@@ -471,7 +473,7 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
     if req.characteristic_class:
         try:
             t = required_targets(Stage(req.stage), req.characteristic_class, idx.n, req.target_confidence,
-                                 edition=req.edition)
+                                 edition=req.edition, table=table_for_service(req.target_table))
             result["targets"] = {
                 "class": req.characteristic_class.lower(), "p": _f(t.p), "pk": _f(t.pk), "n_base": t.n_base,
                 "n": t.n, "adjusted": t.adjusted, "confidence": t.confidence, "edition": t.edition,

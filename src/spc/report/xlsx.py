@@ -27,6 +27,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from spc.data.dataset import Dataset
+from spc.profile import ReportTemplate
 from spc.report.builder import Report
 from spc.report.texts import T
 
@@ -147,6 +148,10 @@ def _log_sheet(wb: Workbook, dataset: Dataset, L):
 
 # ---------------------------------------------------------------------------------------- report workbook
 
+def _template(rep: Report) -> ReportTemplate:
+    return ReportTemplate.from_dict(rep.profile["report"]) if rep.profile else ReportTemplate()
+
+
 def _elements_rows(rep: Report, L) -> list[tuple[int | str, str, object, str | None]]:
     """(element no., item, value, number format) in the order of the report."""
     m, f, r = rep.meta, rep.facts, rep.result
@@ -154,6 +159,7 @@ def _elements_rows(rep: Report, L) -> list[tuple[int | str, str, object, str | N
     ix, tg, st = r["indices"], r["targets"], r["stability"]
     rows: list[tuple[int | str, str, object, str | None]] = []
     add = lambda no, item, value, fmt=None: rows.append((no, item, value, fmt))
+    tpl = _template(rep)
     add(1, L("f.process"), m.process); add(1, L("f.machine"), m.machine); add(1, L("f.site"), m.site)
     add(2, L("f.process_ref"), m.process_ref); add(2, L("f.machine_ref"), m.machine_ref)
     add(3, L("el.3"), m.persons)
@@ -246,10 +252,13 @@ def _elements_rows(rep: Report, L) -> list[tuple[int | str, str, object, str | N
     if m.recommendations.strip():
         add(20, L("c.recommendations"), m.recommendations)
     model = rep.request.model
-    add(21, L("f.model"), L("v.model_" + model) if model else L("v.model_unknown"))
-    add(21, L("f.controlled"), L("v.yes" if rep.request.controlled_stable else "v.no"))
+    if tpl.show_element_21:
+        add(21, L("f.model"), L("v.model_" + model) if model else L("v.model_unknown"))
+        add(21, L("f.controlled"), L("v.yes" if rep.request.controlled_stable else "v.no"))
     g = f["guard"]
-    if g:
+    if not tpl.show_element_22:
+        pass
+    elif g:
         add(22, L("f.uncertainty") + unit, g["U"]); add(22, L("f.coverage"), g["k"]); add(22, L("f.std_uncertainty") + unit, g["u"])
         add(22, L("f.guard_band", z=f"{g['z']:.3f}", risk=f"{g['risk'] * 100:g} %"), g["g"])
         if g["accept_low"] is not None:
@@ -258,6 +267,8 @@ def _elements_rows(rep: Report, L) -> list[tuple[int | str, str, object, str | N
             add(22, L("f.accept_high") + unit, g["accept_high"])
     else:
         add(22, L("el.22"), L("doc.not_given"))
+    for fld in tpl.extra_fields:  # the customer's own fields
+        add("C", fld.label(rep.lang), m.extra.get(fld.key, ""))
     return rows
 
 
@@ -266,8 +277,11 @@ def _summary_sheet(wb: Workbook, rep: Report, L) -> None:
     ws.title = L("x.sheet_summary")
     f, r = rep.facts, rep.result
     ix, tg = r["indices"], r["targets"]
-    _text(ws, 1, 1, L("doc.title"), bold=True).font = _font(True, 14)
-    _text(ws, 2, 1, L("doc.stage_" + f["stage"]))
+    tpl = _template(rep)
+    _text(ws, 1, 1, tpl.title or L("doc.title"), bold=True).font = _font(True, 14)
+    head = " · ".join(x for x in (tpl.organization, f"{L('doc.form')} {tpl.form_no}" if tpl.form_no else "",
+                                  f"{L('v.revision')} {tpl.revision}" if tpl.revision else "") if x)
+    _text(ws, 2, 1, (head + " — " if head else "") + L("doc.stage_" + f["stage"]))
     _text(ws, 3, 1, L("doc.report_id")); _text(ws, 3, 2, rep.report_id)
     _text(ws, 4, 1, L("doc.created")); _text(ws, 4, 2, _stamp(rep.generated_at))
     _text(ws, 5, 1, L("x.digest")); _text(ws, 5, 2, rep.archive_digest)
@@ -299,7 +313,11 @@ def _elements_sheet(wb: Workbook, rep: Report, L) -> None:
     last = None
     for no, item, value, fmt in _elements_rows(rep, L):
         if no != last:
-            _num(ws, r, 1, no, "0", _font(True)); _text(ws, r, 2, L(f"el.{no}"), bold=True)
+            if no == "C":
+                _text(ws, r, 1, "–", bold=True)
+                _text(ws, r, 2, L("doc.customer_fields", name=rep.profile["name"]), bold=True)
+            else:
+                _num(ws, r, 1, no, "0", _font(True)); _text(ws, r, 2, L(f"el.{no}"), bold=True)
             last = no
         _text(ws, r, 3, item, wrap=True)
         _any(ws, r, 4, value, fmt).alignment = Alignment(vertical="top", wrap_text=True, horizontal="left")
@@ -442,6 +460,10 @@ def _annex_sheet(wb: Workbook, rep: Report, L) -> None:
         _text(ws, r, 1, label); _text(ws, r, 2, value); r += 1
     if tr.get("customer"):
         _text(ws, r, 1, L("f.customer")); _text(ws, r, 2, tr["customer"]); r += 1
+    if rep.profile:
+        p = rep.profile
+        _text(ws, r, 1, L("f.profile")); _text(ws, r, 2, f"{p['name']} ({L('v.revision')} {p['revision']})"); r += 1
+        _text(ws, r, 1, L("f.profile_deviations")); _text(ws, r, 2, ", ".join(p["deviations"]) or L("v.none")); r += 1
     if tr.get("source"):
         s = tr["source"]
         _text(ws, r, 1, "SHA-256"); _text(ws, r, 2, s["sha256"]); r += 1

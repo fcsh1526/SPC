@@ -78,7 +78,7 @@ def test_every_key_in_the_files_is_used(messages):
     dynamic = (
         "issue.", "error.", "warn.", "alarmrule.", "result.class_", "result.verdict_", "result.kind_",
         "result.series_variation_", "analysis.model_", "analysis.class_", "analysis.chart_",
-        "analysis.stage_", "result.names_reason_", "role.", "dist.",
+        "analysis.stage_", "result.names_reason_", "role.", "dist.", "pkey.",
     )
     text = page_text()
     unused = sorted(
@@ -138,7 +138,7 @@ def test_every_backend_code_has_a_text(messages):
 def test_every_key_like_string_in_the_page_code_is_a_real_key(messages):
     """Keys listed in arrays or passed through variables are not found by the t("...") scan. Check them here."""
     js = (STATIC / "app.js").read_text(encoding="utf-8")
-    prefixes = ("nav.", "login.", "user.", "password.", "saved.", "admin.", "data.", "import.", "result.", "report.", "tools.", "analysis.")
+    prefixes = ("nav.", "login.", "user.", "password.", "saved.", "admin.", "data.", "import.", "result.", "report.", "tools.", "analysis.", "pkey.")
     quoted = set(re.findall(r'"((?:%s)[\w.\-]*)"' % "|".join(re.escape(p) for p in prefixes), js))
     missing = sorted(k for k in quoted if not k.endswith((".", "_")) and k not in messages["en"])
     assert missing == [], missing

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from html import escape
 
+from spc.profile import ReportTemplate
 from spc.report.builder import Report
 from spc.report.texts import T
 
@@ -19,6 +20,9 @@ h1 { font-size: 18pt; margin: 0; }
 h2 { font-size: 11.5pt; margin: 0 0 4px; }
 .sub { color: #59626e; margin: 2px 0 8px; }
 .head { display: flex; justify-content: space-between; gap: 12px; border-bottom: 2px solid #1f5fbf; padding-bottom: 6px; margin-bottom: 10px; }
+.head .left { display: flex; align-items: center; gap: 12px; }
+.logo { max-height: 52px; max-width: 170px; }
+.org { font-weight: 600; color: #59626e; }
 .head .id { text-align: right; color: #59626e; font-size: 9pt; }
 .summary { border: 2px solid #1f5fbf; border-radius: 6px; padding: 8px 12px; margin: 10px 0 14px; break-inside: avoid; }
 .summary .big { font-size: 15pt; font-weight: 700; }
@@ -58,6 +62,9 @@ def _sig(x, digits=6) -> str:
 def render_html(rep: Report) -> str:
     lang, m, f, r = rep.lang, rep.meta, rep.facts, rep.result
     L = lambda key, **p: T(lang, key, **p)
+    prof = rep.profile
+    tpl = ReportTemplate.from_dict(prof["report"]) if prof else ReportTemplate()  # checked again: it is HTML in the end
+    accent = tpl.accent or "#1f5fbf"
     unit = f" {esc(m.unit)}" if m.unit else ""
 
     def given(text) -> str:
@@ -288,29 +295,43 @@ def render_html(rep: Report) -> str:
     if tr.get("source"):
         rows_b.append((L("f.source_file"), esc(tr["source"]["name"])))
         rows_b.append((L("f.source_hash"), f"<code>{esc(tr['source']['sha256'])}</code>"))
+    if prof:
+        rows_b.append((L("f.profile"), esc(f"{prof['name']} ({L('v.revision')} {prof['revision']})")))
+        rows_b.append((L("f.profile_deviations"), esc(", ".join(prof["deviations"]) if prof["deviations"] else L("v.none"))))
     if rep.archive_digest:
         rows_b.append((L("f.archive_digest"), f"<code>{esc(rep.archive_digest)}</code>"))
     annex_b = kv(rows_b)
 
     note = L("doc.draft_note") if tr["edition"] == "draft" else L("doc.final_note")
     stage_line = L("doc.stage_" + f["stage"])
-    title = f"{L('doc.title')} {rep.report_id}"
+    doc_title = tpl.title or L("doc.title")
+    title = f"{doc_title} {rep.report_id}"
+    form_line = " · ".join(x for x in (f"{L('doc.form')} {tpl.form_no}" if tpl.form_no else "",
+                                       f"{L('v.revision')} {tpl.revision}" if tpl.revision else "") if x)
+    logo = f'<img class="logo" src="{esc(tpl.logo)}" alt="">' if tpl.logo else ""
+    org = f'<div class="org">{esc(tpl.organization)}</div>' if tpl.organization else ""
+    custom = ""
+    if tpl.extra_fields:
+        rows = [(fld.label(lang), given(m.extra.get(fld.key, ""))) for fld in tpl.extra_fields]
+        custom = f'<section class="el"><h2>{esc(L("doc.customer_fields", name=prof["name"]))}</h2>{kv(rows)}</section>'
+    footer = (f"{esc(tpl.footer)}<br>" if tpl.footer else "") + f"{esc(L('doc.agreed'))}<br>{esc(note)}"
     return (
         f'<!doctype html><html lang="{esc(lang)}"><head><meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(title)}</title>'
-        f"<style>{CSS}</style></head><body><main>"
-        f'<div class="head"><div><h1>{esc(L("doc.title"))}</h1><p class="sub">{esc(L("doc.subtitle"))}</p>'
-        f'<div>{esc(stage_line)}</div></div>'
-        f'<div class="id">{esc(L("doc.report_id"))}: {esc(rep.report_id)}<br>{esc(L("doc.created"))}: {esc(rep.generated_at)}</div></div>'
+        f"<style>{CSS.replace('#1f5fbf', accent)}</style></head><body><main>"
+        f'<div class="head"><div class="left">{logo}<div>{org}<h1>{esc(doc_title)}</h1><p class="sub">{esc(L("doc.subtitle"))}</p>'
+        f'<div>{esc(stage_line)}</div></div></div>'
+        f'<div class="id">{esc(form_line)}{"<br>" if form_line else ""}{esc(L("doc.report_id"))}: {esc(rep.report_id)}<br>{esc(L("doc.created"))}: {esc(rep.generated_at)}</div></div>'
         f"{summary}"
         + element(1, e1) + element(2, e2) + element(3, e3) + element(4, e4) + element(5, e5) + element(6, e6)
-        + element(7, e7) + element(8, e8) + element(9, e9) + element(10, e10)
+        + element(7, e7) + element(8, e8) + element(9, e9) + element(10, e10) + custom
         + f'<section class="el" style="break-inside:auto"><h2><span class="no">11–14</span>{esc(sep.join(L(f"el.{n}") for n in (11, 12, 13, 14)))}</h2>{figs}</section>'
         + element(14, e14) + element(15, e15) + element(16, e16) + element(17, e17) + element(18, e18)
-        + element(19, e19) + element(20, e20, "") + element(21, e21) + element(22, e22)
+        + element(19, e19) + element(20, e20, "")
+        + (element(21, e21) if tpl.show_element_21 else "") + (element(22, e22) if tpl.show_element_22 else "")
         + f'<section class="el"><h2>{esc(L("doc.annex_a"))}</h2>{annex_a}</section>'
         + f'<section class="el"><h2>{esc(L("doc.annex_b"))}</h2>{annex_b}</section>'
-        + f"<footer>{esc(L('doc.agreed'))}<br>{esc(note)}</footer>"
+        + f"<footer>{footer}</footer>"
         + "</main></body></html>"
     )
 

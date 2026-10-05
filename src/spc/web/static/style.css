@@ -141,3 +141,8 @@ body[data-role="viewer"] [data-needs="engineer"], body:not([data-role="admin"]) 
 tr.restart-row td { border-top: 2px dashed var(--muted); }
 .chart .restart.phase { stroke: var(--text); stroke-width: 1.4; stroke-dasharray: 7 3; }
 label.check { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.logo-preview { max-height: 48px; max-width: 160px; border: 1px solid var(--line); }
+label.required > span::after { content: " *"; color: var(--bad, #c62828); }
+#pf-extra .row { margin: 6px 0; }
+#pf-extra input.key { width: 10em; }
+#pf-extra input.lab { width: 14em; }

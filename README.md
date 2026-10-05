@@ -69,6 +69,14 @@ In the analysis form, choose a distribution (or "choose automatically") and a me
 - Few values (under 50) make the tail quantiles uncertain. The result warns about it. The empirical method needs 2000 values and supports only `.G`.
 - Through the API: `distribution`, `method`, `bootstrap_n` and `seed` in the analysis body. Results for a normal distribution (`distribution: "normal"`, the default) are unchanged.
 
+## Customer profiles
+
+A profile holds what one customer agreed on and how that customer's report looks. Administrators make them in the Administration tab. Everybody can pick one in the analysis form.
+- **Analysis**: risk α, confidence levels, handbook edition, stability decision, stability criteria and the target values per stage and characteristic class (p and pk). Only the settings you fill in count. When a profile is chosen the program applies them and the matching controls are locked. Through the API, fields you do not send take the profile's value, and a field you send with another value is kept and named as a deviation.
+- **Report**: organisation line, title, form number and revision, footer, accent colour, logo (PNG or JPEG), default language, whether the optional elements 21 and 22 appear, extra fields of the customer (asked when the report is made) and fields that must be filled. The 20 required elements cannot be switched off.
+- The report keeps a copy of the profile it used, and the archive holds the complete target table. A later change or deletion of the profile does not change a report that exists. Every change raises the revision number, and everything is in the audit trail.
+- A logo must be a PNG or JPEG of at most 150 KB. An SVG is refused because it can hold script.
+
 ## Excel output
 
 - Report: "Excel workbook" next to the HTML report (also in the Saved tab). Sheets: Summary, Report elements (the 20+2 elements as rows), Data (every value with status, marks and restarts), Control charts (plotted values and limits, with native charts), Check, Annex, Log. The language is the one of the report.

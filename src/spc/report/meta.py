@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 
 TEXT_LIMIT = 2000
 
@@ -28,12 +28,18 @@ class ReportMeta:
     uncertainty: float | None = None  # element 22: expanded measurement uncertainty U
     coverage_factor: float = 2.0
     guard_band_risk: float = 0.05
+    extra: dict = field(default_factory=dict)  # values of the customer's extra fields: key -> text
 
     def validate(self) -> "ReportMeta":
         for f in fields(self):
             v = getattr(self, f.name)
             if isinstance(v, str) and len(v) > TEXT_LIMIT:
                 raise ValueError(f"{f.name} is longer than {TEXT_LIMIT} characters")
+        if not isinstance(self.extra, dict) or len(self.extra) > 12:
+            raise ValueError("extra must hold at most 12 entries")
+        for k, v in self.extra.items():
+            if not isinstance(k, str) or not isinstance(v, str) or len(v) > TEXT_LIMIT:
+                raise ValueError(f"extra field {k!r} must be a text of at most {TEXT_LIMIT} characters")
         if self.uncertainty is not None and not self.uncertainty > 0:
             raise ValueError("uncertainty must be positive")
         if not self.coverage_factor >= 1:

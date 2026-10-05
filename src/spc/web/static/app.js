@@ -15,6 +15,7 @@
     result: null, toolsTargets: null, toolsArl: null,
     lastAnalysisBody: null, reportOut: null, reportLangTouched: false, archiveOut: null,
     user: null, csrf: "", mustChange: false,
+    profiles: [], profile: null, defaultTargets: null, editing: null, logo: "",
   };
 
   // ---------------------------------------------------------------- small helpers
@@ -79,6 +80,7 @@
     if (Array.isArray(p.labels)) p.labels = p.labels.join(", ");
     if (e.code === "validation") p.fields = (p.errors || []).map((x) => x.field).join(", ");
     if (e.code === "invalid_input") p.message = e.message;
+    if (Array.isArray(p.fields) && e.code.startsWith("report_field")) p.fields = p.fields.map(fieldLabel).join(", ");
     if (e.code === "login_locked") p.minutes = Math.max(1, Math.ceil((p.retry_after || 0) / 60));
     if (e.code === "forbidden" && p.role) p.role = t("role." + p.role);
     return t(key, p);
@@ -426,6 +428,12 @@
       },
     };
     if (alpha) body.alpha = Number(alpha);
+    if (state.profile) {  // the profile fixes what the customer agreed: those fields are not sent, the server applies them
+      const fixed = state.profile.analysis;
+      ["alpha", "stability_mode", "edition", "rules"].forEach((k) => { if (k in fixed) delete body[k]; });
+      delete body.customer;
+      body.profile_id = state.profile.id;
+    }
     if (!$("#a-moving-wrap").hidden) body.moving_n = Math.max(1, Math.min(10, Math.round(Number($("#a-moving").value) || 1)));
     body.distribution = $("#a-dist").value;
     if (body.distribution !== "normal") {
@@ -592,6 +600,10 @@
       const d = r.diagnosis;
       $("#r-diagnosis").textContent = `${d.name_p ? d.name_p + " " + fmt(d.p) + " · " : ""}${d.name_pk} ${fmt(d.pk)}`;
     }
+    const pr = r.profile;
+    $("#r-profile").textContent = pr
+      ? t("result.profile_line", { name: pr.name, rev: pr.revision }) + (pr.deviations.length ? " · " + t("result.profile_deviations", { keys: pr.deviations.map((k) => t("pkey." + k)).join(", ") }) : "")
+      : "";
     const p = r.params;
     $("#r-params").textContent = t("result.params_edition", { edition: p.edition, alpha: fmt(p.alpha, 5), conf: p.estimate_confidence }) + (p.customer ? ` · ${p.customer}` : "");
     $("#r-fingerprint").textContent = `${t("result.params_fingerprint")}: ${p.fingerprint}`;
@@ -638,6 +650,8 @@
     meta.uncertainty = num("#rp-uncertainty");
     const k = num("#rp-coverage_factor");
     meta.coverage_factor = k === null ? 2 : k;
+    meta.extra = {};
+    if (state.profile) state.profile.report.extra_fields.forEach((f) => { meta.extra[f.key] = $("#rp-x-" + f.key).value; });
     return meta;
   }
   function restoreReportMeta() {
@@ -758,6 +772,7 @@
     $("#login").hidden = true; $("#app").hidden = false; $("#userbox").hidden = false;
     $("#login-user").value = ""; $("#login-pass").value = "";
     renderUserBox();
+    if (!state.mustChange) loadProfiles();
     showTab(state.mustChange ? "password" : (me.user.role === "viewer" ? "saved" : "import"));
   }
   function renderUserBox() {
@@ -788,6 +803,207 @@
       $("#password-form").reset();
       $("#pw-done").hidden = false;
     });
+  }
+
+  // ---------------------------------------------------------------- customer profiles
+  const RULE_IDS = (p) => ({ beyond: `#${p}beyond`, run: `#${p}run`, runN: `#${p}run-n`, trend: `#${p}trend`, trendN: `#${p}trend-n`,
+    middle: `#${p}middle`, two: `#${p}2of3`, four: `#${p}4of5`, fifteen: `#${p}15` });
+  function readRules(prefix) {
+    const i = RULE_IDS(prefix), on = (k) => $(i[k]).checked;
+    return { beyond_limits: on("beyond"), run_length: on("run") ? Number($(i.runN).value) : null,
+      trend_length: on("trend") ? Number($(i.trendN).value) : null, middle_third: on("middle"),
+      two_of_three_beyond_2s: on("two"), four_of_five_beyond_1s: on("four"), fifteen_within_1s: on("fifteen") };
+  }
+  function fillRules(prefix, rules, lock) {
+    const i = RULE_IDS(prefix), r = rules || {};
+    $(i.beyond).checked = r.beyond_limits !== false;
+    $(i.run).checked = !!r.run_length; if (r.run_length) $(i.runN).value = r.run_length;
+    $(i.trend).checked = !!r.trend_length; if (r.trend_length) $(i.trendN).value = r.trend_length;
+    $(i.middle).checked = !!r.middle_third; $(i.two).checked = !!r.two_of_three_beyond_2s;
+    $(i.four).checked = !!r.four_of_five_beyond_1s; $(i.fifteen).checked = !!r.fifteen_within_1s;
+    if (lock !== undefined) Object.values(i).forEach((sel) => { $(sel).disabled = lock; });
+  }
+  async function loadProfiles() {
+    try { state.profiles = (await api("/api/profiles")).profiles; } catch (e) { state.profiles = []; }
+    const select = $("#a-profile"), keep = state.profile ? String(state.profile.id) : "";
+    $$("option", select).slice(1).forEach((o) => o.remove());
+    state.profiles.forEach((p) => { const o = el("option", "", p.name); o.value = String(p.id); select.appendChild(o); });
+    select.value = state.profiles.some((p) => String(p.id) === keep) ? keep : "";
+    onProfileChange();
+  }
+  function onProfileChange() {
+    const id = $("#a-profile").value;
+    state.profile = id ? state.profiles.find((p) => String(p.id) === id) || null : null;
+    const a = state.profile ? state.profile.analysis : {};
+    const lock = (sel, key) => { $(sel).disabled = !!state.profile && key in a; };
+    lock("#a-alpha", "alpha"); lock("#a-mode", "stability_mode"); lock("#a-edition", "edition");
+    if (state.profile && "stability_mode" in a) $("#a-mode").value = a.stability_mode;
+    if (state.profile && "edition" in a) $("#a-edition").value = a.edition;
+    if (state.profile && "alpha" in a) { const o = $$("#a-alpha option").find((x) => Number(x.value) === a.alpha); if (o) $("#a-alpha").value = o.value; }
+    fillRules("r-", state.profile && "rules" in a ? a.rules : readRules("r-"), !!state.profile && "rules" in a);
+    $("#a-customer").value = state.profile ? state.profile.name : $("#a-customer").value;
+    $("#a-customer").disabled = !!state.profile;
+    const line = $("#a-profile-line");
+    line.hidden = !state.profile;
+    if (state.profile) {
+      const keys = Object.keys(a).map((k) => t("pkey." + k)).join(", ") || "–";
+      line.textContent = t("analysis.profile_line", { name: state.profile.name, rev: state.profile.revision, keys });
+    }
+    renderReportProfile();
+  }
+  function fieldLabel(name) {
+    if (name.startsWith("extra:") && state.profile) {
+      const f = state.profile.report.extra_fields.find((x) => x.key === name.slice(6));
+      return f ? (state.lang === "zh-TW" ? f.label_zh : f.label_en) || f.label_en || f.label_zh || f.key : name;
+    }
+    const input = $("#rp-" + name), label = input && input.closest("label");
+    return label ? label.querySelector("span").textContent : name;
+  }
+  function renderReportProfile() {
+    const report = state.profile ? state.profile.report : null;
+    $$("label.required").forEach((l) => l.classList.remove("required"));
+    (report ? report.required : []).forEach((n) => { const i = $("#rp-" + n); if (i) i.closest("label").classList.add("required"); });
+    const box = $("#rp-extra"), fields = $("#rp-extra-fields");
+    const keep = {};
+    $$("input", fields).forEach((i) => { keep[i.id] = i.value; });
+    fields.replaceChildren();
+    const extra = report ? report.extra_fields : [];
+    extra.forEach((f) => {
+      const label = el("label"), span = el("span", "", (state.lang === "zh-TW" ? f.label_zh : f.label_en) || f.label_en || f.label_zh);
+      const input = el("input"); input.type = "text"; input.maxLength = 2000; input.id = "rp-x-" + f.key;
+      input.value = keep[input.id] || "";
+      if (f.required) label.classList.add("required");
+      label.append(span, input); fields.appendChild(label);
+    });
+    box.hidden = !extra.length;
+    $("#rp-required-hint").hidden = !report || !(report.required.length || extra.some((f) => f.required));
+    if (report && report.language && !state.reportLangTouched) $("#rp-language").value = report.language;
+  }
+
+  // ---- administration of profiles
+  function renderProfileList() {
+    const table = $("#profile-list"); table.replaceChildren();
+    const head = el("tr");
+    ["admin.pf_col_name", "admin.pf_col_rev", "admin.pf_col_updated", "admin.col_actions"].forEach((k) => cell(head, t(k), "th"));
+    table.appendChild(head);
+    if (!state.profiles.length) { const tr = el("tr"); const c = cell(tr, t("saved.empty")); c.colSpan = 4; table.appendChild(tr); }
+    state.profiles.forEach((p) => {
+      const tr = el("tr");
+      cell(tr, p.name); cell(tr, String(p.revision)); cell(tr, when(p.updated_at));
+      const actions = cell(tr, "");
+      const edit = el("button", "", t("admin.profile_edit")); edit.addEventListener("click", () => openProfileEditor(p));
+      const del = el("button", "", t("admin.profile_delete"));
+      del.addEventListener("click", async () => {
+        if (!window.confirm(t("admin.profile_confirm_delete", { name: p.name }))) return;
+        await guarded(async () => { await api(`/api/profiles/${p.id}`, { method: "DELETE" }); });
+        await loadProfiles(); renderProfileList(); closeProfileEditor();
+      });
+      actions.append(edit, del); table.appendChild(tr);
+    });
+  }
+  const STAGES = ["machine", "preliminary", "production"], CLASSES = ["critical", "major", "minor", "others"];
+  const REQUIRABLE = ["process", "machine", "site", "process_ref", "machine_ref", "persons", "period_text", "part_name", "part_number",
+    "characteristic", "unit", "target", "technical_conditions", "deviations", "sampling_frequency", "recommendations", "uncertainty"];
+  function buildTargetsTable() {
+    const table = $("#pf-targets"); table.replaceChildren();
+    const head = el("tr"); cell(head, "", "th");
+    CLASSES.forEach((c) => cell(head, t("analysis.class_" + c), "th")); table.appendChild(head);
+    STAGES.forEach((s) => {
+      const tr = el("tr"); cell(tr, t("analysis.stage_" + s), "th");
+      CLASSES.forEach((c) => {
+        const td = el("td"), d = state.defaultTargets ? state.defaultTargets[s][c] : ["", ""];
+        ["p", "pk"].forEach((k, i) => {
+          const input = el("input", "small"); input.type = "number"; input.step = "any"; input.min = "0"; input.id = `pf-t-${s}-${c}-${k}`;
+          input.placeholder = String(d[i]); td.appendChild(input);
+        });
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+  }
+  function buildRequiredBoxes(selected) {
+    const box = $("#pf-required"); box.replaceChildren();
+    REQUIRABLE.forEach((n) => {
+      const label = el("label", "check"), input = el("input"); input.type = "checkbox"; input.id = "pf-req-" + n; input.checked = selected.includes(n);
+      label.append(input, el("span", "", t("report." + n))); box.appendChild(label);
+    });
+  }
+  function addExtraRow(f) {
+    const row = el("div", "row"), mk = (cls, ph, v) => { const i = el("input", cls); i.type = "text"; i.placeholder = ph; i.value = v || ""; return i; };
+    const key = mk("key", t("admin.pf_extra_key"), f && f.key), en = mk("lab", t("admin.pf_extra_en"), f && f.label_en), zh = mk("lab", t("admin.pf_extra_zh"), f && f.label_zh);
+    key.maxLength = 31; en.maxLength = 100; zh.maxLength = 100;
+    const req = el("input"); req.type = "checkbox"; req.checked = !!(f && f.required);
+    const rl = el("label", "check"); rl.append(req, el("span", "", t("admin.pf_extra_required")));
+    const rm = el("button", "", "✕"); rm.addEventListener("click", () => row.remove());
+    row.append(key, en, zh, rl, rm); $("#pf-extra").appendChild(row);
+  }
+  function showLogo() {
+    $("#pf-logo-preview").hidden = !state.logo; $("#pf-logo-remove").hidden = !state.logo;
+    if (state.logo) $("#pf-logo-preview").src = state.logo; else $("#pf-logo-preview").removeAttribute("src");
+  }
+  function openProfileEditor(p) {
+    state.editing = p ? p.id : "new";
+    const a = p ? p.analysis : {}, r = p ? p.report : { extra_fields: [], required: [], show_element_21: true, show_element_22: true };
+    $("#pf-title-line").textContent = p ? t("admin.profile_edit_title", { name: p.name }) : t("admin.profile_new");
+    $("#pf-name").value = p ? p.name : "";
+    $("#pf-alpha").value = a.alpha ?? ""; $("#pf-est").value = a.estimate_confidence ?? ""; $("#pf-tgt").value = a.target_confidence ?? "";
+    $("#pf-stab").value = a.stability_confidence ?? ""; $("#pf-edition").value = a.edition || ""; $("#pf-mode").value = a.stability_mode || "";
+    $("#pf-rules-on").checked = "rules" in a; fillRules("pf-r-", a.rules, !("rules" in a));
+    buildTargetsTable();
+    STAGES.forEach((s) => CLASSES.forEach((c) => {
+      const pair = a.targets && a.targets[s] && a.targets[s][c];
+      $(`#pf-t-${s}-${c}-p`).value = pair ? pair[0] : ""; $(`#pf-t-${s}-${c}-pk`).value = pair ? pair[1] : "";
+    }));
+    $("#pf-org").value = r.organization || ""; $("#pf-title").value = r.title || ""; $("#pf-form").value = r.form_no || "";
+    $("#pf-rev").value = r.revision || ""; $("#pf-footer").value = r.footer || ""; $("#pf-lang").value = r.language || "";
+    $("#pf-accent-on").checked = !!r.accent; $("#pf-accent").value = r.accent || "#1f5fbf"; $("#pf-accent").disabled = !r.accent;
+    $("#pf-el21").checked = r.show_element_21 !== false; $("#pf-el22").checked = r.show_element_22 !== false;
+    state.logo = r.logo || ""; showLogo();
+    buildRequiredBoxes(r.required || []);
+    $("#pf-extra").replaceChildren(); (r.extra_fields || []).forEach(addExtraRow);
+    $("#pf-msg").textContent = ""; $("#pf-editor").hidden = false; $("#pf-editor").scrollIntoView({ block: "nearest" });
+  }
+  function closeProfileEditor() { state.editing = null; $("#pf-editor").hidden = true; }
+  function readProfileForm() {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const analysis = {};
+    [["alpha", "#pf-alpha"], ["estimate_confidence", "#pf-est"], ["target_confidence", "#pf-tgt"], ["stability_confidence", "#pf-stab"]]
+      .forEach(([k, id]) => { const v = num(id); if (v !== null) analysis[k] = v; });
+    if ($("#pf-edition").value) analysis.edition = $("#pf-edition").value;
+    if ($("#pf-mode").value) analysis.stability_mode = $("#pf-mode").value;
+    if ($("#pf-rules-on").checked) analysis.rules = readRules("pf-r-");
+    const targets = {};
+    for (const s of STAGES) for (const c of CLASSES) {
+      const p = num(`#pf-t-${s}-${c}-p`), pk = num(`#pf-t-${s}-${c}-pk`);
+      if (p === null && pk === null) continue;
+      if (p === null || pk === null) throw { code: "profile_targets_pair", params: {} };
+      (targets[s] = targets[s] || {})[c] = [p, pk];
+    }
+    if (Object.keys(targets).length) analysis.targets = targets;
+    const report = {
+      organization: $("#pf-org").value, title: $("#pf-title").value, form_no: $("#pf-form").value, revision: $("#pf-rev").value,
+      footer: $("#pf-footer").value, accent: $("#pf-accent-on").checked ? $("#pf-accent").value : "", logo: state.logo,
+      language: $("#pf-lang").value, show_element_21: $("#pf-el21").checked, show_element_22: $("#pf-el22").checked,
+      required: REQUIRABLE.filter((n) => $("#pf-req-" + n).checked),
+      extra_fields: $$("#pf-extra .row").map((row) => { const [key, en, zh] = $$("input[type=text]", row); return { key: key.value.trim(), label_en: en.value, label_zh: zh.value, required: $("input[type=checkbox]", row).checked }; }),
+    };
+    return { name: $("#pf-name").value, analysis, report };
+  }
+  async function saveProfile() {
+    await guarded(async () => {
+      const body = readProfileForm();
+      const url = state.editing === "new" ? "/api/profiles" : `/api/profiles/${state.editing}`;
+      const saved = await api(url, { method: state.editing === "new" ? "POST" : "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      state.editing = saved.id;
+      await loadProfiles(); renderProfileList();
+      $("#pf-msg").textContent = t("admin.profile_saved", { name: saved.name, rev: saved.revision });
+    });
+  }
+  function onLogoChosen(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { state.logo = String(reader.result); showLogo(); };
+    reader.readAsDataURL(file);
   }
 
   // ---------------------------------------------------------------- saved data and reports
@@ -852,6 +1068,7 @@
       const [users, audit] = await Promise.all([api("/api/users"), api("/api/audit?limit=100")]);
       renderUsers(users.users);
       renderAudit(audit.entries);
+      await loadProfiles(); renderProfileList();
     });
   }
   function renderUsers(users) {
@@ -934,6 +1151,7 @@
     if (state.dataset) renderData();
     if (state.result) renderResult();
     renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
+    if (state.user && state.profile) { onProfileChange(); }
     if (state.user && !$("#tab-saved").hidden) loadSaved();
     if (state.user && !$("#tab-admin").hidden) loadAdmin();
   }
@@ -970,6 +1188,15 @@
     $("#pw-btn").addEventListener("click", () => showTab("password"));
     $("#password-form").addEventListener("submit", (e) => { e.preventDefault(); doChangePassword(); });
     $("#nu-create").addEventListener("click", createUser);
+    $("#a-profile").addEventListener("change", onProfileChange);
+    $("#pf-new").addEventListener("click", () => openProfileEditor(null));
+    $("#pf-save").addEventListener("click", saveProfile);
+    $("#pf-cancel").addEventListener("click", closeProfileEditor);
+    $("#pf-extra-add").addEventListener("click", () => addExtraRow(null));
+    $("#pf-rules-on").addEventListener("change", (e) => fillRules("pf-r-", readRules("pf-r-"), !e.target.checked));
+    $("#pf-accent-on").addEventListener("change", (e) => { $("#pf-accent").disabled = !e.target.checked; });
+    $("#pf-logo-file").addEventListener("change", (e) => onLogoChosen(e.target.files[0]));
+    $("#pf-logo-remove").addEventListener("click", () => { state.logo = ""; $("#pf-logo-file").value = ""; showLogo(); });
     $("#audit-verify").addEventListener("click", verifyAudit);
     restoreReportMeta();
     $("#rp-language").addEventListener("change", () => { state.reportLangTouched = true; });
@@ -983,6 +1210,7 @@
       await setLanguage(pickLanguage());
       const meta = await api("/api/meta");
       state.setupNeeded = meta.setup_needed;
+      state.defaultTargets = meta.default_targets;
       if (meta.session) enterApp(meta.session); else showLogin();
     } catch (e) { showError({ code: "network", message: String(e && e.message || e.code), params: {} }); }
   }

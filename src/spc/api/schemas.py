@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from spc.core.constants import ALPHA_3SIGMA
+from spc.profile import merge_target_table, resolve_analysis
 from spc.report import ReportMeta
 from spc.service import AnalysisRequest
 
@@ -83,9 +84,24 @@ class AnalyzeBody(Strict):
     bootstrap_n: int = Field(default=200, ge=0, le=2000)
     seed: int = Field(default=20260701, ge=0, le=2**32 - 1)
     moving_n: int = Field(default=1, ge=1, le=10)
+    profile_id: int | None = Field(default=None, ge=1)  # customer profile: fills what is not set here, see spc.profile
+    target_table: dict | None = None
+
+    def resolve(self, profile: dict | None = None) -> tuple[AnalysisRequest, list[str]]:
+        """The effective request and the names of the fields that differ from the profile on purpose.
+        Fields not set in the body take the profile's value. A field set to another value is a deviation."""
+        data = self.model_dump(exclude={"profile_id"})
+        explicit = {k: v for k, v in data.items() if k in self.model_fields_set}
+        values, deviations, table = resolve_analysis(explicit, data, profile["analysis"] if profile else {})
+        if profile and "customer" not in explicit:
+            values["customer"] = profile["name"]
+        if table is None and values.get("target_table") is not None:
+            table = merge_target_table(values["target_table"])
+        values["target_table"] = table
+        return AnalysisRequest(**values), deviations
 
     def to_request(self) -> AnalysisRequest:
-        return AnalysisRequest(**self.model_dump())
+        return self.resolve(None)[0]
 
 
 class TargetBody(Strict):
@@ -130,6 +146,7 @@ class ReportMetaBody(Strict):
     uncertainty: float | None = Field(default=None, gt=0)
     coverage_factor: float = Field(default=2.0, ge=1)
     guard_band_risk: float = Field(default=0.05, gt=0, lt=0.5)
+    extra: dict[str, str] = Field(default_factory=dict, max_length=12)  # values of the customer profile's extra fields
 
     def to_meta(self) -> ReportMeta:
         return ReportMeta(**self.model_dump())
@@ -138,4 +155,13 @@ class ReportMetaBody(Strict):
 class ReportBody(Strict):
     analysis: AnalyzeBody
     meta: ReportMetaBody = Field(default_factory=ReportMetaBody)
-    language: Literal["zh-TW", "en"] = "en"
+    language: Literal["zh-TW", "en"] = "en"  # not set: the profile's language, else English
+    profile_id: int | None = Field(default=None, ge=1)  # also applies to the analysis unless that names its own
+
+
+class ProfileBody(Strict):
+    """Name, analysis settings and report layout of a customer. The parts are checked in spc.profile."""
+
+    name: str = Field(min_length=1, max_length=100)
+    analysis: dict = Field(default_factory=dict)
+    report: dict = Field(default_factory=dict)

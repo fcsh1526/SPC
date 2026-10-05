@@ -41,6 +41,7 @@ def build_archive(
     report_id: str,
     language: str,
     created_by: str = "",
+    profile: dict | None = None,
 ) -> dict:
     body = {
         "format": FORMAT,
@@ -56,6 +57,8 @@ def build_archive(
     }
     if created_by:  # the login that made the report; inside the digest like everything else
         body["created_by"] = created_by
+    if profile:  # snapshot of the customer profile that was used (name, revision, layout, deviations)
+        body["profile"] = profile
     digest = hashlib.sha256(canonical(body)).hexdigest()
     return {
         **body,

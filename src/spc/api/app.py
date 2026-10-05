@@ -27,6 +27,7 @@ from spc.api.schemas import (
     ArlBody,
     AttributeBody,
     MarkBody,
+    ProfileBody,
     RestartBody,
     ReportBody,
     SuspectsBody,
@@ -36,8 +37,11 @@ from spc.auth import Audit, AuthError, AuthService, User
 from spc.core.arl_oc import alarm_probability, arl, required_subgroup_size
 from spc.core.capability import Stage, TargetAdjustmentNotAllowed, required_targets
 from spc.core.charts import attribute as attr
-from spc.db import Database, DatasetNotFound, DatasetStore, ReportNotFound, ReportStore
+from spc.db import (
+    Database, DatasetNotFound, DatasetStore, ProfileNameTaken, ProfileNotFound, ProfileStore, ReportNotFound, ReportStore,
+)
 from spc.data import ColumnMap, DataImportError, Dataset, IncompleteSubgroupsError, load_csv, preview_csv, suspects, to_csv
+from spc.profile import ReportTemplate, default_target_table, missing_fields, snapshot, validate_analysis
 from spc.report import ReportError, generate, report_xlsx, reproduce
 from spc.service import analyze
 
@@ -132,7 +136,9 @@ def create_app(
                   dependencies=[Depends(authenticate)])
     store = DatasetStore(db)
     reports = ReportStore(db)
+    profiles = ProfileStore(db)
     app.state.db, app.state.auth, app.state.audit, app.state.store, app.state.reports = db, auth, audit, store, reports
+    app.state.profiles = profiles
 
     # ------------------------------------------------------------------ plumbing
 
@@ -173,6 +179,14 @@ def create_app(
     async def _missing(_: Request, exc: DatasetNotFound):
         return _error(404, "dataset_not_found", "dataset not found")
 
+    @app.exception_handler(ProfileNotFound)
+    async def _profile_missing(_: Request, exc: ProfileNotFound):
+        return _error(404, "profile_not_found", "customer profile not found")
+
+    @app.exception_handler(ProfileNameTaken)
+    async def _profile_taken(_: Request, exc: ProfileNameTaken):
+        return _error(409, "profile_name_taken", "a customer profile with this name exists already")
+
     @app.exception_handler(ReportNotFound)
     async def _report_missing(_: Request, exc: ReportNotFound):
         return _error(404, "report_not_found", "report not found")
@@ -204,7 +218,7 @@ def create_app(
         """Public. Also tells the page whether it is signed in, so a first visit makes no failing request."""
         info = auth.session(request.cookies.get("spc_session"))
         return {"version": __version__, "languages": list(LANGUAGES), "max_upload_mb": max_upload // (1024 * 1024),
-                "setup_needed": auth.user_count() == 0,
+                "setup_needed": auth.user_count() == 0, "default_targets": default_target_table(),
                 "session": None if info is None else {"user": info.user.to_json(), "csrf": info.csrf}}
 
     add_account_routes(app, auth, audit, admin, secure_cookies)
@@ -393,11 +407,31 @@ def create_app(
 
     @app.post("/api/datasets/{key}/reports")
     def create_report(key: str, body: ReportBody, user: User = Depends(writer)):
-        g = generate(store.get(key), body.analysis.to_request(), body.meta.to_meta(), body.language, created_by=user.label)
+        profile_id = body.analysis.profile_id or body.profile_id
+        profile = profiles.get(profile_id) if profile_id else None
+        request, deviations = body.analysis.resolve(profile)
+        meta = body.meta.to_meta()
+        language, snap = body.language, None
+        if profile:
+            template = ReportTemplate.from_dict(profile["report"])
+            unknown = sorted(set(meta.extra) - {f.key for f in template.extra_fields})
+            if unknown:
+                raise ApiError(400, "report_field_unknown", "unknown extra field", fields=unknown)
+            missing = missing_fields(meta, template, meta.extra)
+            if missing:
+                raise ApiError(400, "report_field_required", "the customer profile requires these fields", fields=missing)
+            if "language" not in body.model_fields_set and template.language:
+                language = template.language
+            snap = snapshot(profile["id"], profile["name"], profile["revision"], template, deviations)
+        elif meta.extra:
+            raise ApiError(400, "report_field_unknown", "extra fields belong to a customer profile", fields=sorted(meta.extra))
+        g = generate(store.get(key), request, meta, language, created_by=user.label, profile=snap)
         with db.tx():
             reports.add(g, key, user.id)
             audit.append("report_created", user_id=user.id, username=user.username, target=g.report_id,
-                         detail={"dataset": key, "digest": g.archive["integrity"]["digest"]})
+                         detail={"dataset": key, "digest": g.archive["integrity"]["digest"],
+                                 **({"profile": profile["name"], "profile_revision": profile["revision"],
+                                     "deviations": sorted(deviations)} if profile else {})})
         base = f"/api/reports/{g.report_id}"
         return {
             "id": g.report_id,
@@ -453,11 +487,51 @@ def create_app(
             "differences": list(result.differences),
         }
 
+    # ------------------------------------------------------------------ customer profiles
+
+    def _profile_parts(body: ProfileBody) -> tuple[str, dict, dict]:
+        return body.name.strip(), validate_analysis(body.analysis), ReportTemplate.from_dict(body.report).to_dict()
+
+    @app.get("/api/profiles")
+    def list_profiles():
+        return {"profiles": profiles.list()}
+
+    @app.post("/api/profiles")
+    def create_profile(body: ProfileBody, user: User = Depends(admin)):
+        name, analysis, report = _profile_parts(body)
+        with db.tx():
+            created = profiles.create(name, analysis, report, user.id)
+            audit.append("profile_created", user_id=user.id, username=user.username, target=name, detail={"id": created["id"]})
+        return created
+
+    @app.put("/api/profiles/{profile_id}")
+    def update_profile(profile_id: int, body: ProfileBody, user: User = Depends(admin)):
+        name, analysis, report = _profile_parts(body)
+        with db.tx():
+            updated = profiles.update(profile_id, name, analysis, report)
+            audit.append("profile_updated", user_id=user.id, username=user.username, target=name,
+                         detail={"id": profile_id, "revision": updated["revision"]})
+        return updated
+
+    @app.delete("/api/profiles/{profile_id}")
+    def delete_profile(profile_id: int, user: User = Depends(admin)):
+        with db.tx():
+            name = profiles.get(profile_id)["name"]
+            profiles.delete(profile_id)
+            audit.append("profile_deleted", user_id=user.id, username=user.username, target=name, detail={"id": profile_id})
+        return {"ok": True}
+
     # ------------------------------------------------------------------ analysis and tools
 
     @app.post("/api/datasets/{key}/analyze")
     def run_analysis(key: str, body: AnalyzeBody):
-        return analyze(store.get(key), body.to_request())
+        profile = profiles.get(body.profile_id) if body.profile_id else None
+        request, deviations = body.resolve(profile)
+        result = analyze(store.get(key), request)
+        if profile:  # what the screen shows is what the report will use
+            result["profile"] = {"id": profile["id"], "name": profile["name"], "revision": profile["revision"],
+                                 "deviations": sorted(deviations)}
+        return result
 
     @app.post("/api/targets")
     def targets(body: TargetBody):

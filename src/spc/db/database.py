@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE users (
@@ -62,6 +62,15 @@ CREATE TABLE reports (
     html       TEXT NOT NULL,
     archive    TEXT NOT NULL
 );
+CREATE TABLE profiles (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    revision   INTEGER NOT NULL DEFAULT 1,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+);
 CREATE TABLE audit (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     ts        TEXT NOT NULL,
@@ -74,6 +83,18 @@ CREATE TABLE audit (
     hash      TEXT NOT NULL
 );
 """
+
+
+MIGRATION_1_TO_2 = """
+CREATE TABLE profiles (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    revision   INTEGER NOT NULL DEFAULT 1,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+)"""
 
 
 class Database:
@@ -105,6 +126,11 @@ class Database:
                 if statement.strip():
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            self._conn.execute("COMMIT")
+        elif version == 1:  # version 2 adds the customer profiles
+            self._conn.execute("BEGIN IMMEDIATE")
+            self._conn.execute(MIGRATION_1_TO_2)
+            self._conn.execute("PRAGMA user_version = 2")
             self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")

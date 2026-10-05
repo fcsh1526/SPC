@@ -116,3 +116,58 @@ class ReportStore:
             (limit,),
         )
         return [dict(r) for r in rows]
+
+
+class ProfileNotFound(KeyError):
+    """No customer profile with this id."""
+
+
+class ProfileNameTaken(ValueError):
+    """Another profile has this name."""
+
+
+class ProfileStore:
+    """Customer profiles (see `spc.profile`). The data is one JSON document: {"analysis": {...}, "report": {...}}.
+    A change raises the revision number. Old revisions are not kept: a report keeps its own snapshot."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    @staticmethod
+    def _row(r) -> dict:
+        return {"id": r["id"], "name": r["name"], "revision": r["revision"], "created_at": r["created_at"],
+                "updated_at": r["updated_at"], **json.loads(r["data"])}
+
+    def list(self) -> list[dict]:
+        return [self._row(r) for r in self.db.all("SELECT * FROM profiles ORDER BY name COLLATE NOCASE")]
+
+    def get(self, profile_id: int) -> dict:
+        r = self.db.one("SELECT * FROM profiles WHERE id = ?", (profile_id,))
+        if r is None:
+            raise ProfileNotFound(profile_id)
+        return self._row(r)
+
+    def create(self, name: str, analysis: dict, report: dict, user_id: int) -> dict:
+        stamp = now_iso()
+        with self.db.tx():
+            if self.db.one("SELECT 1 FROM profiles WHERE name = ?", (name,)):
+                raise ProfileNameTaken(name)
+            cur = self.db.execute(
+                "INSERT INTO profiles (name, revision, data, created_at, updated_at, created_by) VALUES (?, 1, ?, ?, ?, ?)",
+                (name, _dump({"analysis": analysis, "report": report}), stamp, stamp, user_id))
+            return self.get(cur.lastrowid)
+
+    def update(self, profile_id: int, name: str, analysis: dict, report: dict) -> dict:
+        with self.db.tx():
+            self.get(profile_id)
+            clash = self.db.one("SELECT id FROM profiles WHERE name = ? AND id != ?", (name, profile_id))
+            if clash:
+                raise ProfileNameTaken(name)
+            self.db.execute(
+                "UPDATE profiles SET name = ?, data = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+                (name, _dump({"analysis": analysis, "report": report}), now_iso(), profile_id))
+            return self.get(profile_id)
+
+    def delete(self, profile_id: int) -> None:
+        if self.db.execute("DELETE FROM profiles WHERE id = ?", (profile_id,)).rowcount == 0:
+            raise ProfileNotFound(profile_id)
