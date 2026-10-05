@@ -227,6 +227,22 @@
             <option value="D" data-i18n="analysis.model_D"></option>
           </select>
           <small class="muted" data-i18n="analysis.model_hint"></small></label>
+        <div class="wide" id="a-model-assist">
+          <p class="row"><button type="button" id="a-model-suggest" data-i18n="tm.suggest"></button></p>
+          <details>
+            <summary data-i18n="tm.hints"></summary>
+            <p class="note" data-i18n="tm.hints_note"></p>
+            <div class="checks">
+              <label class="check"><input type="checkbox" data-hint="natural_limit"><span data-i18n="tm.hint_natural_limit"></span></label>
+              <label class="check"><input type="checkbox" data-hint="different_fixtures"><span data-i18n="tm.hint_different_fixtures"></span></label>
+              <label class="check"><input type="checkbox" data-hint="tool_wear_trend"><span data-i18n="tm.hint_tool_wear_trend"></span></label>
+              <label class="check"><input type="checkbox" data-hint="tool_or_batch_changes"><span data-i18n="tm.hint_tool_or_batch_changes"></span></label>
+              <label class="check"><input type="checkbox" data-hint="spindle_wear"><span data-i18n="tm.hint_spindle_wear"></span></label>
+              <label class="check"><input type="checkbox" data-hint="multi_stream"><span data-i18n="tm.hint_multi_stream"></span></label>
+            </div>
+          </details>
+          <div id="a-model-suggestion" role="status"></div>
+        </div>
         <label class="check wide"><input id="a-controlled" type="checkbox"><span data-i18n="analysis.controlled_stable"></span></label>
       </div>
     </fieldset>

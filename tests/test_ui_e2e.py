@@ -1210,3 +1210,41 @@ def test_machine_study_checklist_in_the_browser(server, browser, app):
     expect(page.locator("#st-list")).to_contain_text("已於")
     assert problems == [], problems
     ctx.close()
+
+
+def test_time_model_suggestion_in_the_browser(server, browser, tmp_path):
+    expect = playwright_sync.expect
+    rng = np.random.default_rng(4)
+    rows = ["lot,v"]
+    for i in range(40):  # tool wear: the location follows a trend, the variation is constant
+        rows += [f"L{i + 1},{10 + 0.2 * i + rng.normal(0, 1):.4f}" for _ in range(5)]
+    path = tmp_path / "wear.csv"
+    path.write_text("\n".join(rows) + "\n")
+    ctx = browser.new_context(viewport={"width": 1200, "height": 1100}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.set_input_files("#file", str(path))
+    page.select_option("#col-value", "v")
+    page.select_option("#col-subgroup", "lot")
+    page.click("#import-btn")
+    page.click("#to-analysis")
+    assert page.input_value("#a-model") == ""
+    page.locator("#a-model-assist summary").click()
+    page.locator("input[data-hint=multi_stream]").check()
+    page.click("#a-model-suggest")
+    box = page.locator("#a-model-suggestion")
+    expect(box).to_contain_text("Suggestion: C3")
+    expect(box).to_contain_text("the location follows a trend")
+    expect(box).to_contain_text("Based on 40 subgroups of 5 values")
+    expect(box).to_contain_text("points to D")  # the hint that does not fit is said
+    expect(box).to_contain_text("not in statistical control")
+    page.click("#a-model-suggestion button")
+    assert page.input_value("#a-model") == "C3"
+    page.select_option("#lang", "zh-TW")
+    expect(box).to_contain_text("建議：")
+    expect(box).to_contain_text("位置隨趨勢改變")
+    assert problems == [], problems
+    ctx.close()

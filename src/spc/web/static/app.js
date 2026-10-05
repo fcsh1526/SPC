@@ -259,7 +259,7 @@
   }
   async function openDataset(ds) {
     state.dataset = ds;
-    state.offset = 0; state.selected.clear(); state.suspects.clear(); state.result = null; state.reportOut = null;
+    state.offset = 0; state.selected.clear(); state.suspects.clear(); state.result = null; state.reportOut = null; state.modelSuggestion = null; renderModelSuggestion();
     renderReportOut();
     $("#result").hidden = true;
     $("#a-size-wrap").hidden = ds.has_subgroup;
@@ -445,6 +445,46 @@
       body.seed = Math.max(0, Math.round(Number($("#a-seed").value) || 0));
     }
     return body;
+  }
+  // ---- suggestion of the time-dependent model (draft 9.4): evidence and a button to take it over, the person decides
+  async function suggestModel() {
+    const hints = {};
+    $$("#a-model-assist input[data-hint]").forEach((i) => { if (i.checked) hints[i.dataset.hint] = true; });
+    const body = { hints };
+    if (!state.dataset.has_subgroup) { const n = num("#a-size"); if (n) body.subgroup_size = Math.max(2, Math.min(25, Math.round(n))); }
+    let r = null;
+    await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/time-model`, body); });
+    state.modelSuggestion = r;
+    renderModelSuggestion();
+  }
+  function renderModelSuggestion() {
+    const box = $("#a-model-suggestion"); box.replaceChildren();
+    const r = state.modelSuggestion;
+    if (!r) return;
+    const g = r.groups;
+    if (!r.model) {
+      box.appendChild(el("p", "status-warning", t("tm.not_enough", { k: g.k, min: r.min_groups, values: r.min_values })));
+      return;
+    }
+    const card = el("div", "ok-box");
+    card.appendChild(el("p", "strong", t("tm.suggestion", { model: t("analysis.model_" + r.model), confidence: t("tm.conf_" + r.confidence) })));
+    card.appendChild(el("p", "", t(g.blocks ? "tm.grouping_blocks" : "tm.grouping_subgroups", { k: g.k, n: g.n })));
+    card.appendChild(el("p", "", t("tm.why") + " " + r.reasons.map((x) => t("tm.reason_" + x)).join("; ")));
+    const ev = r.evidence, p = (v) => (v < 0.001 ? "< 0.001" : sig(v, 2));
+    const ul = el("ul");
+    [t("tm.ev_location", { anova: p(ev.location.anova_p), ratio: sig(ev.location.between_to_within, 2), trend: p(ev.location.trend_p), r2: sig(ev.location.trend_r2, 2), after: p(ev.location.after_trend_p) }),
+      t("tm.ev_variation", { disp: p(ev.variation.dispersion_p), ratio: sig(ev.variation.dispersion_ratio, 2), sd: sig(ev.variation.sd_ratio, 3) }),
+      t("tm.ev_shape", { inst: p(ev.shape.instantaneous_normal_p), res: p(ev.shape.resulting_normal_p), modes: ev.shape.modes, skew: sig(ev.shape.skewness, 2), kurt: sig(ev.shape.kurtosis, 3) })]
+      .forEach((x) => ul.appendChild(el("li", "", x)));
+    card.appendChild(ul);
+    if (r.alternatives.length) card.appendChild(el("p", "", t("tm.alternatives", { list: r.alternatives.map((a) => `${t("analysis.model_" + a.model)} (${t("tm.when_" + a.when)})`).join("; ") })));
+    r.hints.forEach((h) => card.appendChild(el("p", h.agrees ? "muted" : "status-warning", t(h.agrees ? "tm.hint_agrees" : "tm.hint_disagrees", { hint: t("tm.hint_" + h.hint), models: h.models.join(", ") }))));
+    card.appendChild(el("p", "muted", t(r.in_statistical_control ? "tm.implication_control" : "tm.implication_no_control")));
+    const use = el("button", "primary", t("tm.use", { model: r.model }));
+    use.type = "button";
+    use.addEventListener("click", () => { $("#a-model").value = r.model; });
+    card.appendChild(use);
+    box.appendChild(card);
   }
   async function runAnalysis(ev) {
     ev.preventDefault();
@@ -1992,6 +2032,7 @@
     if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); refreshImportForm(); }
     if (state.dataset) renderData();
     if (state.result) renderResult();
+    renderModelSuggestion();
     renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
     if (state.user && M.view && !$("#mon-detail").hidden) renderMonitor();
     if (state.user && ST.view && !$("#st-detail").hidden) renderStudy();
@@ -2027,6 +2068,7 @@
     $("#a-dist").addEventListener("change", syncDistributionControls);
     syncDistributionControls();
     $("#analysis-form").addEventListener("submit", runAnalysis);
+    $("#a-model-suggest").addEventListener("click", suggestModel);
     $("#t-btn").addEventListener("click", calcTargets);
     $("#l-btn").addEventListener("click", calcArl);
     $("#login-form").addEventListener("submit", (e) => { e.preventDefault(); doLogin(); });

@@ -61,6 +61,13 @@ class ResetPasswordBody(Strict):
     must_change: bool = True
 
 
+class TimeModelBody(Strict):
+    """Optional help for the suggestion of the time-dependent model."""
+
+    subgroup_size: int | None = Field(default=None, ge=2, le=25)  # only for data without subgroups: the size of the blocks
+    hints: dict[str, bool] = Field(default_factory=dict, max_length=10)
+
+
 class AnalyzeBody(Strict):
     stage: Literal["machine", "preliminary", "production"] = "production"
     chart: Literal["auto", "xbar-s", "xbar-r", "median-r", "imr"] = "auto"

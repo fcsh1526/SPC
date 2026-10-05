@@ -9,7 +9,7 @@ Assumptions of this version, stated in the result as warnings:
   run and reported. With `distribution` set, a distribution is fitted and the indices come from the
   General Geometric method (.G, quantiles) or the z-score method (.Z, shares outside the limits). The
   interval then comes from a seeded bootstrap. Results for a normal distribution stay as they were.
-* The time-dependent model (A1 .. D) is chosen by the user. It is not detected.
+* The time-dependent model (A1 .. D) is chosen by the user. It is not detected in the analysis (a suggestion with its evidence is a separate step, `spc.service.model_suggestion`; the result of an analysis must not change, stored reports are reproduced from it).
 """
 
 from __future__ import annotations

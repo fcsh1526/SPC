@@ -24,7 +24,9 @@ from spc.api.accounts import add_account_routes
 from spc.api.monitors import add_monitor_routes
 from spc.api.studies import add_study_routes
 from spc.api.errors import ApiError, error_response as _error
+from spc.service.model_suggestion import suggest_for_dataset
 from spc.api.schemas import (
+    TimeModelBody,
     AnalyzeBody,
     ArlBody,
     AttributeBody,
@@ -565,6 +567,14 @@ def create_app(
         return {"ok": True}
 
     # ------------------------------------------------------------------ analysis and tools
+
+    @app.post("/api/datasets/{key}/time-model")
+    def time_model(key: str, body: TimeModelBody):
+        """A suggestion for the time-dependent distribution model (draft 9.4) with its evidence. The person decides."""
+        try:
+            return suggest_for_dataset(store.get(key), body.subgroup_size, body.hints)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
 
     @app.post("/api/datasets/{key}/analyze")
     def run_analysis(key: str, body: AnalyzeBody):

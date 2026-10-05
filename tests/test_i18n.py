@@ -78,7 +78,7 @@ def test_every_key_in_the_files_is_used(messages):
     dynamic = (
         "issue.", "error.", "warn.", "alarmrule.", "result.class_", "result.verdict_", "result.kind_",
         "result.series_variation_", "analysis.model_", "analysis.class_", "analysis.chart_",
-        "analysis.stage_", "result.names_reason_", "role.", "dist.", "pkey.", "mon.chart_", "mon.kind_", "mon.step_", "mon.result_", "mon.quadrant_", "mon.review_", "study.item.", "study.res.", "study.eff_", "study.status_",
+        "analysis.stage_", "result.names_reason_", "role.", "dist.", "pkey.", "mon.chart_", "mon.kind_", "mon.step_", "mon.result_", "mon.quadrant_", "mon.review_", "study.item.", "study.res.", "tm.reason_", "tm.conf_", "tm.when_", "tm.hint_", "study.eff_", "study.status_",
     )
     text = page_text()
     unused = sorted(
