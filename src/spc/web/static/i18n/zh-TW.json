@@ -1277,5 +1277,6 @@
   "error.plan_released": "計畫已經發行。",
   "error.plan_not_released": "計畫是草稿。",
   "error.plan_not_found": "此控制計畫不存在。",
-  "error.plan_name_taken": "已有同名的控制計畫。"
+  "error.plan_name_taken": "已有同名的控制計畫。",
+  "report.plan": "控制計畫（已發行）"
 }

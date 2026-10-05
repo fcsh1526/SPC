@@ -161,6 +161,29 @@ class PlanService:
         plan = self.get(plan_id)
         return {"plan": plan, "evaluation": self.evaluate(plan), "approvers": list(R.APPROVERS)}
 
+    def snapshot(self, plan_id: int) -> dict:
+        """What a report keeps of a released plan: the lines with the result of their checks, the approvals and the release. A draft is refused."""
+        plan = self.get(plan_id)
+        if plan["status"] != "released":
+            raise PlanError("plan_not_released", "a report refers to a released control plan only", 409, plan=plan["name"])
+        ev = self.evaluate(plan)
+        lines = []
+        for i, line in enumerate(plan["lines"], start=1):
+            checks = ev["lines"][str(i)]
+            names = {}
+            for c in checks:
+                if c["key"] in ("monitor", "msa") and c.get("name"):
+                    names[c["key"]] = c["name"]
+            lines.append({**{k: line[k] for k in ("step", "kind", "characteristic", "unit", "target", "lsl", "usl", "class", "control", "sample_size", "frequency", "responsible")},
+                          "no": i, "monitor": names.get("monitor"), "system": names.get("msa"),
+                          "result": "fail" if any(c["result"] == "fail" for c in checks) else "warn" if any(c["result"] == "warn" for c in checks) else "pass",
+                          "remarks": [c["key"] for c in checks if c["result"] == "warn"]})
+        last = plan["released"][-1]
+        return {"id": plan["id"], "name": plan["name"], "part": plan["part"], "process": plan["process"], "phase": plan["phase"],
+                "revision": plan["released_revision"], "released_at": last["at"], "released_by": last["by"], "release_reason": last["reason"],
+                "approvals": {r: {k: a[k] for k in ("by", "at", "note", "revision")} for r, a in plan["approvals"].items()},
+                "remarks": ev["remarks"], "lines": lines}
+
     def list(self) -> list[dict]:
         out = []
         for r in self.db.all("SELECT * FROM control_plans ORDER BY name COLLATE NOCASE"):

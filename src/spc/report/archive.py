@@ -42,6 +42,7 @@ def build_archive(
     language: str,
     created_by: str = "",
     profile: dict | None = None,
+    control_plan: dict | None = None,
 ) -> dict:
     body = {
         "format": FORMAT,
@@ -59,6 +60,8 @@ def build_archive(
         body["created_by"] = created_by
     if profile:  # snapshot of the customer profile that was used (name, revision, layout, deviations)
         body["profile"] = profile
+    if control_plan:  # the released control plan the study belongs to, as it stood (lines, checks, approvals)
+        body["control_plan"] = control_plan
     digest = hashlib.sha256(canonical(body)).hexdigest()
     return {
         **body,

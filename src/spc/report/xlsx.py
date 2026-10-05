@@ -467,7 +467,22 @@ def _annex_sheet(wb: Workbook, rep: Report, L) -> None:
     if tr.get("source"):
         s = tr["source"]
         _text(ws, r, 1, "SHA-256"); _text(ws, r, 2, s["sha256"]); r += 1
-    _widths(ws, [34, 40, 40, 24, 22])
+    if rep.control_plan:
+        from spc.report.render import plan_approval_lines, plan_head_line, plan_heads, plan_rows
+
+        r += 1
+        _text(ws, r, 1, L("doc.annex_c"), bold=True); r += 1
+        _text(ws, r, 1, plan_head_line(rep.control_plan, L), wrap=False); r += 1
+        _header(ws, r, plan_heads(L)); r += 1
+        for row in plan_rows(rep.control_plan, L):
+            for c, v in enumerate(row, start=1):
+                _text(ws, r, c, v, wrap=True)
+            r += 1
+        r += 1
+        _text(ws, r, 1, L("cp.approvals"), bold=True); r += 1
+        for k, v in plan_approval_lines(rep.control_plan, L):
+            _text(ws, r, 1, k); _text(ws, r, 2, v, wrap=True); r += 1
+    _widths(ws, [34, 40, 40, 24, 22, 24, 24, 20])
 
 
 def render_xlsx(rep: Report, dataset: Dataset) -> bytes:

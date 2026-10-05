@@ -495,6 +495,7 @@
       const body = buildAnalysisBody();
       state.result = await post(`/api/datasets/${state.dataset.id}/analyze`, body);
       fillMsaSelect($("#rp-msa"), $("#rp-msa").value);
+      fillReportPlanSelect();
       state.lastAnalysisBody = body;
       state.reportOut = null;
       renderReportOut();
@@ -737,6 +738,7 @@
       const out = await post(`/api/datasets/${state.dataset.id}/reports`, {
         analysis: state.lastAnalysisBody, meta, language: $("#rp-language").value,
         measurement_system_id: $("#rp-msa").value ? Number($("#rp-msa").value) : null,
+        control_plan_id: $("#rp-plan").value ? Number($("#rp-plan").value) : null,
       });
       state.reportOut = out;
       renderReportOut();
@@ -1771,6 +1773,15 @@
   const GATE_CLASS = { pass: "status-ok", conditional: "status-warning", block: "status-alarm" };
   const CHECK_CLASS = { pass: "status-ok", waived: "status-warning", warn: "status-warning", fail: "status-alarm", missing: "status-alarm", not_done: "", not_needed: "" };
   const POLICY_PCT = ["resolution_share_max", "guard_band_risk"];  // shown in percent
+  async function fillReportPlanSelect() {  // only a released plan can stand in a report
+    const select = $("#rp-plan"), current = select.value;
+    let list = [];
+    try { list = (await api("/api/plans")).plans.filter((p) => p.status === "released"); } catch (e) { /* none */ }
+    select.replaceChildren();
+    const none = el("option", "", t("plan.link_none")); none.value = ""; select.appendChild(none);
+    list.forEach((p) => { const o = el("option", "", `${p.name} (${t("plan.state_released", { rev: p.revision })})`); o.value = String(p.id); select.appendChild(o); });
+    select.value = list.some((p) => String(p.id) === current) ? current : "";
+  }
   async function fillMsaSelect(select, current) {
     let list = [];
     try { list = (await api("/api/msa")).systems; } catch (e) { /* none */ }
@@ -2487,7 +2498,7 @@
     if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); refreshImportForm(); }
     if (state.dataset) renderData();
     if (state.result) renderResult();
-    if (state.user) fillMsaSelect($("#rp-msa"), $("#rp-msa").value);
+    if (state.user) { fillMsaSelect($("#rp-msa"), $("#rp-msa").value); fillReportPlanSelect(); }
     renderModelSuggestion();
     renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
     if (state.user && M.view && !$("#mon-detail").hidden) renderMonitor();

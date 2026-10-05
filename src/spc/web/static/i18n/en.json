@@ -1277,5 +1277,6 @@
   "error.plan_released": "The plan is released already.",
   "error.plan_not_released": "The plan is a draft.",
   "error.plan_not_found": "This control plan does not exist.",
-  "error.plan_name_taken": "A control plan with this name exists already."
+  "error.plan_name_taken": "A control plan with this name exists already.",
+  "report.plan": "Control plan (released)"
 }

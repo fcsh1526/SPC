@@ -59,6 +59,42 @@ def _sig(x, digits=6) -> str:
     return "–" if x is None else f"{float(f'{x:.{digits}g}'):g}"
 
 
+def plan_rows(plan: dict, L) -> list[list[str]]:
+    """The lines of a control plan snapshot as text cells (HTML and Excel use the same)."""
+    rows = []
+    for ln in plan["lines"]:
+        spec = ", ".join(x for x in (f"{ln['lsl']:g} ≤" if ln["lsl"] is not None else "", f"{ln['target']:g}" if ln["target"] is not None else "",
+                                      f"≤ {ln['usl']:g}" if ln["usl"] is not None else "") if x)
+        link = "; ".join(x for x in (f"{L('cp.monitor')}: {ln['monitor']}" if ln["monitor"] else "", f"{L('cp.system')}: {ln['system']}" if ln["system"] else "") if x)
+        result = L("cp.res_" + ln["result"]) + (f" ({', '.join(ln['remarks'])})" if ln["remarks"] else "")
+        rows.append([str(ln["no"]), ln["step"], ln["characteristic"] + (f" [{ln['unit']}]" if ln["unit"] else ""), spec or "–",
+                     L("cp.control_" + ln["control"]) + (f" ({link})" if link else ""),
+                     ", ".join(x for x in (f"n={ln['sample_size']}" if ln["sample_size"] else "", ln["frequency"]) if x) or "–",
+                     ", ".join(L("cp.role." + r) for r in ln["responsible"]) or "–", result])
+    return rows
+
+
+def plan_heads(L) -> list[str]:
+    return [L(k) for k in ("cp.col_no", "cp.col_step", "cp.col_char", "cp.col_spec", "cp.col_control", "cp.col_sampling", "cp.col_resp", "cp.col_result")]
+
+
+def plan_head_line(plan: dict, L) -> str:
+    return L("cp.released", name=plan["name"], part=plan["part"] or "–", process=plan["process"] or "–", rev=plan["revision"], at=plan["released_at"].replace("T", " ").replace("Z", ""),
+             by=plan["released_by"], reason=plan["release_reason"])
+
+
+def plan_approval_lines(plan: dict, L) -> list[tuple[str, str]]:
+    return [(L("cp.role." + r), L("cp.approved_line", by=a["by"], at=a["at"].replace("T", " ").replace("Z", ""), rev=a["revision"], note=a["note"] or "–")) for r, a in plan["approvals"].items()]
+
+
+def _plan_html(plan: dict, L) -> str:
+    head = "".join(f"<th>{esc(h)}</th>" for h in plan_heads(L))
+    body = "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in row) + "</tr>" for row in plan_rows(plan, L))
+    appr = "".join(f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in plan_approval_lines(plan, L))
+    return (f"<p>{esc(plan_head_line(plan, L))}</p><table><tr>{head}</tr>{body}</table>"
+            f'<h3>{esc(L("cp.approvals"))}</h3><table class="kv">{appr}</table>')
+
+
 def render_html(rep: Report) -> str:
     lang, m, f, r = rep.lang, rep.meta, rep.facts, rep.result
     L = lambda key, **p: T(lang, key, **p)
@@ -301,6 +337,7 @@ def render_html(rep: Report) -> str:
     if rep.archive_digest:
         rows_b.append((L("f.archive_digest"), f"<code>{esc(rep.archive_digest)}</code>"))
     annex_b = kv(rows_b)
+    annex_c = _plan_html(rep.control_plan, L) if rep.control_plan else ""
 
     note = L("doc.draft_note") if tr["edition"] == "draft" else L("doc.final_note")
     stage_line = L("doc.stage_" + f["stage"])
@@ -331,6 +368,7 @@ def render_html(rep: Report) -> str:
         + (element(21, e21) if tpl.show_element_21 else "") + (element(22, e22) if tpl.show_element_22 else "")
         + f'<section class="el"><h2>{esc(L("doc.annex_a"))}</h2>{annex_a}</section>'
         + f'<section class="el"><h2>{esc(L("doc.annex_b"))}</h2>{annex_b}</section>'
+        + (f'<section class="el"><h2>{esc(L("doc.annex_c"))}</h2>{annex_c}</section>' if annex_c else "")
         + f"<footer>{footer}</footer>"
         + "</main></body></html>"
     )

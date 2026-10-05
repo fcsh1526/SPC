@@ -530,11 +530,13 @@ def create_app(
             snap = snapshot(profile["id"], profile["name"], profile["revision"], template, deviations)
         elif meta.extra:
             raise ApiError(400, "report_field_unknown", "extra fields belong to a customer profile", fields=sorted(meta.extra))
-        g = generate(store.get(key), request, meta, language, created_by=user.label, profile=snap)
+        plan_snap = plan_service.snapshot(body.control_plan_id) if body.control_plan_id else None
+        g = generate(store.get(key), request, meta, language, created_by=user.label, profile=snap, control_plan=plan_snap)
         with db.tx():
             reports.add(g, key, user.id)
             audit.append("report_created", user_id=user.id, username=user.username, target=g.report_id,
                          detail={"dataset": key, "digest": g.archive["integrity"]["digest"],
+                                 **({"control_plan": plan_snap["name"], "control_plan_revision": plan_snap["revision"]} if plan_snap else {}),
                                  **({"profile": profile["name"], "profile_revision": profile["revision"],
                                      "deviations": sorted(deviations)} if profile else {})})
         base = f"/api/reports/{g.report_id}"

@@ -260,3 +260,44 @@ def test_the_staffing_of_the_roles_of_a_line_is_a_remark(env):
         c["eng"].post(f"/api/people/{uid(app, 'oper')}/competences", json={"competence": comp, "level": 1, "date": "2026-01-10", "note": "course SPC-1"})
     st = next(x for x in c["eng"].get(f"/api/plans/{v['plan']['id']}").json()["evaluation"]["plan"] if x["key"] == "staffing")
     assert st["result"] == "pass" and st["roles"]["line_operator"] == {"assigned": 1, "qualified": 1}
+
+
+def test_a_report_carries_the_released_plan_into_its_archive(env):
+    import numpy as np
+
+    from spc.data import Dataset
+    from spc.report import reproduce, verify_archive
+
+    app, c = env
+    msa_id = build_system(c["eng"], "Air gauge", tolerance=0.2)
+    pid = c["eng"].post("/api/plans", json={"record": {"name": "Housing", "part": "H-1", "lines": [{**LINE, "msa_id": msa_id}]}}).json()["plan"]["id"]
+    key = app.state.store.add(Dataset.from_values([float(v) for v in np.random.default_rng(3).normal(10, 0.02, 60)]), 1, "run")
+    body = {"analysis": {"stage": "preliminary", "lsl": 9.9, "usl": 10.1}, "language": "en", "control_plan_id": pid}
+    r = c["eng"].post(f"/api/datasets/{key}/reports", json=body)
+    assert r.status_code == 409 and err(r)["code"] == "plan_not_released"  # a draft does not stand in a report
+    assert err(c["eng"].post(f"/api/datasets/{key}/reports", json={**body, "control_plan_id": 999}))["code"] == "plan_not_found"
+    for user, role in (("qpe", "quality_planning"), ("pde", "product_developer"), ("ppe", "process_planner"), ("ipe", "inspection_planner")):
+        give_roles(c, app, user, [role])
+        c[user].post(f"/api/plans/{pid}/approve", json={"role": role, "note": f"ok by {user}"})
+    assert c["eng"].post(f"/api/plans/{pid}/release", json={"reason": "pre-series"}).status_code == 200
+    r = c["eng"].post(f"/api/datasets/{key}/reports", json=body)
+    assert r.status_code == 200, r.text
+    rid = r.json()["id"]
+    archive = c["eng"].get(f"/api/reports/{rid}/archive.json").json()
+    cp = archive["control_plan"]
+    assert cp["name"] == "Housing" and cp["revision"] == 1 and cp["release_reason"] == "pre-series" and cp["lines"][0]["system"] == "Air gauge"
+    assert set(cp["approvals"]) == set(R.APPROVERS) and cp["approvals"]["quality_planning"]["note"] == "ok by qpe"
+    assert verify_archive(archive) and reproduce(archive).reproduced
+    html = c["eng"].get(f"/api/reports/{rid}").text
+    assert "Annex C: control plan" in html and "Housing" in html and "ok by pde" in html and "Quality planning" in html
+    xlsx_resp = c["eng"].get(f"/api/reports/{rid}/report.xlsx")
+    assert xlsx_resp.status_code == 200 and b"PK" == xlsx_resp.content[:2]
+    # a change to the plan afterwards does not touch the stored report
+    changed = {"name": "Housing", "part": "H-1", "lines": [{**LINE, "msa_id": msa_id, "sample_size": 9}]}
+    c["eng"].put(f"/api/plans/{pid}", json={"record": changed})
+    assert c["eng"].get(f"/api/reports/{rid}/archive.json").json() == archive
+    # without a plan nothing is added
+    plain = c["eng"].post(f"/api/datasets/{key}/reports", json={**body, "control_plan_id": None}).json()["id"]
+    assert "control_plan" not in c["eng"].get(f"/api/reports/{plain}/archive.json").json()
+    assert "Annex C" not in c["eng"].get(f"/api/reports/{plain}").text
+    assert any(e["action"] == "report_created" and e["detail"].get("control_plan") == "Housing" for e in app.state.audit.list(100))
