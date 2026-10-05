@@ -164,6 +164,7 @@ class ReportBody(Strict):
     meta: ReportMetaBody = Field(default_factory=ReportMetaBody)
     language: Literal["zh-TW", "en"] = "en"  # not set: the profile's language, else English
     profile_id: int | None = Field(default=None, ge=1)  # also applies to the analysis unless that names its own
+    measurement_system_id: int | None = Field(default=None, ge=1)  # the MSA gate applies, and U and the guard band come from its studies
 
 
 class ProfileBody(Strict):
@@ -200,6 +201,19 @@ class PointBody(Strict):
 
 class ReasonBody(Strict):
     reason: str = Field(max_length=2000)
+
+
+class MsaBody(Strict):
+    """A measurement system: name, resolution, tolerance and policy; checked in spc.msa.service.validate_record."""
+
+    record: dict
+
+
+class MsaStudyBody(Strict):
+    kind: str = Field(max_length=20)
+    date: str = Field(max_length=10)
+    note: str = Field(default="", max_length=2000)
+    input: dict
 
 
 class StudyBody(Strict):

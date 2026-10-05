@@ -78,7 +78,7 @@ def test_every_key_in_the_files_is_used(messages):
     dynamic = (
         "issue.", "error.", "warn.", "alarmrule.", "result.class_", "result.verdict_", "result.kind_",
         "result.series_variation_", "analysis.model_", "analysis.class_", "analysis.chart_",
-        "analysis.stage_", "result.names_reason_", "role.", "dist.", "pkey.", "mon.chart_", "mon.kind_", "mon.step_", "mon.result_", "mon.quadrant_", "mon.review_", "study.item.", "study.res.", "tm.reason_", "tm.conf_", "tm.when_", "tm.hint_", "study.eff_", "study.status_",
+        "analysis.stage_", "result.names_reason_", "role.", "dist.", "pkey.", "mon.chart_", "mon.kind_", "mon.step_", "mon.result_", "mon.quadrant_", "mon.review_", "study.item.", "study.res.", "tm.reason_", "tm.conf_", "tm.when_", "tm.hint_", "msa.res.", "msa.check_", "msa.eff_", "msa.gate_", "msa.status_", "msa.verdict_", "msa.kind_", "msa.basis_", "msa.data_", "study.eff_", "study.status_",
     )
     text = page_text()
     unused = sorted(
@@ -90,10 +90,11 @@ def test_every_key_in_the_files_is_used(messages):
 
 def test_every_backend_code_has_a_text(messages):
     en = messages["en"]
-    sources = [*(ROOT / "api").glob("*.py"), *(ROOT / "auth").glob("*.py"), *(ROOT / "monitor").glob("*.py")]
+    sources = [*(ROOT / "api").glob("*.py"), *(ROOT / "auth").glob("*.py"), *(ROOT / "monitor").glob("*.py"), *(ROOT / "study").glob("*.py"), *(ROOT / "msa").glob("*.py")]
     api = "\n".join(f.read_text(encoding="utf-8") for f in sources)
     api_codes = set(re.findall(r'(?:ApiError|AuthError)\(\s*\d+,\s*"(\w+)"', api))
     api_codes |= set(re.findall(r'MonitorError\(\s*"(\w+)"', api))
+    api_codes |= set(re.findall(r'(?:StudyError|MsaProblem)\(\s*"(\w+)"', api))
     api_codes |= set(re.findall(r'_error\(\s*\d+,\s*"(\w+)"', api))
     api_codes |= set(re.findall(r'PasswordPolicyError\(\s*"(\w+)"', api))
     api_codes |= {"not_invalid", "already_invalid"}  # chosen through a conditional expression

@@ -31,8 +31,8 @@ def _dump(x: Any) -> str:
 
 
 class StudyService:
-    def __init__(self, db: Database, audit: Audit, datasets: DatasetStore):
-        self.db, self.audit, self.datasets = db, audit, datasets
+    def __init__(self, db: Database, audit: Audit, datasets: DatasetStore, msa=None):
+        self.db, self.audit, self.datasets, self.msa = db, audit, datasets, msa
 
     def _log(self, action: str, user, target: str, detail: dict) -> None:
         self.audit.append(action, user_id=user.id, username=user.username, target=target, detail=detail)
@@ -79,9 +79,19 @@ class StudyService:
         vals = ds.values[ds.valid_mask]
         return cl.facts_from_dataset(ds, _normality(np.asarray(vals, dtype=float)) if vals.size >= 3 else None), False
 
+    def _msa(self, study: dict):
+        sid = study.get("measurement_system_id")
+        if not sid or self.msa is None:
+            return None
+        try:
+            system = self.msa.view(sid)
+        except KeyError:
+            return {"state": "missing"}
+        return {"state": "gate", "gate": system["gate"], "name": system["system"]["name"]}
+
     def _evaluate(self, study: dict) -> dict:
         facts, missing = self._facts(study)
-        return cl.evaluate(study, study.get("items", {}), facts, missing)
+        return cl.evaluate(study, study.get("items", {}), facts, missing, self._msa(study))
 
     def view(self, study_id: int) -> dict:
         study = self.get(study_id)
@@ -105,6 +115,11 @@ class StudyService:
         return self.view(cur.lastrowid)
 
     def _check_dataset(self, record: dict) -> None:
+        if record.get("measurement_system_id") and self.msa is not None:
+            try:
+                self.msa.get(record["measurement_system_id"])
+            except KeyError:
+                raise StudyError("msa_system_not_found", "the measurement system does not exist", 404) from None
         if record["dataset_id"]:
             try:
                 self.datasets.get(record["dataset_id"])

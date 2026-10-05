@@ -5,6 +5,7 @@ from spc.data import Dataset
 from spc.study import checklist as cl
 from tests.conftest import PASSWORD, logged_in_client, make_app
 from tests.test_api import err
+from tests.test_msa import build_system
 
 RECORD = {"name": "Grinder 4 – bore", "machine": "Grinder 4", "characteristic": "bore diameter", "station": "spindle 1", "unit": "mm",
           "specs": {"lsl": 9.9, "usl": 10.1}}
@@ -23,6 +24,11 @@ def add_dataset(app, n=50, mean=10.0, timestamps=True):
     times = [f"2026-03-02T08:{i // 60:02d}:{i % 60:02d}" for i in range(n)] if timestamps else None
     ds = Dataset.from_values(x, timestamp=times)
     return app.state.store.add(ds, 1, "bore")
+
+
+def proven(c, record):
+    """The record with a measurement system whose gate is open (8.2.3)."""
+    return {**record, "measurement_system_id": build_system(c["eng"], f"gauge of {record['name']}")}
 
 
 def confirm_all(client, sid):
@@ -115,7 +121,7 @@ def test_traceability_and_numeric_data_and_the_distribution_come_from_the_data_s
 def test_roles_and_the_whole_life_of_a_study(env):
     app, c = env
     assert c["view"].post("/api/studies", json={"record": RECORD}).status_code == 403
-    sid = c["eng"].post("/api/studies", json={"record": {**RECORD, "dataset_id": add_dataset(app)}}).json()["study"]["id"]
+    sid = c["eng"].post("/api/studies", json={"record": proven(c, {**RECORD, "dataset_id": add_dataset(app)})}).json()["study"]["id"]
     assert c["view"].get(f"/api/studies/{sid}").status_code == 200 and c["view"].get("/api/studies").json()["studies"][0]["ready"] is False
     view = c["eng"].get(f"/api/studies/{sid}").json()
     ev = view["evaluation"]
@@ -138,7 +144,7 @@ def test_roles_and_the_whole_life_of_a_study(env):
 
 def test_a_failed_automatic_item_blocks_until_a_deviation_with_a_reason_is_recorded(env):
     app, c = env
-    sid = c["eng"].post("/api/studies", json={"record": {**RECORD, "dataset_id": add_dataset(app, n=30)}}).json()["study"]["id"]
+    sid = c["eng"].post("/api/studies", json={"record": proven(c, {**RECORD, "dataset_id": add_dataset(app, n=30)})}).json()["study"]["id"]
     confirm_all(c["eng"], sid)
     ev = c["eng"].get(f"/api/studies/{sid}").json()["evaluation"]
     assert ev["blockers"] == ["sample_size"] and ev["ready"] is False
@@ -151,8 +157,8 @@ def test_a_failed_automatic_item_blocks_until_a_deviation_with_a_reason_is_recor
     closed = c["eng"].post(f"/api/studies/{sid}/close", json={"reason": "closed with a recorded deviation"}).json()["study"]["closed"]
     assert closed["flagged"] == ["sample_size"]
     # the same approval can be given in the record instead: the item becomes a remark, not a failure
-    sid2 = c["eng"].post("/api/studies", json={"record": {**RECORD, "name": "second", "dataset_id": add_dataset(app, n=30),
-                                                          "sample": {"reduced_approved_by": "J. Doe", "reduced_reason": "parts"}}}).json()["study"]["id"]
+    sid2 = c["eng"].post("/api/studies", json={"record": proven(c, {**RECORD, "name": "second", "dataset_id": add_dataset(app, n=30),
+                                                                    "sample": {"reduced_approved_by": "J. Doe", "reduced_reason": "parts"}})}).json()["study"]["id"]
     row2 = next(r for r in c["eng"].get(f"/api/studies/{sid2}").json()["evaluation"]["items"] if r["key"] == "sample_size")
     assert row2["effective"] == "warn" and row2["blocking"] is False
 

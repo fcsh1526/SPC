@@ -23,6 +23,8 @@ from spc import __version__
 from spc.api.accounts import add_account_routes
 from spc.api.monitors import add_monitor_routes
 from spc.api.studies import add_study_routes
+from spc.api.msa import add_msa_routes
+from spc.msa.service import MsaProblem, MsaService, SystemNameTaken, SystemNotFound
 from spc.api.errors import ApiError, error_response as _error
 from spc.service.model_suggestion import suggest_for_dataset
 from spc.api.schemas import (
@@ -150,9 +152,11 @@ def create_app(
     profiles = ProfileStore(db)
     app.state.db, app.state.auth, app.state.audit, app.state.store, app.state.reports = db, auth, audit, store, reports
     app.state.profiles = profiles
-    monitors = MonitorService(db, audit, store, notifiers or [])
+    msa_systems = MsaService(db, audit)
+    app.state.msa = msa_systems
+    monitors = MonitorService(db, audit, store, notifiers or [], msa_systems)
     app.state.monitors = monitors
-    studies = StudyService(db, audit, store)
+    studies = StudyService(db, audit, store, msa_systems)
     app.state.studies = studies
 
     # ------------------------------------------------------------------ plumbing
@@ -205,6 +209,18 @@ def create_app(
     @app.exception_handler(IncidentNotFound)
     async def _incident_missing(_: Request, exc: IncidentNotFound):
         return _error(404, "incident_not_found", "incident not found")
+
+    @app.exception_handler(MsaProblem)
+    async def _msa_problem(_: Request, exc: MsaProblem):
+        return _error(exc.status, exc.code, str(exc), exc.params)
+
+    @app.exception_handler(SystemNotFound)
+    async def _msa_missing(_: Request, exc: SystemNotFound):
+        return _error(404, "msa_system_not_found", "measurement system not found")
+
+    @app.exception_handler(SystemNameTaken)
+    async def _msa_taken(_: Request, exc: SystemNameTaken):
+        return _error(409, "msa_system_name_taken", "a measurement system with this name exists already")
 
     @app.exception_handler(StudyError)
     async def _study_error(_: Request, exc: StudyError):
@@ -267,6 +283,7 @@ def create_app(
     add_account_routes(app, auth, audit, admin, secure_cookies)
     add_monitor_routes(app, monitors, store, reports, audit, db, reader, operator, writer, admin)
     add_study_routes(app, studies, reader, writer, admin)
+    add_msa_routes(app, msa_systems, reader, writer, admin)
 
     # ------------------------------------------------------------------ import
 
@@ -450,12 +467,36 @@ def create_app(
 
     # ------------------------------------------------------------------ reports
 
+    def _apply_msa_gate(meta, system_id: int, what: str):
+        """The gate of the measurement system stands before a report: a blocked gate refuses. The uncertainty of the studies and what the
+        gate says go into the report (elements 7, 8 and 22), unless the author entered their own uncertainty."""
+        from dataclasses import replace
+
+        system = msa_systems.view(system_id)
+        gate_result = system["gate"]
+        if gate_result["status"] == "block":
+            raise ApiError(409, "msa_gate_blocked", f"the measurement system {system['system']['name']!r} is not proven for this {what}", system=system["system"]["name"],
+                           blocking=gate_result["blocking"])
+        s, u = system["system"], gate_result["uncertainty"]
+        pct = gate_result["checks"]["grr"].get("pct")
+        text = (f"Measurement system {s['name']}: resolution {s['resolution']}"
+                + (f", gauge R&R {pct:.1f} % of the {gate_result['checks']['grr']['basis'].replace('_', ' ')}, ndc {gate_result['checks']['grr']['ndc']:.1f}" if pct is not None else "")
+                + f". MSA gate: {gate_result['status']}"
+                + (f" (waived: {', '.join(gate_result['waived'])})" if gate_result["waived"] else "")
+                + (f" (remarks: {', '.join(gate_result['remarks'])})" if gate_result["remarks"] else "") + ".")
+        out = replace(meta, technical_conditions=(meta.technical_conditions + "\n" + text).strip())
+        if u and not meta.uncertainty:
+            out = replace(out, uncertainty=u["U"], coverage_factor=u["k"], guard_band_risk=u["guard_risk"])
+        return out
+
     @app.post("/api/datasets/{key}/reports")
     def create_report(key: str, body: ReportBody, user: User = Depends(writer)):
         profile_id = body.analysis.profile_id or body.profile_id
         profile = profiles.get(profile_id) if profile_id else None
         request, deviations = body.analysis.resolve(profile)
         meta = body.meta.to_meta()
+        if body.measurement_system_id:
+            meta = _apply_msa_gate(meta, body.measurement_system_id, "report")
         language, snap = body.language, None
         if profile:
             template = ReportTemplate.from_dict(profile["report"])

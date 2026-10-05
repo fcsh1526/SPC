@@ -154,6 +154,7 @@
     if (name === "monitor") loadMonitors();
     if (name === "saved") loadSaved();
     if (name === "study") loadStudies();
+    if (name === "msa") loadMsa();
     if (name === "admin") loadAdmin();
     if (name === "password") renderPasswordPanel();
   }
@@ -732,6 +733,7 @@
     await guarded(async () => {
       const out = await post(`/api/datasets/${state.dataset.id}/reports`, {
         analysis: state.lastAnalysisBody, meta, language: $("#rp-language").value,
+        measurement_system_id: $("#rp-msa").value ? Number($("#rp-msa").value) : null,
       });
       state.reportOut = out;
       renderReportOut();
@@ -1230,6 +1232,12 @@
     const v = M.view, m = v.monitor, lim = v.limits;
     const sub = isCount(m.kind) ? "mon.sub_count" : "mon.sub";
     $("#md-title").textContent = m.name;
+    const msaBox = $("#md-msa");
+    msaBox.hidden = !v.msa;
+    if (v.msa) {
+      msaBox.textContent = t("msa.monitor_banner", { name: v.msa.name || "–", status: t("msa.gate_" + v.msa.status) });
+      msaBox.className = "strong " + GATE_CLASS[v.msa.status];
+    }
     $("#md-sub").textContent = t(sub, { process: m.process || "–", characteristic: m.characteristic, unit: m.unit || "–", line: m.line || "–",
       chart: t("result.kind_" + m.kind), n: m.n, rev: lim.revision, by: lim.created_by, at: when(lim.created_at) });
     // the action plan must be known
@@ -1372,6 +1380,7 @@
     const div = el("div", { ok: "ok-box", warning: "warn-box", alarm: "alarm-box" }[r.status]);
     div.appendChild(el("p", "strong status-" + r.status, t("mon.result_" + r.status, { seq: r.point.seq })));
     if (r.verification) div.appendChild(el("p", "", t("mon.verification_note")));
+    if (r.msa && r.msa.status === "conditional") div.appendChild(el("p", "status-warning", t("msa.monitor_conditional", { name: r.msa.name })));
     if (r.status === "alarm") {
       div.appendChild(el("p", "", r.point.alarms.map((a) => `${t("mon.chart_" + a.chart)}: ${t("alarmrule." + a.rule)}`).join("; ")));
       r.point.alarms.filter((a) => a.detail).forEach((a) => {  // several characteristics: which of them carries the signal
@@ -1637,6 +1646,7 @@
     $("#me-ack").checked = m.require_ack; $("#me-active").checked = m.active;
     syncKindFields();
     if (!monitor) await fillDatasetSelect($("#me-dataset"));
+    await fillMsaSelect($("#me-msa"), m.specs.msa_id);
     showMonitorView("#mon-editor");
   }
   function syncKindFields() {
@@ -1703,6 +1713,7 @@
       rules: readRules("mon-r-"), ocap: readOcap(), require_ack: $("#me-ack").checked, active: $("#me-active").checked,
     };
     if (editing) config.alpha = editing.alpha; else if ($("#me-alpha").value) config.alpha = Number($("#me-alpha").value);
+    config.specs = { ...config.specs, msa_id: $("#me-msa").value ? Number($("#me-msa").value) : null };
     return config;
   }
   async function saveMonitor() {
@@ -1749,6 +1760,176 @@
     $("#nl-save").addEventListener("click", setLimits);
     $("#og-show").addEventListener("click", showOngoing);
     $("#og-report").addEventListener("click", ongoingReport);
+  }
+
+  // ---------------------------------------------------------------- measurement systems and the MSA gate
+  const MS = { view: null, editing: null, list: [] };
+  const showMsaView = (which) => { ["#ms-list-view", "#ms-editor", "#ms-detail"].forEach((sel) => { $(sel).hidden = sel !== which; }); };
+  const GATE_CLASS = { pass: "status-ok", conditional: "status-warning", block: "status-alarm" };
+  const CHECK_CLASS = { pass: "status-ok", waived: "status-warning", warn: "status-warning", fail: "status-alarm", missing: "status-alarm", not_done: "", not_needed: "" };
+  const POLICY_PCT = ["resolution_share_max", "guard_band_risk"];  // shown in percent
+  async function fillMsaSelect(select, current) {
+    let list = [];
+    try { list = (await api("/api/msa")).systems; } catch (e) { /* none */ }
+    select.replaceChildren();
+    const none = el("option", "", t("msa.link_none")); none.value = ""; select.appendChild(none);
+    list.forEach((s) => { const o = el("option", "", `${s.name} (${t("msa.gate_" + s.status)})`); o.value = String(s.id); select.appendChild(o); });
+    select.value = current ? String(current) : "";
+  }
+  async function loadMsa() {
+    if (MS.view && !$("#ms-detail").hidden) return;
+    await guarded(async () => { MS.list = (await api("/api/msa")).systems; });
+    renderMsaList(); showMsaView("#ms-list-view");
+  }
+  function renderMsaList() {
+    const table = $("#ms-list"); table.replaceChildren();
+    const head = el("tr");
+    ["msa.f_name", "msa.f_characteristic", "msa.col_gate", "msa.col_u", ""].forEach((k) => cell(head, k ? t(k) : "", "th"));
+    table.appendChild(head);
+    MS.list.forEach((s) => {
+      const tr = el("tr");
+      cell(tr, s.name); cell(tr, s.characteristic);
+      const g = cell(tr, t("msa.gate_" + s.status) + (s.blocking.length ? ` (${s.blocking.map((k) => t("msa.check_" + k)).join(", ")})` : "")); g.className = GATE_CLASS[s.status];
+      cell(tr, s.U === null || s.U === undefined ? "–" : sig(s.U, 4));
+      const open = el("button", "", t("mon.open")); open.addEventListener("click", () => openMsa(s.id)); cell(tr, "").appendChild(open);
+      table.appendChild(tr);
+    });
+    if (!MS.list.length) table.appendChild(el("tr")).appendChild(el("td", "muted", t("msa.none")));
+  }
+  async function openMsa(id) {
+    await guarded(async () => { MS.view = await api(`/api/msa/${id}`); });
+    if (MS.view) { renderMsa(); showMsaView("#ms-detail"); }
+  }
+  function checkText(key, c) {
+    const p = { ...c };
+    if (c.share !== undefined) { p.share = sig(c.share * 100, 3); p.limit = sig(c.limit * 100, 3); }
+    if (c.pct !== undefined) p.pct = sig(c.pct, 3), p.ndc = sig(c.ndc, 3), p.basis = t("msa.basis_" + c.basis);
+    if (c.cg !== undefined) p.cg = sig(c.cg, 3), p.cgk = sig(c.cgk, 3);
+    const reason = c.reason ? `.${c.reason}` : "";
+    const k = `msa.res.${key}.${c.result}${reason}`;
+    return k in state.msgs || k in state.fallback ? t(k, p) : t(`msa.res.${key}.${c.result}`, p);
+  }
+  function renderMsa() {
+    const { system: s, gate: g } = MS.view;
+    $("#ms-title").textContent = s.name;
+    $("#ms-sub").textContent = t("msa.sub", { characteristic: s.characteristic || "–", unit: s.unit || "–", resolution: s.resolution ?? "–", tolerance: s.tolerance ?? "–", rev: s.revision });
+    $("#ms-status").textContent = t("msa.status_" + g.status); $("#ms-status").className = "strong " + GATE_CLASS[g.status];
+    const edit = canEditStudy();
+    const table = $("#ms-checks"); table.replaceChildren();
+    const head = el("tr"); ["msa.col_check", "msa.col_result", "msa.col_waiver"].forEach((k) => cell(head, t(k), "th")); table.appendChild(head);
+    Object.entries(g.checks).forEach(([key, c]) => {
+      const tr = el("tr");
+      cell(tr, t("msa.check_" + key));
+      const r = cell(tr, `${t("msa.eff_" + c.effective)}: ${checkText(key, c)}`); r.className = CHECK_CLASS[c.effective] || "";
+      const w = cell(tr, "");
+      if (c.waiver) {
+        w.appendChild(el("span", "", `${c.waiver.reason} (${c.waiver.by}, ${when(c.waiver.at)}) `));
+        if (edit) { const b = el("button", "", t("msa.remove_waiver")); b.addEventListener("click", () => msaWaiver(key, null)); w.appendChild(b); }
+      } else if (edit && ["warn", "fail", "missing"].includes(c.result)) {
+        const b = el("button", "", t("msa.waive"));
+        b.addEventListener("click", () => { const reason = window.prompt(t("msa.waive_prompt", { check: t("msa.check_" + key) })); if (reason) msaWaiver(key, reason); });
+        w.appendChild(b);
+      }
+      table.appendChild(tr);
+    });
+    const u = $("#ms-uncertainty"); u.replaceChildren();
+    if (g.uncertainty) {
+      const x = g.uncertainty;
+      u.appendChild(el("p", "", t("msa.uncertainty", { U: sig(x.U, 4), k: x.k, u: sig(x.u, 4), g: sig(x.guard_band, 4), risk: sig(x.guard_risk * 100, 3), study: x.from_study })));
+      u.appendChild(el("p", "muted", t("msa.uncertainty_note")));
+    }
+    const st = $("#ms-studies"); st.replaceChildren();
+    const sh = el("tr"); ["msa.col_no", "msa.s_kind", "msa.s_date", "msa.col_by", "msa.col_verdict", "msa.col_summary", ""].forEach((k) => cell(sh, k ? t(k) : "", "th")); st.appendChild(sh);
+    s.studies.slice().reverse().forEach((x) => {
+      const tr = el("tr", x.voided ? "invalid-point" : "");
+      cell(tr, String(x.id)); cell(tr, t("msa.kind_" + x.kind)); cell(tr, x.date); cell(tr, x.by);
+      const v = cell(tr, x.voided ? t("msa.voided") : t("msa.verdict_" + x.verdict)); v.className = x.voided ? "" : { pass: "status-ok", conditional: "status-warning", fail: "status-alarm" }[x.verdict] || "";
+      if (x.voided) v.title = `${x.voided.reason} (${x.voided.by || ""})`;
+      cell(tr, x.result ? studySummary(x) : x.error || "");
+      const a = cell(tr, "");
+      if (edit && !x.voided) { const b = el("button", "", t("msa.void")); b.addEventListener("click", () => { const reason = window.prompt(t("msa.void_prompt", { id: x.id })); if (reason) msaVoid(x.id, reason); }); a.appendChild(b); }
+      st.appendChild(tr);
+    });
+    $("#ms-add-card").hidden = !edit;
+    $("#ms-edit").hidden = !edit;
+    syncStudyForm();
+  }
+  function studySummary(x) {
+    const r = x.result;
+    if (x.kind === "grr") return t("msa.sum_grr", { pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis), ndc: sig(r.ndc, 3), ev: sig(r.sigma.ev, 3), av: sig(r.sigma.av, 3), n: `${r.parts}×${r.operators}×${r.trials}` });
+    if (x.kind === "type1") return t("msa.sum_type1", { cg: sig(r.cg, 3), cgk: sig(r.cgk, 3), bias: sig(r.bias, 3), n: r.n });
+    return t("msa.sum_stability", { n: r.n, signals: r.n_signals });
+  }
+  function syncStudyForm() {
+    const kind = $("#mss-kind").value;
+    $("#mss-ref-label").hidden = kind !== "type1";
+    $("#mss-data-label").textContent = t("msa.data_" + kind);
+    if (!$("#mss-date").value) $("#mss-date").value = new Date().toISOString().slice(0, 10);
+  }
+  function readStudyInput() {
+    const kind = $("#mss-kind").value, text = $("#mss-data").value;
+    if (kind === "grr") return { data: lines(text).map((row) => row.split(";").map(numbers)) };
+    if (kind === "type1") return { reference: Number($("#mss-reference").value), values: numbers(text) };
+    return { values: numbers(text) };
+  }
+  async function addMsaStudy() {
+    await guarded(async () => {
+      MS.view = await post(`/api/msa/${MS.view.system.id}/studies`, { kind: $("#mss-kind").value, date: $("#mss-date").value, note: $("#mss-note").value, input: readStudyInput() });
+      $("#mss-data").value = ""; $("#mss-note").value = "";
+    });
+    renderMsa();
+  }
+  async function msaWaiver(check, reason) {
+    await guarded(async () => {
+      const path = `/api/msa/${MS.view.system.id}/waivers/${check}`;
+      MS.view = reason === null ? await api(path, { method: "DELETE" }) : await put(path, { reason });
+    });
+    renderMsa();
+  }
+  async function msaVoid(id, reason) {
+    await guarded(async () => { MS.view = await post(`/api/msa/${MS.view.system.id}/studies/${id}/void`, { reason }); });
+    renderMsa();
+  }
+  function openMsaEditor(view) {
+    MS.editing = view ? view.system.id : "new";
+    const s = view ? view.system : { name: "", description: "", characteristic: "", unit: "", resolution: null, tolerance: null, policy: DEFAULT_MSA_POLICY };
+    $("#ms-editor-title").textContent = view ? t("msa.edit_title", { name: s.name }) : t("msa.new");
+    ["name", "description", "characteristic", "unit"].forEach((k) => { $("#mse-" + k).value = s[k] || ""; });
+    $("#mse-resolution").value = s.resolution ?? ""; $("#mse-tolerance").value = s.tolerance ?? "";
+    Object.entries(s.policy).forEach(([k, v]) => {
+      const e = $("#msp-" + k);
+      if (!e) return;
+      if (e.type === "checkbox") e.checked = !!v; else e.value = POLICY_PCT.includes(k) ? v * 100 : v;
+    });
+    showMsaView("#ms-editor");
+  }
+  const DEFAULT_MSA_POLICY = { validity_months: 12, stability_months: 6, resolution_share_max: 0.05, grr_pass: 10, grr_conditional: 30, ndc_min: 5, cg_min: 1.33, require_stability: true, k: 2, guard_band_risk: 0.05, u_cal: 0 };
+  function readMsaEditor() {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const policy = {};
+    Object.keys(DEFAULT_MSA_POLICY).forEach((k) => {
+      const e = $("#msp-" + k);
+      policy[k] = e.type === "checkbox" ? e.checked : POLICY_PCT.includes(k) ? Number(e.value) / 100 : Number(e.value);
+    });
+    return { name: $("#mse-name").value, description: $("#mse-description").value, characteristic: $("#mse-characteristic").value, unit: $("#mse-unit").value,
+      resolution: num("#mse-resolution"), tolerance: num("#mse-tolerance"), policy };
+  }
+  async function saveMsa() {
+    await guarded(async () => {
+      const record = readMsaEditor();
+      MS.view = MS.editing === "new" ? await post("/api/msa", { record }) : await put(`/api/msa/${MS.editing}`, { record });
+      MS.saved = true;
+    });
+    if (MS.saved) { MS.saved = false; renderMsa(); showMsaView("#ms-detail"); }
+  }
+  function wireMsa() {
+    $("#ms-new").addEventListener("click", () => openMsaEditor(null));
+    $("#mse-save").addEventListener("click", saveMsa);
+    $("#mse-cancel").addEventListener("click", () => { if (MS.editing !== "new" && MS.view) showMsaView("#ms-detail"); else { MS.view = null; loadMsa(); } });
+    $("#ms-back").addEventListener("click", () => { MS.view = null; loadMsa(); });
+    $("#ms-edit").addEventListener("click", () => openMsaEditor(MS.view));
+    $("#mss-kind").addEventListener("change", syncStudyForm);
+    $("#mss-save").addEventListener("click", addMsaStudy);
   }
 
   // ---------------------------------------------------------------- machine performance studies (draft 8.1 to 8.3)
@@ -1858,6 +2039,7 @@
     const sel = $("#se-dataset"); await fillDatasetSelect(sel);
     const none = el("option", "", t("study.no_dataset")); none.value = ""; sel.insertBefore(none, sel.firstChild);
     sel.value = s.dataset_id || "";
+    await fillMsaSelect($("#se-msa"), s.measurement_system_id);
     showStudyView("#st-editor");
   }
   function readStudyEditor() {
@@ -1866,6 +2048,7 @@
     return {
       name: $("#se-name").value, machine: $("#se-machine").value, characteristic: $("#se-characteristic").value, station: $("#se-station").value, unit: $("#se-unit").value,
       dataset_id: $("#se-dataset").value || null,
+      measurement_system_id: $("#se-msa").value ? Number($("#se-msa").value) : null,
       specs: { lsl: num("#se-lsl"), usl: num("#se-usl"), natural: $("#se-natural").value || null },
       sample: { reduced_approved_by: $("#se-reduced-by").value, reduced_reason: $("#se-reduced-reason").value, tool_wear_high: $("#se-wear").checked, dressing_cycles: num("#se-cycles") },
       preproduction: { one: num("#se-pre-one"), five: five === "" ? null : five.split(/[\s,;]+/).filter((x) => x !== "").map(Number) },
@@ -2032,10 +2215,13 @@
     if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); refreshImportForm(); }
     if (state.dataset) renderData();
     if (state.result) renderResult();
+    fillMsaSelect($("#rp-msa"), $("#rp-msa").value);
     renderModelSuggestion();
     renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
     if (state.user && M.view && !$("#mon-detail").hidden) renderMonitor();
     if (state.user && ST.view && !$("#st-detail").hidden) renderStudy();
+    if (state.user && MS.view && !$("#ms-detail").hidden) renderMsa();
+    if (state.user && !$("#ms-list-view").hidden && !$("#tab-msa").hidden) loadMsa();
     if (state.user && !$("#st-list-view").hidden && !$("#tab-study").hidden) loadStudies();
     if (state.user && !$("#mon-list-view").hidden && !$("#tab-monitor").hidden) renderMonitorList();
     if (state.user && state.profile) { onProfileChange(); }
@@ -2078,6 +2264,7 @@
     $("#nu-create").addEventListener("click", createUser);
     wireMonitor();
     wireStudy();
+    wireMsa();
     $("#a-profile").addEventListener("change", onProfileChange);
     $("#pf-new").addEventListener("click", () => openProfileEditor(null));
     $("#pf-save").addEventListener("click", saveProfile);

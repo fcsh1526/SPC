@@ -168,7 +168,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         if not out["rules"].get("beyond_limits") or extra:
             raise ValueError("this chart signals only when its own limit is crossed: the run, trend and zone criteria do not apply")
     specs = dict(d.get("specs") or {})
-    if set(specs) - {"lsl", "usl", "target_class", "model", "controlled_stable", "edition", "accept_p", "accept_pa"}:
+    if set(specs) - {"lsl", "usl", "target_class", "model", "controlled_stable", "edition", "accept_p", "accept_pa", "msa_id"}:
         raise ValueError("specs: unknown setting(s)")
     for key in ("lsl", "usl"):
         if specs.get(key) is not None and (isinstance(specs[key], bool) or not isinstance(specs[key], (int, float)) or not math.isfinite(specs[key])):
@@ -183,9 +183,12 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         raise ValueError("specs.edition must be 'draft' or 'final'")
     if kind in (*ATTRIBUTE_KINDS, ZMR_KIND, *VECTOR_KINDS, AR_KIND, MS_KIND) and any(specs.get(k) is not None for k in ("lsl", "usl", "target_class", "model")):
         raise ValueError("this monitor has no specification limits and no capability indices: counts, mixed products and several characteristics have no single tolerance")
+    msa_id = specs.get("msa_id")
+    if msa_id is not None and (isinstance(msa_id, bool) or not isinstance(msa_id, int) or msa_id < 1):
+        raise ValueError("specs.msa_id must be the id of a measurement system")
     out["specs"] = {"lsl": specs.get("lsl"), "usl": specs.get("usl"), "target_class": specs.get("target_class"),
                     "model": specs.get("model"), "controlled_stable": bool(specs.get("controlled_stable", False)),
-                    "edition": specs.get("edition", "draft")}
+                    "edition": specs.get("edition", "draft"), "msa_id": msa_id}
     if kind in TOLERANCE_KINDS and (specs.get("lsl") is None or specs.get("usl") is None):
         raise ValueError("a tolerance related chart needs both specification limits")
     if kind in ACCEPT_KINDS:

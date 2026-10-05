@@ -59,9 +59,36 @@ def _seconds(a: str, b: str) -> float:
 
 
 class MonitorService:
-    def __init__(self, db: Database, audit: Audit, datasets: DatasetStore, notifiers: Iterable[Notifier] = ()):
+    def __init__(self, db: Database, audit: Audit, datasets: DatasetStore, notifiers: Iterable[Notifier] = (), msa=None):
         self.db, self.audit, self.datasets, self.notifiers = db, audit, datasets, list(notifiers)
+        self.msa = msa
         self.store = MonitorStore(db)
+
+    # ------------------------------------------------------------------ the MSA gate
+    def _check_system(self, config: dict) -> None:
+        sid = config["specs"].get("msa_id")
+        if sid and self.msa is not None:
+            try:
+                self.msa.get(sid)
+            except KeyError:
+                raise MonitorError("msa_system_not_found", "the measurement system does not exist", 404) from None
+
+    def _gate(self, monitor: dict, enforce: bool = True) -> dict | None:
+        """The gate of the linked measurement system. Blocked: no sample is accepted. Conditional: accepted and flagged."""
+        sid = monitor["specs"].get("msa_id")
+        if not sid or self.msa is None:
+            return None
+        try:
+            view = self.msa.view(sid)
+        except KeyError:
+            if enforce:
+                raise MonitorError("msa_system_missing", "the measurement system of this monitor no longer exists", 409) from None
+            return {"status": "block", "name": None, "blocking": ["system"], "remarks": [], "waived": []}
+        g = view["gate"]
+        if enforce and g["status"] == "block":
+            raise MonitorError("msa_gate_blocked", f"the measurement system {view['system']['name']!r} is not proven: no sample is accepted", 409,
+                               system=view["system"]["name"], blocking=g["blocking"])
+        return {"status": g["status"], "name": view["system"]["name"], "blocking": g["blocking"], "remarks": g["remarks"], "waived": g["waived"], "id": sid}
 
     def _log(self, action: str, user, target: str, detail: dict) -> None:
         self.audit.append(action, user_id=user.id, username=user.username, target=target, detail=detail)
@@ -438,6 +465,7 @@ class MonitorService:
             config = validate_config(config_in)
         except ValueError as exc:
             raise MonitorError("invalid_input", str(exc)) from None
+        self._check_system(config)
         if source.get("type") == "points":
             raise MonitorError("bad_source", "a new monitor has no points yet")
         with self.db.tx():
@@ -454,9 +482,11 @@ class MonitorService:
             config = validate_config(config_in)
         except ValueError as exc:
             raise MonitorError("invalid_input", str(exc)) from None
+        self._check_system(config)
         if (config["kind"], config["n"]) != (old["kind"], old["n"]):
             raise MonitorError("monitor_shape_locked", "the chart type and the subgroup size cannot change: make a new monitor", 409)
-        if config["kind"] in TOLERANCE_KINDS and config["specs"] != {**old["specs"], "controlled_stable": config["specs"]["controlled_stable"],
+        if config["kind"] in TOLERANCE_KINDS and config["specs"] != {"msa_id": None, **old["specs"], "msa_id": config["specs"]["msa_id"],
+                                                                  "controlled_stable": config["specs"]["controlled_stable"],
                                                                   "edition": config["specs"]["edition"], "target_class": config["specs"]["target_class"],
                                                                   "model": config["specs"]["model"]}:
             raise MonitorError("monitor_shape_locked", "the tolerance and the acceptance risks belong to the limits: make a new monitor", 409)
@@ -499,6 +529,7 @@ class MonitorService:
         monitor = self.store.get(monitor_id)
         if not monitor["active"]:
             raise MonitorError("monitor_inactive", "this monitor is switched off", 409)
+        msa_state = self._gate(monitor)
         values = check_values(monitor, values)
         if monitor["kind"] == ZMR_KIND:
             tags = {**tags, "part": str(part or "").strip()}
@@ -585,7 +616,7 @@ class MonitorService:
                           "incident_id": opened, "point_seq": seq, "rules": alarms, "entered_by": _label(user)})
         status = "alarm" if alarms else ("warning" if warnings else "ok")
         return {"point": point, "status": status, "incident": incident_now, "instructions": self._instructions(monitor, alarms),
-                "verification": bool(incident and not alarms)}
+                "verification": bool(incident and not alarms), "msa": msa_state}
 
     def invalidate_point(self, monitor_id: int, seq: int, reason: str, user) -> dict:
         if not reason or not reason.strip():
@@ -697,6 +728,7 @@ class MonitorService:
             "incident": None if inc is None else self.incident_view(monitor, inc),
             "acknowledged": self.store.has_ack(monitor_id, user.id, monitor["ocap_rev"]),
             "qualification": self._qualification(monitor) if monitor["kind"] == PRE_KIND else None,
+            "msa": self._gate(monitor, enforce=False),
         }
 
     def _qualification(self, monitor: dict) -> dict:

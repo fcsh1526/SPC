@@ -35,7 +35,7 @@ ITEMS: tuple[Item, ...] = (
     Item("machine_parameters", "8.1"), Item("changes_documented", "8.1"), Item("deviations_agreed", "8.1"),
     Item("sample_size", "8.2.1", auto=True), Item("tool_wear_cycles", "8.2.1", auto=True),
     Item("material_homogeneous", "8.2.2"),
-    Item("msa_evidence", "8.2.3"),
+    Item("msa_evidence", "8.2.3", auto=True),
     Item("warmed_up", "8.2.4"), Item("tools_conditioned", "8.2.4"), Item("uninterrupted", "8.2.4"),
     Item("adjusted_to_center", "8.2.4", auto=True),
     Item("preproduction_1", "8.2.5", auto=True, optional=True), Item("preproduction_5", "8.2.5", auto=True, optional=True),
@@ -79,7 +79,7 @@ def _text(d: Mapping, key: str, limit: int, required: bool = False) -> str:
 
 def validate_record(data: Mapping[str, Any]) -> dict:
     """Check and normalise the descriptive part of a study (everything except the items and the closing)."""
-    allowed = {"name", "machine", "characteristic", "station", "unit", "dataset_id", "specs", "sample", "preproduction"}
+    allowed = {"name", "machine", "characteristic", "station", "unit", "dataset_id", "specs", "sample", "preproduction", "measurement_system_id"}
     if set(data) - allowed:
         raise ValueError(f"unknown setting(s): {sorted(set(data) - allowed)}")
     out: dict[str, Any] = {"name": _text(data, "name", 100, True), "machine": _text(data, "machine", 200), "characteristic": _text(data, "characteristic", 200, True),
@@ -88,6 +88,10 @@ def validate_record(data: Mapping[str, Any]) -> dict:
     if ds is not None and (not isinstance(ds, str) or not 0 < len(ds) <= 64):
         raise ValueError("dataset_id must be the id of a stored data set")
     out["dataset_id"] = ds
+    msa_id = data.get("measurement_system_id")
+    if msa_id is not None and (isinstance(msa_id, bool) or not isinstance(msa_id, int) or msa_id < 1):
+        raise ValueError("measurement_system_id must be the id of a measurement system")
+    out["measurement_system_id"] = msa_id
     specs = dict(data.get("specs") or {})
     if set(specs) - {"lsl", "usl", "natural"}:
         raise ValueError("specs: unknown setting(s)")
@@ -142,9 +146,18 @@ def facts_from_dataset(ds, normality: dict | None = None) -> dict:
             "normality": normality}
 
 
-def auto_results(record: Mapping, facts: Mapping | None, dataset_missing: bool = False) -> dict[str, dict]:
+def auto_results(record: Mapping, facts: Mapping | None, dataset_missing: bool = False, msa: Mapping | None = None) -> dict[str, dict]:
     """Result of every auto item: {'result': pass|warn|fail|unknown|not_done|not_needed, ...details}."""
     out: dict[str, dict] = {}
+    # 8.2.3 proof of the measurement process: the MSA gate of the linked measurement system
+    if msa is None:
+        out["msa_evidence"] = {"result": "unknown", "reason": "no_system"}
+    elif msa["state"] == "missing":
+        out["msa_evidence"] = {"result": "unknown", "reason": "system_missing"}
+    else:
+        g = msa["gate"]
+        out["msa_evidence"] = {"result": {"pass": "pass", "conditional": "warn", "block": "fail"}[g["status"]], "system": msa["name"], "status": g["status"],
+                               "blocking": g["blocking"], "remarks": g["remarks"], "waived": g["waived"]}
     specs, sample = record["specs"], record["sample"]
     region = _region(specs)
     # 8.2.1 number of parts
@@ -203,9 +216,9 @@ def auto_results(record: Mapping, facts: Mapping | None, dataset_missing: bool =
     return out
 
 
-def evaluate(record: Mapping, items: Mapping[str, Mapping], facts: Mapping | None, dataset_missing: bool = False) -> dict:
+def evaluate(record: Mapping, items: Mapping[str, Mapping], facts: Mapping | None, dataset_missing: bool = False, msa: Mapping | None = None) -> dict:
     """The state of every item and the readiness of the study."""
-    auto = auto_results(record, facts, dataset_missing)
+    auto = auto_results(record, facts, dataset_missing, msa)
     rows, blockers = [], []
     for item in ITEMS:
         rec = items.get(item.key) or {}

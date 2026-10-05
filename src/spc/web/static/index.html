@@ -55,6 +55,7 @@
   <button role="tab" data-tab="data" aria-selected="false" aria-disabled="true" data-i18n="nav.data"></button>
   <button role="tab" data-tab="analysis" aria-selected="false" aria-disabled="true" data-i18n="nav.analysis"></button>
   <button role="tab" data-tab="monitor" aria-selected="false"><span data-i18n="nav.monitor"></span> <span id="alert-badge" class="badge" hidden></span></button>
+  <button role="tab" data-tab="msa" aria-selected="false" data-i18n="nav.msa"></button>
   <button role="tab" data-tab="study" aria-selected="false" data-i18n="nav.study"></button>
   <button role="tab" data-tab="saved" aria-selected="false" data-i18n="nav.saved"></button>
   <button role="tab" data-tab="tools" aria-selected="false" data-i18n="nav.tools"></button>
@@ -384,6 +385,7 @@
       <div class="form-grid">
         <label><span data-i18n="report.language"></span>
           <select id="rp-language"><option value="zh-TW">繁體中文</option><option value="en">English</option></select></label>
+        <label><span data-i18n="msa.link"></span><select id="rp-msa"></select></label>
         <label><span data-i18n="report.process"></span><input id="rp-process" type="text" maxlength="2000"></label>
         <label><span data-i18n="report.machine"></span><input id="rp-machine" type="text" maxlength="2000"></label>
         <label><span data-i18n="report.site"></span><input id="rp-site" type="text" maxlength="2000"></label>
@@ -497,6 +499,7 @@
       <label><span data-i18n="mon.f_characteristic"></span><input id="me-characteristic" type="text" maxlength="200"></label>
       <label><span data-i18n="mon.f_unit"></span><input id="me-unit" type="text" maxlength="40"></label>
       <label><span data-i18n="mon.f_line"></span><input id="me-line" type="text" maxlength="200"></label>
+      <label><span data-i18n="msa.link"></span><select id="me-msa"></select></label>
       <label><span data-i18n="mon.f_kind"></span>
         <select id="me-kind">
           <option value="xbar-s" data-i18n="analysis.chart_xbar-s"></option>
@@ -634,6 +637,7 @@
       <button id="mon-refresh" data-i18n="mon.refresh"></button></p>
     <h3 id="md-title"></h3>
     <p id="md-sub" class="muted"></p>
+    <p id="md-msa" class="strong" hidden></p>
     <div id="md-ack" class="card" hidden>
       <p class="strong" data-i18n="mon.ack_needed"></p>
       <div id="md-plan"></div>
@@ -770,6 +774,70 @@
 </section>
 
 <!-- saved -->
+<!-- Measurement systems and the MSA gate -->
+<section id="tab-msa" class="panel" hidden>
+  <h2 data-i18n="msa.title"></h2>
+  <div id="ms-list-view">
+    <p class="note" data-i18n="msa.intro"></p>
+    <div class="scroll"><table id="ms-list" class="grid"></table></div>
+    <p data-needs="engineer"><button id="ms-new" class="primary" data-i18n="msa.new"></button></p>
+  </div>
+
+  <div id="ms-editor" class="card" hidden>
+    <h3 id="ms-editor-title"></h3>
+    <div class="form-grid">
+      <label><span data-i18n="msa.f_name"></span><input id="mse-name" type="text" maxlength="100"></label>
+      <label><span data-i18n="msa.f_characteristic"></span><input id="mse-characteristic" type="text" maxlength="200"></label>
+      <label><span data-i18n="msa.f_unit"></span><input id="mse-unit" type="text" maxlength="40"></label>
+      <label><span data-i18n="msa.f_resolution"></span><input id="mse-resolution" type="number" step="any" min="0"></label>
+      <label><span data-i18n="msa.f_tolerance"></span><input id="mse-tolerance" type="number" step="any" min="0"></label>
+      <label class="wide"><span data-i18n="msa.f_description"></span><input id="mse-description" type="text" maxlength="1000"></label>
+    </div>
+    <details>
+      <summary data-i18n="msa.f_policy"></summary>
+      <p class="note" data-i18n="msa.policy_note"></p>
+      <div class="form-grid">
+        <label><span data-i18n="msa.p_validity"></span><input id="msp-validity_months" type="number" min="1" max="60" step="1"></label>
+        <label><span data-i18n="msa.p_stability_months"></span><input id="msp-stability_months" type="number" min="1" max="60" step="1"></label>
+        <label><span data-i18n="msa.p_resolution"></span><input id="msp-resolution_share_max" type="number" min="0.1" max="50" step="any"></label>
+        <label><span data-i18n="msa.p_grr_pass"></span><input id="msp-grr_pass" type="number" min="1" max="50" step="any"></label>
+        <label><span data-i18n="msa.p_grr_conditional"></span><input id="msp-grr_conditional" type="number" min="1" max="100" step="any"></label>
+        <label><span data-i18n="msa.p_ndc"></span><input id="msp-ndc_min" type="number" min="1" max="20" step="any"></label>
+        <label><span data-i18n="msa.p_cg"></span><input id="msp-cg_min" type="number" min="0.5" max="5" step="any"></label>
+        <label><span data-i18n="msa.p_k"></span><input id="msp-k" type="number" min="1" max="4" step="any"></label>
+        <label><span data-i18n="msa.p_guard"></span><input id="msp-guard_band_risk" type="number" min="0.1" max="49.9" step="any"></label>
+        <label><span data-i18n="msa.p_ucal"></span><input id="msp-u_cal" type="number" min="0" step="any"></label>
+        <label class="check"><input id="msp-require_stability" type="checkbox"><span data-i18n="msa.p_require_stability"></span></label>
+      </div>
+    </details>
+    <p class="row"><button id="mse-save" class="primary" data-i18n="msa.save"></button><button id="mse-cancel" data-i18n="admin.pf_cancel"></button></p>
+  </div>
+
+  <div id="ms-detail" hidden>
+    <p class="row"><button id="ms-back" data-i18n="msa.back"></button><button id="ms-edit" data-needs="engineer" data-i18n="msa.edit"></button></p>
+    <h3 id="ms-title"></h3>
+    <p id="ms-sub" class="muted"></p>
+    <p id="ms-status" class="strong"></p>
+    <h4 data-i18n="msa.checks"></h4>
+    <div class="scroll"><table id="ms-checks" class="grid"></table></div>
+    <div id="ms-uncertainty"></div>
+    <h4 data-i18n="msa.studies"></h4>
+    <div class="scroll"><table id="ms-studies" class="grid"></table></div>
+    <div class="card" data-needs="engineer" id="ms-add-card">
+      <h4 data-i18n="msa.add_study"></h4>
+      <div class="form-grid">
+        <label><span data-i18n="msa.s_kind"></span>
+          <select id="mss-kind"><option value="grr" data-i18n="msa.kind_grr"></option><option value="type1" data-i18n="msa.kind_type1"></option><option value="stability" data-i18n="msa.kind_stability"></option></select></label>
+        <label><span data-i18n="msa.s_date"></span><input id="mss-date" type="date"></label>
+        <label id="mss-ref-label" hidden><span data-i18n="msa.s_reference"></span><input id="mss-reference" type="number" step="any"></label>
+        <label class="wide"><span id="mss-data-label"></span><textarea id="mss-data" rows="6"></textarea></label>
+        <label class="wide"><span data-i18n="msa.s_note"></span><input id="mss-note" type="text" maxlength="2000"></label>
+      </div>
+      <p class="row"><button id="mss-save" class="primary" data-i18n="msa.add"></button></p>
+    </div>
+  </div>
+</section>
+
 <!-- Machine performance studies: the checklist of draft 8.1 to 8.3 -->
 <section id="tab-study" class="panel" hidden>
   <h2 data-i18n="study.title"></h2>
@@ -788,6 +856,7 @@
       <label><span data-i18n="study.f_station"></span><input id="se-station" type="text" maxlength="100"></label>
       <label><span data-i18n="study.f_unit"></span><input id="se-unit" type="text" maxlength="40"></label>
       <label><span data-i18n="study.f_dataset"></span><select id="se-dataset"></select></label>
+      <label><span data-i18n="msa.link"></span><select id="se-msa"></select></label>
     </div>
     <fieldset>
       <legend data-i18n="study.f_specs"></legend>

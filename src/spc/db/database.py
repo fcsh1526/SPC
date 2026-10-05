@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE users (
@@ -168,6 +168,15 @@ CREATE TABLE studies (
     updated_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
 );
+CREATE TABLE msa_systems (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    revision   INTEGER NOT NULL DEFAULT 1,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+);
 """
 
 
@@ -178,6 +187,17 @@ def _monitor_tables() -> str:
 
 MIGRATION_3_TO_4 = """
 CREATE TABLE studies (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    revision   INTEGER NOT NULL DEFAULT 1,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+)"""
+
+MIGRATION_4_TO_5 = """
+CREATE TABLE msa_systems (
     id         INTEGER PRIMARY KEY,
     name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
     revision   INTEGER NOT NULL DEFAULT 1,
@@ -229,7 +249,7 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2, 3):
+        elif version in (1, 2, 3, 4):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
@@ -237,9 +257,14 @@ class Database:
                 self._conn.execute("COMMIT")
             if version <= 2:
                 self._migrate_2_to_3()
-            self._conn.execute("BEGIN IMMEDIATE")  # version 4 adds the machine performance studies
-            self._conn.execute(MIGRATION_3_TO_4)
-            self._conn.execute("PRAGMA user_version = 4")
+            if version <= 3:
+                self._conn.execute("BEGIN IMMEDIATE")  # version 4 adds the machine performance studies
+                self._conn.execute(MIGRATION_3_TO_4)
+                self._conn.execute("PRAGMA user_version = 4")
+                self._conn.execute("COMMIT")
+            self._conn.execute("BEGIN IMMEDIATE")  # version 5 adds the measurement systems (MSA gate)
+            self._conn.execute(MIGRATION_4_TO_5)
+            self._conn.execute("PRAGMA user_version = 5")
             self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")

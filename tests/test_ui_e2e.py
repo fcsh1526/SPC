@@ -1147,6 +1147,21 @@ def test_mcusum_monitor_in_the_browser(server, browser, app):
     ctx.close()
 
 
+def proven_system(app, user, name, tolerance=1.0):
+    """A measurement system with a gauge R&R, a type 1 study and a stability check: its gate is open."""
+    import datetime
+
+    rng = np.random.default_rng(2)
+    svc = app.state.msa
+    sid = svc.create({"name": name, "characteristic": "bore", "unit": "mm", "resolution": 0.001, "tolerance": tolerance}, user)["system"]["id"]
+    day = datetime.date.today().isoformat()
+    data = (10 + rng.normal(0, 0.2, (10, 1, 1)) + rng.normal(0, 0.003, (10, 3, 3))).tolist()
+    svc.add_study(sid, "grr", day, "", {"data": data}, user)
+    svc.add_study(sid, "stability", day, "", {"values": [float(v) for v in 10 + rng.normal(0, 0.005, 25)]}, user)
+    svc.add_study(sid, "type1", day, "", {"reference": 10.0, "values": [float(v) for v in 10 + rng.normal(0, 0.004, 50)]}, user)
+    return sid
+
+
 def test_machine_study_checklist_in_the_browser(server, browser, app):
     import numpy as np
 
@@ -1159,6 +1174,7 @@ def test_machine_study_checklist_in_the_browser(server, browser, app):
     times = [f"2026-03-02T08:{i // 60:02d}:{i % 60:02d}" for i in range(50)]
     admin = next(u for u in app.state.auth.list_users() if u.username == "admin")
     app.state.store.add(Dataset.from_values([float(v) for v in rng.normal(10.0, 0.02, 50)], timestamp=times), admin.id, "Grinder run 1")
+    proven_system(app, admin, "Study gauge")
     ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
     page = ctx.new_page()
     page.on("pageerror", lambda e: problems.append(str(e)))
@@ -1171,6 +1187,7 @@ def test_machine_study_checklist_in_the_browser(server, browser, app):
     page.fill("#se-characteristic", "bore diameter")
     page.fill("#se-station", "spindle 1")
     page.select_option("#se-dataset", label="Grinder run 1 (50)")
+    page.select_option("#se-msa", label="Study gauge (gate open)")
     page.fill("#se-lsl", "9.9")
     page.fill("#se-usl", "10.1")
     page.fill("#se-pre-one", "10.01")
@@ -1246,5 +1263,75 @@ def test_time_model_suggestion_in_the_browser(server, browser, tmp_path):
     page.select_option("#lang", "zh-TW")
     expect(box).to_contain_text("建議：")
     expect(box).to_contain_text("位置隨趨勢改變")
+    assert problems == [], problems
+    ctx.close()
+
+
+def test_measurement_system_and_the_gate_in_the_browser(server, browser, app):
+    expect = playwright_sync.expect
+    problems = []
+    rng = np.random.default_rng(12)
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1100}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=msa]")
+    page.click("#ms-new")
+    page.fill("#mse-name", "Air gauge 7")
+    page.fill("#mse-characteristic", "bore diameter")
+    page.fill("#mse-unit", "mm")
+    page.fill("#mse-resolution", "0.001")
+    page.fill("#mse-tolerance", "1")
+    page.locator("#ms-editor summary").click()
+    assert page.input_value("#msp-validity_months") == "12" and page.input_value("#msp-guard_band_risk") == "5"
+    page.click("#mse-save")
+    expect(page.locator("#ms-title")).to_have_text("Air gauge 7")
+    expect(page.locator("#ms-status")).to_contain_text("blocked")
+    expect(page.locator("#ms-checks tr", has_text="Gauge R&R").first).to_contain_text("no gauge R&R study")
+
+    def add(kind, text, reference=None):
+        page.select_option("#mss-kind", kind)
+        if reference is not None:
+            page.fill("#mss-reference", str(reference))
+        page.fill("#mss-data", text)
+        page.click("#mss-save")
+
+    grr = (10 + rng.normal(0, 0.2, (10, 1, 1)) + rng.normal(0, 0.003, (10, 3, 3)))
+    add("grr", "\n".join(" ; ".join(" ".join(f"{v:.4f}" for v in op) for op in part) for part in grr))
+    expect(page.locator("#ms-studies tr", has_text="Gauge R&R")).to_contain_text("capable")
+    add("stability", " ".join(f"{v:.4f}" for v in 10 + rng.normal(0, 0.005, 25)))
+    expect(page.locator("#ms-status")).to_contain_text("The gate is open")
+    expect(page.locator("#ms-uncertainty")).to_contain_text("Expanded uncertainty U =")
+    # a bad type 1 study stops the gate; a waiver with a reason lets it pass, flagged
+    add("type1", " ".join(f"{v:.4f}" for v in 10 + rng.normal(0, 0.08, 40)), reference=10.0)
+    expect(page.locator("#ms-status")).to_contain_text("blocked")
+    expect(page.locator("#ms-checks tr", has_text="Type 1 study")).to_contain_text("below the limit")
+    page.once("dialog", lambda d: d.accept("customer agreed to a type 1 later"))
+    page.locator("#ms-checks tr", has_text="Type 1 study").locator("button").click()
+    expect(page.locator("#ms-status")).to_contain_text("The gate is open")
+    expect(page.locator("#ms-checks tr", has_text="Type 1 study")).to_contain_text("waived")
+    expect(page.locator("#ms-checks tr", has_text="Type 1 study")).to_contain_text("customer agreed")
+    # a monitor tied to a blocked system takes no sample
+    other = app.state.msa.create({"name": "No proof gauge", "resolution": 0.001, "tolerance": 1.0},
+                                 app.state.auth.get_user(next(u.id for u in app.state.auth.list_users() if u.username == "admin")))["system"]["id"]
+    page.click("nav.tabs button[data-tab=monitor]")
+    page.click("#mon-new")
+    page.fill("#me-name", "Bore monitor")
+    page.fill("#me-characteristic", "bore")
+    page.select_option("#me-msa", label="No proof gauge (gate blocked)")
+    page.fill("#me-mu", "10")
+    page.fill("#me-sigma", "0.1")
+    page.locator("#me-ocap tr[data-key=default] input").nth(0).fill("Check the setup")
+    page.locator("#me-ocap tr[data-key=default] input").nth(1).fill("Setter")
+    page.click("#me-save")
+    expect(page.locator("#md-msa")).to_contain_text("gate blocked")
+    page.click("#md-ack-btn")
+    for i, v in enumerate([10.0, 10.01, 9.99, 10.02, 10.0]):
+        page.fill(f"#md-v{i}", str(v))
+    page.click("#md-submit")
+    expect(page.locator("#errors")).to_contain_text("is not proven")
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#md-msa")).to_contain_text("閘門封鎖")
     assert problems == [], problems
     ctx.close()
