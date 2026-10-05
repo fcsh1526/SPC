@@ -1069,3 +1069,140 @@ def test_an_extended_limits_monitor_and_a_pearson_monitor_end_to_end(env):
     assert c["eng"].post("/api/monitors", json={"config": {"name": "ghost", "characteristic": "g", "kind": "pearson", "n": 1}, "source": obs}).status_code in (400, 404)
     assert c["eng"].post("/api/monitors", json={"config": {"name": "bad", "characteristic": "g", "kind": "pearson", "n": 1},
                                                 "source": {"type": "parameters", "mu": 0, "sigma": 1, "skew": 3.0, "kurt": 2.0}}).status_code == 400
+
+
+# ------------------------------------------------------------------ autocorrelated values and several streams
+
+def _ar1(rng, n, phi, mu=10.0, sigma=0.1):
+    e = rng.normal(0, sigma, n + 200)
+    x = np.zeros(n + 200)
+    for t in range(1, n + 200):
+        x[t] = phi * x[t - 1] + e[t]
+    return mu + x[200:]
+
+
+def test_the_ar_fit_finds_the_model_and_refuses_data_without_autocorrelation():
+    from spc.core.charts import dependent as dep
+    rng = np.random.default_rng(21)
+    fit = dep.fit_ar(_ar1(rng, 3000, 0.7))
+    assert fit["order"] == 1 and fit["phi"][0] == pytest.approx(0.7, abs=0.04) and fit["mu"] == pytest.approx(10.0, abs=0.05)
+    assert fit["sigma_e"] == pytest.approx(0.1, rel=0.05) and fit["diagnostics"]["residual_ljung_box_p"] > 0.01
+    e = rng.normal(0, 0.1, 3000)
+    x = np.zeros(3000)
+    for t in range(2, 3000):
+        x[t] = 0.5 * x[t - 1] - 0.3 * x[t - 2] + e[t]
+    assert dep.fit_ar(x + 5.0, 2)["order"] == 2 and dep.fit_ar(x + 5.0)["order"] in (2, 3)
+    with pytest.raises(ValueError, match="no autocorrelation"):
+        dep.fit_ar(rng.normal(0, 1, 300))
+    with pytest.raises(ValueError, match="not stationary"):
+        dep.fit_ar(np.cumsum(rng.normal(0, 1, 400)), 1)
+    with pytest.raises(ValueError):
+        dep.fit_ar(rng.normal(0, 1, 20))
+
+
+def test_residuals_of_the_model_are_independent_and_a_plain_individuals_chart_is_not():
+    from spc.core.charts import dependent as dep
+    rng = np.random.default_rng(22)
+    x = _ar1(rng, 60_000, 0.8)
+    r = dep.residuals(x, 10.0, [0.8])
+    assert np.std(r[1:]) == pytest.approx(0.1, rel=0.03) and abs(np.corrcoef(r[1:-1], r[2:])[0, 1]) < 0.02
+    assert dep.next_residual(x[:5], x[5], 10.0, [0.8]) == pytest.approx(r[5])
+    plain = compute_limits("imr", 1, ALPHA_3SIGMA, None, float(x.mean()), float(np.abs(np.diff(x)).mean() / 1.128))
+    out_plain = np.mean((x > plain["location"]["ucl"]) | (x < plain["location"]["lcl"]))
+    lim = compute_limits("imr", 1, ALPHA_3SIGMA, None, 0.0, 0.1)
+    out_res = np.mean((r > lim["location"]["ucl"]) | (r < lim["location"]["lcl"]))
+    assert out_res == pytest.approx(ALPHA_3SIGMA, rel=0.25) and out_plain > 3 * out_res  # the moving range ignores the slow wandering
+
+
+def test_an_ar_monitor_end_to_end(env):
+    app, c = env
+    rng = np.random.default_rng(23)
+    mid = make_monitor(c["eng"], {"name": "Furnace", "characteristic": "temperature", "kind": "ar"},
+                       {"type": "parameters", "mu": 100.0, "sigma": 0.5, "phi": [0.8]})
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    assert lim["order"] == 1 and lim["location"]["cl"] == 0.0 and lim["process_mean"] == 100.0
+    ack(c["oper"], mid)
+    x = 100.0
+    results = []
+    for _ in range(60):  # a process that wanders slowly: a plain chart on the values would alarm again and again
+        x = 100.0 + 0.8 * (x - 100.0) + rng.normal(0, 0.5)
+        results.append(enter(c["oper"], mid, [x])["status"])
+    assert results.count("alarm") <= 2
+    first = c["eng"].get(f"/api/monitors/{mid}").json()["points"][0]
+    assert first["loc"] == pytest.approx(first["values"][0] - 100.0)  # the first residual: the model starts at the mean
+    r = enter(c["oper"], mid, [x + 3.0])  # a jump of 6 sigma_e against the forecast
+    assert r["status"] == "alarm" and r["point"]["loc"] == pytest.approx(3.0 - 0.0 + 0.0, abs=1.6)
+    r = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [1.0, 2.0]})
+    assert r.status_code == 400
+    assert c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code in (400, 409)
+    for bad in ({"type": "parameters", "mu": 1, "sigma": 1, "phi": [1.2]}, {"type": "parameters", "mu": 1, "sigma": 1, "phi": []},
+                {"type": "parameters", "mu": 1, "sigma": 0, "phi": [0.5]}):
+        assert c["eng"].post("/api/monitors", json={"config": {"name": "bad", "characteristic": "x", "kind": "ar"}, "source": bad}).status_code == 400
+    # limits fitted to points of the monitor itself
+    r = c["eng"].post(f"/api/monitors/{mid}/limits", json={"source": {"type": "points", "seq_from": 1, "seq_to": 60}, "reason": "re-fit"})
+    assert r.status_code == 200, r.text
+    assert r.json()["limits"]["order"] >= 1 and r.json()["limits"]["diagnostics"]["raw_ljung_box_p"] < 0.05
+
+
+def test_the_stream_estimate_separates_level_offsets_and_noise():
+    from spc.core.charts import dependent as dep
+    rng = np.random.default_rng(31)
+    off = np.array([0.3, -0.1, 0.0, -0.2])
+    rows = 10.0 + off + rng.normal(0, 0.05, (400, 1)) + rng.normal(0, 0.1, (400, 4))
+    est = dep.estimate_streams(rows)
+    assert est["sigma_w"] == pytest.approx(0.1, rel=0.06) and est["sigma_time"] == pytest.approx(0.05, rel=0.2)
+    assert np.allclose(est["offsets"], off - off.mean(), atol=0.02) and est["mu"] == pytest.approx(10.0 + off.mean(), abs=0.02)
+    assert dep.sidak_h(0.0027, 1) == pytest.approx(3.0, abs=0.01) and dep.sidak_h(0.0027, 4) > 3.3
+
+
+def test_the_stream_chart_has_the_stated_false_alarm_rate_and_finds_a_wandering_stream():
+    from spc.monitor.model import check_multistream_point, multistream_limits
+    rng = np.random.default_rng(32)
+    k, sw, st = 4, 0.1, 0.05
+    off = [0.3, -0.1, 0.0, -0.2]
+    lim = multistream_limits(ALPHA_3SIGMA, k, None, 10.0, sw, st, off)
+    cfg = validate_config({"name": "x", "characteristic": "y", "kind": "multistream", "n": k})
+    x = 10.0 + np.array(lim["offsets"]) + rng.normal(0, st, (150_000, 1)) + rng.normal(0, sw, (150_000, k))
+    xbar = x.mean(axis=1)
+    level = np.mean((xbar > lim["location"]["ucl"]) | (xbar < lim["location"]["lcl"]))
+    sigma_r = sw * math.sqrt((k - 1) / k)
+    z = (x - xbar[:, None] - np.array(lim["offsets"])) / sigma_r
+    streams = np.mean(np.max(np.abs(z), axis=1) > lim["h"])
+    assert level == pytest.approx(ALPHA_3SIGMA, rel=0.2) and streams == pytest.approx(ALPHA_3SIGMA, rel=0.35)
+    # one stream drifts by 5 sigma_w: the mean moves by 1.25 sigma_w only, the stream chart sees it
+    drift = np.array([0.3, -0.1 + 5 * sw, 0.0, -0.2]) + 10.0
+    _xb, top, alarms, _w = check_multistream_point(cfg, lim, [], list(drift))
+    assert top > lim["h"] and [a["chart"] for a in alarms] == ["variation"] and alarms[0]["detail"]["z"][1] > lim["h"]
+    # the same fixed differences between the streams are NOT an alarm, and a common shift of all streams only moves the level
+    assert check_multistream_point(cfg, lim, [], list(10.0 + np.array(off)))[2] == []
+    _xb, top2, alarms2, _w = check_multistream_point(cfg, lim, [], list(10.0 + np.array(off) + 0.6))
+    assert top2 < lim["h"] and [a["chart"] for a in alarms2] == ["location"]
+
+
+def test_a_multistream_monitor_end_to_end(env):
+    app, c = env
+    rng = np.random.default_rng(33)
+    off = np.array([0.3, -0.1, 0.0, -0.2])
+    rows = (10.0 + off + rng.normal(0, 0.05, (60, 1)) + rng.normal(0, 0.1, (60, 4))).tolist()
+    cfg = {"name": "Four spindles", "characteristic": "bore", "kind": "multistream", "n": 4}
+    mid = make_monitor(c["eng"], cfg, {"type": "observations", "rows": rows, "names": ["S1", "S2", "S3", "S4"]})
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    assert lim["names"] == ["S1", "S2", "S3", "S4"] and lim["h"] > 3.3 and lim["sigma_w"] == pytest.approx(0.1, rel=0.25)
+    ack(c["oper"], mid)
+    ok = 0
+    for _ in range(10):
+        r = enter(c["oper"], mid, [float(v) for v in 10.0 + off + rng.normal(0, 0.05) + rng.normal(0, 0.1, 4)])
+        ok += r["status"] != "alarm"
+    assert ok >= 9
+    r = enter(c["oper"], mid, [10.3, 9.9 + 0.8, 10.0, 9.8])
+    assert r["status"] == "alarm" and r["point"]["alarms"][0]["chart"] == "variation"
+    assert r["point"]["alarms"][0]["detail"]["names"] == ["S1", "S2", "S3", "S4"]
+    assert c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [1, 2, 3]}).status_code == 400
+    assert c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code in (400, 409)
+    par = {"type": "parameters", "mu": 10.0, "sigma": 0.1, "sigma_time": 0.05, "offsets": [0.3, -0.1, 0.0, -0.2], "names": ["a", "b", "c", "d"]}
+    r = c["eng"].post(f"/api/monitors/{mid}/limits", json={"source": par, "reason": "known"})
+    assert r.status_code == 200 and r.json()["limits"]["names"] == ["a", "b", "c", "d"]
+    for i, bad in enumerate(({**par, "offsets": [0, 0]}, {**par, "sigma": 0}, {"type": "observations", "rows": rows[:5]},
+                             {"type": "observations", "rows": [row[:3] for row in rows]})):
+        assert c["eng"].post("/api/monitors", json={"config": {**cfg, "name": f"bad {i}"}, "source": bad}).status_code == 400
+    assert c["eng"].post("/api/monitors", json={"config": {**cfg, "name": "one stream", "n": 1}, "source": par}).status_code == 400

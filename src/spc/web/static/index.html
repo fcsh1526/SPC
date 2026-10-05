@@ -501,6 +501,8 @@
           <option value="mewma" data-i18n="analysis.chart_mewma"></option>
           <option value="ext-xbar" data-i18n="analysis.chart_ext-xbar"></option>
           <option value="pearson" data-i18n="analysis.chart_pearson"></option>
+          <option value="ar" data-i18n="analysis.chart_ar"></option>
+          <option value="multistream" data-i18n="analysis.chart_multistream"></option>
         </select></label>
       <label><span data-i18n="mon.f_n" id="me-n-label"></span><input id="me-n" type="number" min="1" max="1000000" step="1" value="5"></label>
       <label><span data-i18n="mon.f_alpha"></span>
@@ -538,6 +540,15 @@
       <label class="me-shape me-pear me-par" hidden><span data-i18n="mon.f_sigma_within"></span><input id="me-sigma-within" type="number" step="any" min="0"></label>
       <label class="me-shape me-pear me-data" hidden><span data-i18n="mon.f_pear_method"></span>
         <select id="me-pear-method"><option value="pearson" data-i18n="mon.pear_method_pearson"></option><option value="fitted" data-i18n="mon.pear_method_fitted"></option></select></label>
+      </div>
+      <div id="me-dep-box" class="form-grid">
+      <p class="note me-dep" hidden id="me-dep-note"></p>
+      <label class="me-dep me-ar me-par" hidden><span data-i18n="mon.f_phi"></span><input id="me-phi" type="text" placeholder="0.8"></label>
+      <label class="me-dep me-ar me-data" hidden><span data-i18n="mon.f_ar_order"></span>
+        <select id="me-ar-order"><option value="" data-i18n="mon.ar_order_auto"></option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+      <label class="me-dep me-ms me-par me-obs" hidden><span data-i18n="mon.f_stream_names"></span><input id="me-ms-names" type="text" placeholder="S1, S2, S3, S4"></label>
+      <label class="me-dep me-ms me-par" hidden><span data-i18n="mon.f_stream_offsets"></span><input id="me-ms-offsets" type="text" placeholder="0.3, -0.1, 0, -0.2"></label>
+      <label class="me-dep me-ms me-par" hidden><span data-i18n="mon.f_stream_sigma_time"></span><input id="me-ms-sigma-time" type="number" step="any" min="0" value="0"></label>
       </div>
       <div id="me-seq-box" class="form-grid" hidden>
         <label id="me-k-label"><span data-i18n="mon.f_cusum_k"></span><input id="me-k" type="number" min="0.05" max="3" step="any" value="0.5"></label>
@@ -660,6 +671,7 @@
     </div>
 
     <p id="md-qual" class="strong" hidden></p>
+    <p id="md-dep-note" class="note" hidden></p>
     <p id="md-zmr-note" class="note" hidden data-i18n="mon.zmr_note"></p>
     <p id="md-mv-note" class="note" hidden data-i18n="mon.mv_note"></p>
     <p id="md-seq-note" class="note" hidden data-i18n="mon.seq_note"></p>
@@ -699,6 +711,13 @@
           <label class="nl-shape nl-pear nl-par" hidden><span data-i18n="mon.f_sigma_within"></span><input id="nl-sigma-within" type="number" step="any" min="0"></label>
           <label class="nl-shape nl-pear nl-data" hidden><span data-i18n="mon.f_pear_method"></span>
             <select id="nl-pear-method"><option value="pearson" data-i18n="mon.pear_method_pearson"></option><option value="fitted" data-i18n="mon.pear_method_fitted"></option></select></label>
+          <p class="note nl-dep" hidden id="nl-dep-note"></p>
+          <label class="nl-dep nl-ar nl-par" hidden><span data-i18n="mon.f_phi"></span><input id="nl-phi" type="text" placeholder="0.8"></label>
+          <label class="nl-dep nl-ar nl-data" hidden><span data-i18n="mon.f_ar_order"></span>
+            <select id="nl-ar-order"><option value="" data-i18n="mon.ar_order_auto"></option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+          <label class="nl-dep nl-ms nl-par nl-obs" hidden><span data-i18n="mon.f_stream_names"></span><input id="nl-ms-names" type="text" placeholder="S1, S2, S3, S4"></label>
+          <label class="nl-dep nl-ms nl-par" hidden><span data-i18n="mon.f_stream_offsets"></span><input id="nl-ms-offsets" type="text" placeholder="0.3, -0.1, 0, -0.2"></label>
+          <label class="nl-dep nl-ms nl-par" hidden><span data-i18n="mon.f_stream_sigma_time"></span><input id="nl-ms-sigma-time" type="number" step="any" min="0" value="0"></label>
           <label class="nl-seq nl-cusum" hidden><span data-i18n="mon.f_cusum_k"></span><input id="nl-k" type="number" min="0.05" max="3" step="any" value="0.5"></label>
           <label class="nl-seq nl-cusum" hidden><span data-i18n="mon.f_cusum_fir"></span><input id="nl-fir" type="number" min="0" max="0.95" step="any" value="0"></label>
           <label class="nl-seq nl-ewma nl-mewma" hidden><span data-i18n="mon.f_ewma_lambda"></span><input id="nl-lambda" type="number" min="0.02" max="1" step="any" value="0.2"></label>

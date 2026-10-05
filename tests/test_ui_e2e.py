@@ -1034,3 +1034,72 @@ def test_extended_limits_and_pearson_monitors_in_the_browser(server, browser, ap
     expect(page.locator("#md-limits")).to_contain_text("偏度")
     assert problems == [], problems
     ctx.close()
+
+
+def test_autocorrelated_and_multistream_monitors_in_the_browser(server, browser, app):
+    import numpy as np
+
+    expect = playwright_sync.expect
+    problems = []
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=monitor]")
+
+    def start(name, kind):
+        page.click("#mon-new")
+        page.fill("#me-name", name)
+        page.fill("#me-characteristic", "temperature")
+        page.select_option("#me-kind", kind)
+        page.locator("#me-ocap tr[data-key=default] input").nth(0).fill("Check the controller")
+        page.locator("#me-ocap tr[data-key=default] input").nth(1).fill("Setter")
+
+    start("Furnace", "ar")
+    expect(page.locator("#me-specs-box")).to_be_hidden()
+    expect(page.locator("#me-phi")).to_be_visible()
+    assert page.input_value("#me-n") == "1"
+    page.fill("#me-mu", "100")
+    page.fill("#me-sigma", "0.5")
+    page.fill("#me-phi", "0.8")
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Furnace")
+    expect(page.locator("#md-dep-note")).to_be_visible()
+    expect(page.locator("#md-ongoing-box")).to_be_hidden()
+    page.click("#md-ack-btn")
+    page.fill("#md-v0", "100.2")
+    page.click("#md-submit")
+    expect(page.locator("#md-result .ok-box")).to_be_visible()
+    page.fill("#md-v0", "103")  # far from the forecast 100.16
+    page.click("#md-submit")
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("OUT OF CONTROL")
+    page.locator("#md-limits").locator("xpath=ancestor::details").locator("summary").click()
+    expect(page.locator("#md-limits")).to_contain_text("Autoregressive model of order 1")
+    page.click("#mon-back")
+
+    rng = np.random.default_rng(5)
+    rows = 10.0 + np.array([0.3, -0.1, 0.0, -0.2]) + rng.normal(0, 0.05, (30, 1)) + rng.normal(0, 0.1, (30, 4))
+    start("Four spindles", "multistream")
+    assert page.input_value("#me-n") == "4"
+    page.select_option("#me-src-type", "observations")
+    expect(page.locator("#me-src-rows")).to_be_visible()
+    page.fill("#me-ms-names", "S1, S2, S3, S4")
+    page.fill("#me-mv-rows", "\n".join(" ".join(f"{v:.4f}" for v in r) for r in rows))
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Four spindles")
+    expect(page.locator("#md-values input")).to_have_count(4)
+    expect(page.locator("#md-chart-var")).to_be_visible()
+    page.click("#md-ack-btn")
+    for i, v in enumerate([10.3, 9.9, 10.0, 9.8]):
+        page.fill(f"#md-v{i}", str(v))
+    page.click("#md-submit")
+    expect(page.locator("#md-result .ok-box")).to_be_visible()
+    for i, v in enumerate([10.3, 10.8, 10.0, 9.8]):  # spindle 2 wanders off
+        page.fill(f"#md-v{i}", str(v))
+    page.click("#md-submit")
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("S2")
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#md-dep-note")).to_contain_text("多個串流")
+    assert problems == [], problems
+    ctx.close()

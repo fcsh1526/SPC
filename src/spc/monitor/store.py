@@ -159,6 +159,11 @@ class MonitorStore:
             (monitor_id, limits_rev, limit))
         return [(json.loads(r["vals"]), bool(json.loads(r["alarms"]))) for r in rows]
 
+    def recent_values(self, monitor_id: int, count: int) -> list[float]:
+        """The first value of the latest valid points (of any limits revision), oldest first: the history of an autoregressive model."""
+        rows = self.db.all("SELECT vals FROM monitor_points WHERE monitor_id = ? AND valid = 1 ORDER BY seq DESC LIMIT ?", (monitor_id, count))
+        return [json.loads(r["vals"])[0] for r in rows][::-1]
+
     def run_state(self, monitor_id: int, limits_rev: int):
         """The statistics of the last valid point, if the chart has not signalled on it (then it starts again): {'loc', 'var'}."""
         r = self.db.one(

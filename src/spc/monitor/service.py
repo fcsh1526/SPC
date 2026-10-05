@@ -15,6 +15,7 @@ from spc.data import Dataset
 from spc.db.database import Database
 from spc.db.stores import DatasetStore, now_iso
 from spc.monitor.model import (
+    AR_KIND, MS_KIND, ar_chart_limits, check_multistream_point, multistream_limits, dep,
     EXT_KIND, PEARSON_KIND, SHAPE_KINDS, extended_chart_limits, pearson_chart_limits, shape_base, ext,
     VECTOR_KINDS, ZMR_KIND, check_vector_point, estimate_reference, vector_limits, zmr_limits, zmr_z,
     ACCEPT_KINDS, ACTION_STEPS, SEQ_KINDS, check_sequential_point, ewma_band, sequential_limits, ATTRIBUTE_KINDS, EVENT_KINDS, PRE_KIND, PRE_QUALIFY, TOLERANCE_KINDS, acceptance_from_values,
@@ -85,6 +86,10 @@ class MonitorService:
             return self._sequential_limits_from(monitor, source)
         if kind in SHAPE_KINDS:
             return self._shape_limits_from(monitor, source)
+        if kind == AR_KIND:
+            return self._ar_limits_from(monitor, source)
+        if kind == MS_KIND:
+            return self._multistream_limits_from(monitor, source)
         if kind == ZMR_KIND:
             return self._zmr_limits_from(monitor, source)
         if kind in VECTOR_KINDS:
@@ -230,6 +235,78 @@ class MonitorService:
             else:
                 limits = pearson_chart_limits(n, alpha, mean, s_plot, g1, b2, base_ref["sigma"], center)
             return limits, {**described, "method": limits["design"]["method"]}
+        except ValueError as exc:
+            if isinstance(exc, MonitorError):
+                raise
+            raise MonitorError("bad_source", str(exc)) from None
+
+    def _ar_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
+        """Residual chart: an AR model given, or fitted to a data set (in time order) or to points of this monitor."""
+        alpha, warn = monitor["alpha"], monitor["warn_alpha"]
+        typ = source.get("type")
+        order = source.get("order")
+        if order is not None and (isinstance(order, bool) or not isinstance(order, int)):
+            raise MonitorError("bad_source", "order must be a whole number")
+        try:
+            if typ == "parameters":
+                mu, sigma_e, phi = source.get("mu"), source.get("sigma"), source.get("phi")
+                if not isinstance(phi, list) or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in [mu, sigma_e, *phi]):
+                    raise ValueError("mu, sigma (of the residuals) and the list phi must be numbers")
+                return ar_chart_limits(alpha, warn, mu, phi, sigma_e), {"type": "parameters", "mu": mu, "sigma": sigma_e, "phi": phi}
+            if typ == "dataset":
+                ds = self.datasets.get(source.get("dataset_id", ""))
+                ref = ds.individuals()[0]
+                name = ds.source.name if ds.source else ""
+                described = {"type": "dataset", "dataset_id": source["dataset_id"], "name": name, "n_values": int(np.size(ref))}
+            elif typ == "points":
+                lo, hi = source.get("seq_from"), source.get("seq_to")
+                if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (lo, hi)) or lo > hi:
+                    raise ValueError("seq_from and seq_to must be point numbers, seq_from <= seq_to")
+                pts = [p for p in self.store.points(monitor["id"], limit=100000, since_seq=lo) if p["seq"] <= hi and p["valid"]]
+                ref = [p["values"][0] for p in pts]
+                described = {"type": "points", "seq_from": lo, "seq_to": hi, "n_points": len(pts)}
+            else:
+                raise ValueError("source.type must be parameters, dataset or points")
+            fit = dep.fit_ar(ref, order)
+            return (ar_chart_limits(alpha, warn, fit["mu"], fit["phi"], fit["sigma_e"], fit["diagnostics"]),
+                    {**described, "order": fit["order"]})
+        except ValueError as exc:
+            if isinstance(exc, MonitorError):
+                raise
+            raise MonitorError("bad_source", str(exc)) from None
+
+    def _multistream_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
+        """Several streams: given level and variation, or estimated from reference rows (one value per stream)."""
+        k, alpha = monitor["n"], monitor["alpha"]
+        typ = source.get("type")
+        names = source.get("names")
+        try:
+            if typ == "parameters":
+                mu, sigma_w = source.get("mu"), source.get("sigma")
+                sigma_time, offsets = source.get("sigma_time", 0.0), source.get("offsets", [0.0] * k)
+                if not isinstance(offsets, list) or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+                                                            for v in [mu, sigma_w, sigma_time, *offsets]):
+                    raise ValueError("mu, sigma, sigma_time and the offsets must be numbers")
+                return (multistream_limits(alpha, k, names, mu, sigma_w, sigma_time, offsets),
+                        {"type": "parameters", "mu": mu, "sigma": sigma_w, "sigma_time": sigma_time})
+            if typ == "observations":
+                rows, described = source.get("rows"), {"type": "observations"}
+            elif typ == "points":
+                lo, hi = source.get("seq_from"), source.get("seq_to")
+                if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (lo, hi)) or lo > hi:
+                    raise ValueError("seq_from and seq_to must be point numbers, seq_from <= seq_to")
+                pts = [p for p in self.store.points(monitor["id"], limit=100000, since_seq=lo) if p["seq"] <= hi and p["valid"]]
+                rows, described = [p["values"] for p in pts], {"type": "points", "seq_from": lo, "seq_to": hi}
+                prev = self.store.limits(monitor["id"]) if monitor.get("limits_rev") else None
+                if names is None and prev is not None:
+                    names = prev["names"]
+            else:
+                raise ValueError("source.type must be parameters, observations or points")
+            est = dep.estimate_streams(rows)
+            if est["k"] != k:
+                raise ValueError(f"the rows need {k} values, one per stream")
+            described["n_rows"] = est["n_rows"]
+            return multistream_limits(alpha, k, names, est["mu"], est["sigma_w"], est["sigma_time"], est["offsets"]), described
         except ValueError as exc:
             if isinstance(exc, MonitorError):
                 raise
@@ -436,7 +513,16 @@ class MonitorService:
                 raise MonitorError("no_limits", "this monitor has no limits yet", 409)
             previous = (self.store.previous_value(monitor_id)
                         if base_kind(monitor["kind"]) == "imr" or (monitor["kind"] == PEARSON_KIND and monitor["n"] == 1) else None)
-            if monitor["kind"] == ZMR_KIND:
+            if monitor["kind"] == AR_KIND:
+                hist = self.store.recent_values(monitor_id, limits["order"])
+                e = dep.next_residual(hist, values[0], limits["process_mean"], limits["phi"])
+                loc, var = statistic("imr", [e], previous)
+                hist_loc, hist_var = self.store.valid_history(monitor_id, limits["revision"], HISTORY_FOR_RULES)
+                alarms, warnings = check_point(monitor, limits, hist_loc, hist_var, loc, var)
+            elif monitor["kind"] == MS_KIND:
+                hist_loc, _hv = self.store.valid_history(monitor_id, limits["revision"], HISTORY_FOR_RULES)
+                loc, var, alarms, warnings = check_multistream_point(monitor, limits, hist_loc, values)
+            elif monitor["kind"] == ZMR_KIND:
                 z = zmr_z(limits, tags["part"], values[0])
                 loc, var = statistic("imr", [z], previous)
                 hist_loc, hist_var = self.store.valid_history(monitor_id, limits["revision"], HISTORY_FOR_RULES)
@@ -461,7 +547,7 @@ class MonitorService:
                 loc, var = pre_statistic(limits, values), None
             else:
                 loc, var = statistic(monitor["kind"], values, previous)
-            if monitor["kind"] in (*SEQ_KINDS, ZMR_KIND, *VECTOR_KINDS):
+            if monitor["kind"] in (*SEQ_KINDS, ZMR_KIND, *VECTOR_KINDS, AR_KIND, MS_KIND):
                 pass
             elif monitor["kind"] == PRE_KIND:
                 alarms, warnings = check_pre_point(limits, values)
@@ -652,7 +738,7 @@ class MonitorService:
     def window_dataset(self, monitor: dict, window: int) -> tuple[Dataset, list[dict]]:
         if monitor["kind"] in ATTRIBUTE_KINDS:
             raise MonitorError("report_not_for_attribute", "the capability report needs measured values: counts have no capability index")
-        if monitor["kind"] in (ZMR_KIND, *VECTOR_KINDS):
+        if monitor["kind"] in (ZMR_KIND, *VECTOR_KINDS, AR_KIND, MS_KIND):
             raise MonitorError("report_not_for_this_chart", "mixed products and several characteristics have no single capability: the report is not available")
         if monitor["kind"] == PRE_KIND:
             raise MonitorError("report_not_for_precontrol", "a pre-control chart only monitors a start-up: it is no basis for a capability report")
