@@ -78,7 +78,7 @@ The tab "SPC at the line" holds SPC monitors: control charts that control a runn
 - **A violation opens one incident.** Follow the steps of the draft: measure again to make sure the sample is valid (an invalid sample, declared with a reason, ends the incident), adjust process parameters, adjust process elements, check with a new sample, and if that does not help go to the root cause analysis and product containment. An incident is closed as "recovered" only after a documented action AND a new valid sample that meets all criteria. An incident that is not escalated in time is marked overdue. Everything is logged with person and time, and is in the audit trail.
 - **Notification.** The page and the badge in the navigation show open incidents. With `spc-serve --alert-webhook URL` (or `SPC_ALERT_WEBHOOK`) the program also posts a JSON message to that URL when an incident opens.
 - **Ongoing performance and capability.** Index of the latest samples (named Pp/Ppk or Cp/Cpk by the stability evidence), the four quadrants of the draft, the trend over earlier windows, a check whether the fixed limits still fit, and the response times of the action plan. One click makes a normal study report of the window.
-- The first release covers X-bar-s, X-bar-R and I-MR monitors. Attribute and median monitors are not done.
+- Monitors cover X-bar-s, X-bar-R, Median-R, I-MR and the count charts p, np, c and u. Count charts use exact binomial and Poisson limits that follow each sample's size, run only the limit, run and trend criteria (counts are not normal), have no specification limits, and give no capability report. Median charts use the c_n factors of the draft. Not done: acceptance, CUSUM and EWMA monitors.
 
 ## Customer profiles
 

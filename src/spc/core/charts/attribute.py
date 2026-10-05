@@ -39,6 +39,25 @@ class AttributeChart:
         return (self.values > self.ucl) | (self.values < self.lcl)
 
 
+def exact_limits(kind: str, center: float, size: float, alpha: float = ALPHA_3SIGMA) -> tuple[float, float]:
+    """(lcl, ucl) of one sample of `size`, in the unit that the chart plots, from the binomial or Poisson distribution.
+
+    center: p-bar for "p" and "np", the mean count per unit for "c" (size is ignored: the unit is constant),
+    u-bar for "u". A sample alarms when its value is below lcl or above ucl.
+    """
+    check_alpha(alpha)
+    lo, hi = alpha / 2.0, 1.0 - alpha / 2.0
+    if kind == "p":
+        return float(binom.ppf(lo, size, center) / size), float(binom.ppf(hi, size, center) / size)
+    if kind == "np":
+        return float(binom.ppf(lo, size, center)), float(binom.ppf(hi, size, center))
+    if kind == "c":
+        return float(poisson.ppf(lo, center)), float(poisson.ppf(hi, center))
+    if kind == "u":
+        return float(poisson.ppf(lo, center * size) / size), float(poisson.ppf(hi, center * size) / size)
+    raise ValueError(f"unknown attribute chart {kind!r}")
+
+
 def _counts(x, name: str) -> np.ndarray:
     a = np.asarray(x, dtype=float)
     if a.ndim != 1 or a.size < 1:

@@ -741,3 +741,44 @@ def test_spc_monitor_at_the_line_from_set_up_to_the_action_plan(server, browser,
     expect(page.locator("nav.tabs button[data-tab=monitor]")).to_contain_text("現場 SPC")
     assert problems == [], problems
     ctx.close()
+
+
+def test_count_chart_monitor_with_limits_that_follow_the_sample_size(server, browser, app):
+    expect = playwright_sync.expect
+    problems = []
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=monitor]")
+    page.click("#mon-new")
+    page.fill("#me-name", "Scratches P1")
+    page.fill("#me-characteristic", "scratched parts")
+    page.select_option("#me-kind", "p")
+    expect(page.locator("#me-specs-box")).to_be_hidden()  # counts have no specification limits
+    expect(page.locator("#me-src-rate")).to_be_visible()
+    page.fill("#me-n", "50")
+    page.fill("#me-rate", "0.04")
+    page.locator("#me-ocap tr[data-key=default] input").nth(0).fill("Stop and call the shift leader")
+    page.locator("#me-ocap tr[data-key=default] input").nth(1).fill("Shift leader")
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Scratches P1")
+    expect(page.locator("#md-chart-var")).to_be_hidden()
+    expect(page.locator("#md-ongoing-box")).to_be_hidden()
+    page.click("#md-ack-btn")
+    page.fill("#md-v0", "2")
+    page.fill("#md-v1", "60")
+    page.click("#md-submit")
+    expect(page.locator("#md-result .ok-box, #md-result .warn-box")).to_be_visible()
+    page.fill("#md-v0", "30")
+    page.fill("#md-v1", "60")
+    page.click("#md-submit")
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("OUT OF CONTROL")
+    expect(page.locator("#md-chart-loc svg circle.alarm")).to_have_count(1)
+    page.locator("#md-limits").locator("xpath=ancestor::details").locator("summary").click()
+    expect(page.locator("#md-limits")).to_contain_text("follow the size of each sample")
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#md-limits")).to_contain_text("隨每個樣本的大小")
+    assert problems == [], problems
+    ctx.close()

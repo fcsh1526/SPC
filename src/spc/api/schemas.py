@@ -63,7 +63,7 @@ class ResetPasswordBody(Strict):
 
 class AnalyzeBody(Strict):
     stage: Literal["machine", "preliminary", "production"] = "production"
-    chart: Literal["auto", "xbar-s", "xbar-r", "imr"] = "auto"
+    chart: Literal["auto", "xbar-s", "xbar-r", "median-r", "imr"] = "auto"
     subgroup_size: int | None = Field(default=None, ge=1, le=1000)
     lsl: float | None = None
     usl: float | None = None

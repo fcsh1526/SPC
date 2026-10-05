@@ -145,6 +145,13 @@ class MonitorStore:
             (monitor_id, limits_rev, limit))[::-1]
         return [r["loc"] for r in rows], [r["var"] for r in rows if r["var"] is not None]
 
+    def valid_counts(self, monitor_id: int, limits_rev: int, limit: int):
+        """(plotted value, sample size or None) of the latest valid points of a limits revision, oldest first (count charts)."""
+        rows = self.db.all(
+            "SELECT loc, vals FROM monitor_points WHERE monitor_id = ? AND limits_rev = ? AND valid = 1 ORDER BY seq DESC LIMIT ?",
+            (monitor_id, limits_rev, limit))[::-1]
+        return [(r["loc"], (json.loads(r["vals"]) + [None])[1]) for r in rows]
+
     def previous_value(self, monitor_id: int) -> float | None:
         r = self.db.one("SELECT loc FROM monitor_points WHERE monitor_id = ? AND valid = 1 ORDER BY seq DESC LIMIT 1", (monitor_id,))
         return None if r is None else r["loc"]

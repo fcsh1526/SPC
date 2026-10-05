@@ -547,3 +547,82 @@ def test_ongoing_report_is_a_normal_report_on_the_window_with_a_stored_dataset(e
         c["oper"].post(f"/api/monitors/{nospec}/points", json={"values": good_sample(fill_no)})
     assert err(c["eng"].post(f"/api/monitors/{nospec}/ongoing-report", json={"window": 12}))["code"] == "report_needs_spec"
     assert c["view"].get(f"/api/monitors/{nospec}/ongoing", params={"window": 12}).json()["result"]["indices"] is None
+
+
+# ------------------------------------------------------------------ median chart and count charts
+
+def test_the_median_chart_limits_follow_the_c_n_factor_and_the_stated_risk():
+    from spc.core.constants import cn
+    rng = np.random.default_rng(5)
+    for n in (3, 5, 9):
+        lim = compute_limits("median-r", n, ALPHA_3SIGMA, None, 10.0, 0.1)
+        half = lim["location"]["ucl"] - 10.0
+        assert half == pytest.approx(3.0 * cn(n) * 0.1 / math.sqrt(n), rel=0.01)
+        x = rng.normal(10.0, 0.1, (300_000, n))
+        med = np.median(x, axis=1)
+        rate = np.mean((med > lim["location"]["ucl"]) | (med < lim["location"]["lcl"]))
+        assert rate == pytest.approx(ALPHA_3SIGMA, rel=0.2)
+
+
+def test_median_chart_statistic_is_the_median():
+    assert statistic("median-r", [9.9, 10.3, 10.0], None) == (10.0, pytest.approx(0.4))
+
+
+@pytest.mark.parametrize("kind,n,center,size", [("p", 50, 0.04, 80), ("np", 50, 0.04, 50), ("c", 1, 4.0, 1), ("u", 1, 0.8, 5)])
+def test_attribute_bands_equal_the_exact_chart_limits(kind, n, center, size):
+    from spc.monitor.model import attribute_limits, band
+    lim = attribute_limits(kind, n, ALPHA_3SIGMA, 0.05, center)
+    b = band(kind, lim, size)
+    assert b["lcl"] <= b["cl"] <= b["ucl"] and b["wucl"] <= b["ucl"] and b["wlcl"] >= b["lcl"]
+
+
+def test_bad_attribute_configurations_are_refused():
+    base = {"name": "x", "characteristic": "y", "kind": "p", "n": 50}
+    assert validate_config(base)["specs"]["lsl"] is None
+    for change in ({"specs": {"usl": 3}}, {"rules": {"middle_third": True}}, {"n": 0}, {"kind": "np", "n": 2_000_000}):
+        with pytest.raises(ValueError):
+            validate_config({**base, **change})
+
+
+def test_a_count_monitor_end_to_end(env):
+    app, c = env
+    cfg = {"name": "Scratches", "characteristic": "scratch count", "kind": "p", "n": 50, "warn_alpha": 0.05}
+    mid = make_monitor(c["eng"], cfg, {"type": "rate", "rate": 0.04})
+    ack(c["oper"], mid)
+    r = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [2, 60]})
+    assert r.status_code == 200 and r.json()["status"] in ("ok", "warning")
+    assert r.json()["point"]["loc"] == pytest.approx(2 / 60)
+    r = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [30, 60]})
+    assert r.json()["status"] == "alarm" and r.json()["incident"]
+    view = c["view"].get(f"/api/monitors/{mid}").json()
+    assert all(p["band"]["ucl"] > p["band"]["cl"] for p in view["points"])
+    for bad in ([1], [1, 2, 3], [-1, 10], [1.5, 10], [11, 10], [1, 0]):
+        assert c["oper"].post(f"/api/monitors/{mid}/points", json={"values": bad}).status_code == 400
+    assert c["eng"].post(f"/api/monitors/{mid}/ongoing-report", json={}).status_code in (400, 422)
+    assert c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code == 400
+    r = c["eng"].post("/api/monitors", json={"config": {**cfg, "name": "d"}, "source": {"type": "dataset", "dataset_id": "x"}})
+    assert r.status_code == 400
+
+
+def test_count_limits_from_reference_counts_and_c_chart(env):
+    app, c = env
+    rng = np.random.default_rng(2)
+    counts = [int(v) for v in rng.poisson(4.0, 40)]
+    mid = make_monitor(c["eng"], {"name": "Voids", "characteristic": "voids", "kind": "c"}, {"type": "counts", "counts": counts})
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    assert lim["center"] == pytest.approx(np.mean(counts))
+    ack(c["oper"], mid)
+    assert c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [4]}).json()["status"] in ("ok", "warning")
+    assert c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [25]}).json()["status"] == "alarm"
+    r = c["eng"].post("/api/monitors", json={"config": {"name": "Zero", "characteristic": "z", "kind": "c"}, "source": {"type": "counts", "counts": [0] * 25}})
+    assert r.status_code == 400
+
+
+def test_a_median_monitor_end_to_end(env):
+    app, c = env
+    mid = make_monitor(c["eng"], {**CONFIG, "name": "Median", "kind": "median-r", "n": 5, "specs": {}}, PARAMS)
+    ack(c["oper"], mid)
+    r = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": OK_SAMPLE})
+    assert r.json()["status"] in ("ok", "warning")
+    r = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [10.5, 10.5, 10.5, 10.4, 10.6]})
+    assert r.json()["status"] == "alarm"

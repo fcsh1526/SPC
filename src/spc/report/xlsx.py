@@ -332,8 +332,8 @@ def _chart_sheet(wb: Workbook, rep: Report, L) -> None:
     if not rep.result["stability"]["assessed"] or "location" not in chart:
         return
     ws = wb.create_sheet(L("x.sheet_charts"))
-    series_names = {"xbar-s": "fig.series.s", "xbar-r": "fig.series.r", "imr": "fig.series.mr"}
-    loc_name = L("fig.series.individual" if chart["kind"] == "imr" else "fig.series.mean")
+    series_names = {"xbar-s": "fig.series.s", "xbar-r": "fig.series.r", "median-r": "fig.series.r", "imr": "fig.series.mr"}
+    loc_name = L({"imr": "fig.series.individual", "median-r": "fig.series.median"}.get(chart["kind"], "fig.series.mean"))
     var_name = L(series_names[chart["kind"]])
     col = 1
     top = 3

@@ -202,8 +202,8 @@ def build_report(
     }
     if stage != "machine":
         kind = chart["kind"]
-        loc_series = L("fig.series.individual" if kind == "imr" else "fig.series.mean")
-        var_series = L({"xbar-s": "fig.series.s", "xbar-r": "fig.series.r", "imr": "fig.series.mr"}[kind])
+        loc_series = L({"imr": "fig.series.individual", "median-r": "fig.series.median"}.get(kind, "fig.series.mean"))
+        var_series = L({"xbar-s": "fig.series.s", "xbar-r": "fig.series.r", "median-r": "fig.series.r", "imr": "fig.series.mr"}[kind])
         common = {"x": L("fig.x"), "y": L("fig.y"), "ucl": L("fig.ucl"), "cl": L("fig.cl"), "lcl": L("fig.lcl"),
                   "point": L("fig.point"), "alarm": L("fig.alarm")}
         figures["control_location"] = svg.control_chart(chart["location"], {**common, "title": L("fig.loc.title", series=loc_series)})

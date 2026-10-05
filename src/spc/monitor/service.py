@@ -15,9 +15,10 @@ from spc.data import Dataset
 from spc.db.database import Database
 from spc.db.stores import DatasetStore, now_iso
 from spc.monitor.model import (
-    ACTION_STEPS, EVENT_KINDS, OUTCOMES, STEPS, MonitorError, check_point, compute_limits, limits_from_values, ocap_for,
-    statistic, validate_config,
+    ACTION_STEPS, ATTRIBUTE_KINDS, EVENT_KINDS, OUTCOMES, STEPS, MonitorError, attribute_limits, band, check_attribute_point,
+    check_point, check_values, compute_limits, limits_from_counts, limits_from_values, ocap_for, statistic, validate_config,
 )
+from spc.core.constants import cn
 from spc.monitor.notify import Notifier
 from spc.monitor.store import MonitorStore
 from spc.service import AnalysisRequest, analyze
@@ -73,6 +74,8 @@ class MonitorService:
         """(limits, source description) from a source: a stored data set, expected parameters, or points of this monitor."""
         kind, n, alpha, warn = monitor["kind"], monitor["n"], monitor["alpha"], monitor["warn_alpha"]
         typ = source.get("type")
+        if kind in ATTRIBUTE_KINDS:
+            return self._attribute_limits_from(monitor, source)
         if typ == "parameters":
             mu, sigma = source.get("mu"), source.get("sigma")
             if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in (mu, sigma)):
@@ -107,6 +110,35 @@ class MonitorService:
                 raise MonitorError("bad_source", str(exc)) from None
             return limits, {"type": "points", "seq_from": lo, "seq_to": hi, "n_points": len(pts)}
         raise MonitorError("bad_source", "source.type must be dataset, parameters or points")
+
+    def _attribute_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
+        """Limits of a count chart: from a reference level, from reference samples given as counts, or from points of this monitor."""
+        kind, n, alpha, warn = monitor["kind"], monitor["n"], monitor["alpha"], monitor["warn_alpha"]
+        typ = source.get("type")
+        try:
+            if typ == "rate":
+                rate = source.get("rate")
+                if not isinstance(rate, (int, float)) or isinstance(rate, bool) or not math.isfinite(rate):
+                    raise ValueError("the reference level must be a number")
+                return attribute_limits(kind, n, alpha, warn, rate), {"type": "rate", "rate": rate}
+            if typ == "counts":
+                counts, sizes = source.get("counts"), source.get("sizes")
+                if not isinstance(counts, list) or (sizes is not None and not isinstance(sizes, list)) or len(counts) > 10000 or not all(
+                        isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in [*counts, *(sizes or [])]):
+                    raise ValueError("counts and sizes must be lists of numbers")
+                return limits_from_counts(kind, n, alpha, warn, counts, sizes), {"type": "counts", "n_samples": len(counts)}
+            if typ == "points":
+                lo, hi = source.get("seq_from"), source.get("seq_to")
+                if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (lo, hi)) or lo > hi:
+                    raise ValueError("seq_from and seq_to must be point numbers, seq_from <= seq_to")
+                pts = [p for p in self.store.points(monitor["id"], limit=100000, since_seq=lo) if p["seq"] <= hi and p["valid"]]
+                counts = [p["values"][0] for p in pts]
+                sizes = [p["values"][1] for p in pts] if kind in ("p", "u") else None
+                return (limits_from_counts(kind, n, alpha, warn, counts, sizes),
+                        {"type": "points", "seq_from": lo, "seq_to": hi, "n_points": len(pts)})
+        except ValueError as exc:
+            raise MonitorError("bad_source", str(exc)) from None
+        raise MonitorError("bad_source", "source.type must be rate, counts or points for a count chart")
 
     def create(self, config_in: dict, source: dict, user) -> dict:
         try:
@@ -170,9 +202,7 @@ class MonitorService:
         monitor = self.store.get(monitor_id)
         if not monitor["active"]:
             raise MonitorError("monitor_inactive", "this monitor is switched off", 409)
-        if not isinstance(values, (list, tuple)) or len(values) != monitor["n"] or not all(
-                isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values):
-            raise MonitorError("wrong_value_count", f"this monitor takes {monitor['n']} measured value(s) per sample", n=monitor["n"])
+        values = check_values(monitor, values)
         if len(label) > 100:
             raise MonitorError("invalid_input", "the label is longer than 100 characters")
         count, klen, vlen = TAG_LIMITS
@@ -187,13 +217,18 @@ class MonitorService:
                 raise MonitorError("no_limits", "this monitor has no limits yet", 409)
             previous = self.store.previous_value(monitor_id) if monitor["kind"] == "imr" else None
             loc, var = statistic(monitor["kind"], values, previous)
-            hist_loc, hist_var = self.store.valid_history(monitor_id, limits["revision"], HISTORY_FOR_RULES)
-            alarms, warnings = check_point(monitor, limits, hist_loc, hist_var, loc, var)
+            if monitor["kind"] in ATTRIBUTE_KINDS:
+                size = values[1] if monitor["kind"] in ("p", "u") else None
+                history = self.store.valid_counts(monitor_id, limits["revision"], HISTORY_FOR_RULES)
+                alarms, warnings = check_attribute_point(monitor, limits, history, loc, size)
+            else:
+                hist_loc, hist_var = self.store.valid_history(monitor_id, limits["revision"], HISTORY_FOR_RULES)
+                alarms, warnings = check_point(monitor, limits, hist_loc, hist_var, loc, var)
             seq = self.store.next_seq(monitor_id)
             incident = self.store.open_incident_of(monitor_id)
             incident_id = incident["id"] if incident else None
             self.store.insert_point(monitor_id, seq, limits_rev=limits["revision"], taken_at=when, entered_by=_label(user), label=label.strip(),
-                                    tags=tags, values=[float(v) for v in values], loc=loc, var=var, alarms=alarms, warnings=warnings,
+                                    tags=tags, values=values, loc=loc, var=var, alarms=alarms, warnings=warnings,
                                     incident_id=incident_id)
             opened = None
             if alarms and incident is None:
@@ -321,10 +356,23 @@ class MonitorService:
             "limits": self.store.limits(monitor_id),
             "limits_history": [{k: v for k, v in h.items() if k in ("revision", "created_at", "created_by", "reason", "source")}
                                for h in self.store.limits_history(monitor_id)],
-            "points": self.store.points(monitor_id, limit=limit),
+            "points": self._with_bands(monitor, self.store.points(monitor_id, limit=limit)),
             "incident": None if inc is None else self.incident_view(monitor, inc),
             "acknowledged": self.store.has_ack(monitor_id, user.id, monitor["ocap_rev"]),
         }
+
+    def _with_bands(self, monitor: dict, pts: list[dict]) -> list[dict]:
+        """Count charts: limits follow the sample size, so each point carries the band that applied to it."""
+        if monitor["kind"] not in ATTRIBUTE_KINDS:
+            return pts
+        revs: dict[int, dict | None] = {}
+        for p in pts:
+            if p["limits_rev"] not in revs:
+                revs[p["limits_rev"]] = self.store.limits(monitor["id"], p["limits_rev"])
+            lim = revs[p["limits_rev"]]
+            size = p["values"][1] if monitor["kind"] in ("p", "u") else None
+            p["band"] = None if lim is None else band(monitor["kind"], lim, size)
+        return pts
 
     def incidents(self, monitor_id: int | None, status: str | None) -> list[dict]:
         out = []
@@ -334,6 +382,8 @@ class MonitorService:
 
     # ------------------------------------------------------------------ ongoing performance and capability (draft 10.4)
     def window_dataset(self, monitor: dict, window: int) -> tuple[Dataset, list[dict]]:
+        if monitor["kind"] in ATTRIBUTE_KINDS:
+            raise MonitorError("report_not_for_attribute", "the capability report needs measured values: counts have no capability index")
         pts = [p for p in self.store.points(monitor["id"], limit=window) if p["valid"]]
         if len(pts) < MIN_ONGOING_POINTS:
             raise MonitorError("not_enough_points", f"the ongoing report needs at least {MIN_ONGOING_POINTS} valid points", 409, have=len(pts))
@@ -403,7 +453,7 @@ class MonitorService:
         expected = k * monitor["alpha"]
         if monitor["kind"] == "xbar-s":
             sigma = math.sqrt(statistics.fmean([p["var"] ** 2 for p in pts]))
-        elif monitor["kind"] == "xbar-r":
+        elif monitor["kind"] in ("xbar-r", "median-r"):
             from spc.core.constants import d2
             sigma = statistics.fmean([p["var"] for p in pts]) / d2(monitor["n"])
         else:
@@ -412,7 +462,8 @@ class MonitorService:
             sigma = statistics.fmean(mrs) / d2(2) if mrs else float("nan")
         ratio = sigma / limits["sigma"] if limits["sigma"] and math.isfinite(sigma) else None
         loc = [p["loc"] for p in pts]
-        shift = None if not loc else (statistics.fmean(loc) - limits["mu"]) / (limits["sigma"] / math.sqrt(monitor["n"]))
+        se = limits["sigma"] * (cn(monitor["n"]) if monitor["kind"] == "median-r" else 1.0) / math.sqrt(monitor["n"])
+        shift = None if not loc else (statistics.fmean(loc) - limits["mu"]) / se
         # the order matters: a shifted location also causes alarms, and lower variation limits catch good news
         if ratio is not None and ratio < 0.8:
             verdict = "too_wide"

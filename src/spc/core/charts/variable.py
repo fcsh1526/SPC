@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import chi2
 
-from spc.core.constants import ALPHA_3SIGMA, check_alpha, d2, u_quantile, w_quantile
+from spc.core.constants import ALPHA_3SIGMA, check_alpha, cn, d2, u_quantile, w_quantile
 
 
 @dataclass(frozen=True)
@@ -116,6 +116,27 @@ def xbar_r(data, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
         ),
         location_values=means,
         variation_values=ranges,
+    )
+
+
+def median_r(data, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
+    """Median and range chart (draft 10.3.3.4). mu_hat = mean of the subgroup medians (the choice of ISO 7870-2),
+    sigma_hat = R̄ / d2. The location limits are mu_hat ± u(1-alpha/2) * c_n * sigma_hat / sqrt(n); the R chart is the same
+    as for X̄-R. The median reacts more slowly to a changing process than the mean, and is less sensitive to a single extreme value."""
+    check_alpha(alpha)
+    x = _subgroups(data)
+    k, n = x.shape
+    medians = np.median(x, axis=1)
+    ranges = x.max(axis=1) - x.min(axis=1)
+    rbar = float(ranges.mean())
+    mu_hat = float(medians.mean())
+    sigma_hat = rbar / d2(n)
+    half = u_quantile(alpha) * cn(n) * sigma_hat / np.sqrt(n)
+    return SubgroupChart(
+        kind="median-r", n=n, k=k, alpha=alpha, mu_hat=mu_hat, sigma_hat=sigma_hat,
+        location=Limits(mu_hat - half, mu_hat, mu_hat + half),
+        variation=Limits(w_quantile(n, alpha / 2.0) * sigma_hat, rbar, w_quantile(n, 1.0 - alpha / 2.0) * sigma_hat),
+        location_values=medians, variation_values=ranges,
     )
 
 

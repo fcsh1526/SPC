@@ -34,7 +34,8 @@ from spc.core.capability import (
 )
 from spc.core.capability.target import BASE_SAMPLE_SIZE
 from spc.core.capability.indices import geometric_indices, zscore_indices
-from spc.core.charts.variable import MAX_MOVING_N, MovingChart, SubgroupChart, imr, imr_moving, xbar_r, xbar_s
+from spc.core.charts.variable import MAX_MOVING_N, MovingChart, SubgroupChart, imr, imr_moving, median_r, xbar_r, xbar_s
+from spc.core.constants import cn
 from spc.core.constants import ALPHA_3SIGMA
 from spc.core.distributions import (
     FAMILIES, FitError, GaussianMixture, bootstrap_interval, choose_automatically, fit, fit_candidates, quantiles,
@@ -45,7 +46,7 @@ from spc.data import Dataset
 from spc.params import AnalysisParams
 from spc.profile import table_for_service
 
-CHARTS = ("auto", "xbar-s", "xbar-r", "imr")
+CHARTS = ("auto", "xbar-s", "xbar-r", "median-r", "imr")
 STAGES = ("machine", "preliminary", "production")
 XBAR_S_MIN_N = 5  # draft figure 10-5 as reported by the 2026-09 article; n < 5 uses X̄-R
 
@@ -351,10 +352,10 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
             sigma_loc = chart.location_sigma
 
     else:
-        chart = (xbar_s if kind == "xbar-s" else xbar_r)(matrix, req.alpha)
+        chart = {"xbar-s": xbar_s, "xbar-r": xbar_r, "median-r": median_r}[kind](matrix, req.alpha)
         loc_labels = var_labels = labels
         loc_pos = var_pos = [[int(p) for p in row] for row in pos_rows]
-        sigma_loc = chart.sigma_hat / math.sqrt(chart.n)
+        sigma_loc = chart.sigma_hat * (cn(chart.n) if kind == "median-r" else 1.0) / math.sqrt(chart.n)  # sd of the plotted statistic
     out_chart = _chart_json(chart, loc_labels, var_labels, loc_pos, var_pos)
 
     # ---- criteria on both charts. Sigma-based criteria only make sense on the location chart.

@@ -42,6 +42,17 @@ def d3(n: int) -> float:
     return math.sqrt(second_moment - d2(n) ** 2)
 
 
+# c_n = sigma(median) / sigma(mean) of a normal subgroup: table of the draft (10.3.3.4). For n = 2 the median is the mean.
+_CN = {2: 1.000, 3: 1.160, 4: 1.092, 5: 1.198, 6: 1.136, 7: 1.214, 8: 1.159, 9: 1.223, 10: 1.175}
+
+
+def cn(n: int) -> float:
+    """Ratio of the standard deviations of the subgroup median and the subgroup mean (draft table, n = 2 .. 10)."""
+    if n not in _CN:
+        raise ValueError(f"the median chart is defined for subgroup sizes 2 to 10, got {n!r}")
+    return _CN[n]
+
+
 def c4(n: int) -> float:
     """Expected value of s/sigma for subgroup size n."""
     n = _check_n(n)
