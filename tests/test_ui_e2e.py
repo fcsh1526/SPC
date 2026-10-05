@@ -1399,3 +1399,37 @@ def test_control_plan_and_roles_in_the_browser(server, browser):
     expect(page.locator("#pl-lines")).to_contain_text("沒有合格人員")
     assert problems == [], problems
     ctx.close()
+
+
+def test_validation_run_and_reference_case_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    problems = []
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1100}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=validation]")
+    expect(page.locator("#va-runs")).to_contain_text("No runs yet")
+    page.click("#va-run")
+    row = page.locator("#va-runs tr", has_text="Verified, not validated")
+    expect(row).to_be_visible()
+    # a reference case: five values with a mean the user knows
+    page.click("#va-new")
+    page.fill("#vae-name", "Textbook example")
+    page.fill("#vae-source", "hand calculation 2026-02")
+    page.fill("#vae-values", "9.8 10.0 10.2 9.9 10.1 10.0 9.9 10.1 10.0 10.0")
+    page.fill("#vae-lsl", "9.0")
+    page.fill("#vae-usl", "11.0")
+    page.fill("#vae-expected", "indices.mean 10.0 1e-9\nindices.n 10 0")
+    page.click("#vae-save")
+    expect(page.locator("#va-cases")).to_contain_text("Textbook example")
+    page.click("#va-run")
+    expect(page.locator("#va-runs tr").nth(1)).to_contain_text("Passed")
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#va-runs")).to_contain_text("通過")
+    link = page.locator("#va-runs tr").nth(1).locator("a").nth(1)
+    href = link.get_attribute("href")
+    assert href.endswith("report?lang=zh-TW")
+    assert problems == [], problems
+    ctx.close()

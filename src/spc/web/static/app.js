@@ -156,6 +156,7 @@
     if (name === "study") loadStudies();
     if (name === "msa") loadMsa();
     if (name === "plan") loadPlans();
+    if (name === "validation") loadValidation();
     if (name === "roles") loadRoles();
     if (name === "admin") loadAdmin();
     if (name === "password") renderPasswordPanel();
@@ -1946,6 +1947,83 @@
     $("#mss-save").addEventListener("click", addMsaStudy);
   }
 
+  // ---------------------------------------------------------------- verification and validation of the software (draft 11.2)
+  const VA = { cases: [], editing: null };
+  async function loadValidation() {
+    await guarded(async () => { VA.cases = (await api("/api/validation/cases")).cases; VA.runs = (await api("/api/validation/runs")).runs; });
+    renderValidation();
+  }
+  function renderValidation() {
+    const runs = $("#va-runs"); runs.replaceChildren();
+    const head = el("tr"); ["val.col_no", "val.col_at", "val.col_by", "val.col_engine", "val.col_verdict", "val.col_cases", "val.col_digest", ""].forEach((k) => cell(head, k ? t(k) : "", "th")); runs.appendChild(head);
+    (VA.runs || []).forEach((r) => {
+      const tr = el("tr"); cell(tr, String(r.id)); cell(tr, when(r.created_at)); cell(tr, r.created_by); cell(tr, r.engine_version);
+      const v = cell(tr, t("val.verdict_" + r.verdict, { n: r.failed })); v.className = r.verdict === "fail" ? "status-alarm" : r.verdict === "pass" ? "status-ok" : "status-warning";
+      cell(tr, String(r.cases)); cell(tr, r.digest.slice(0, 12)).title = r.digest;
+      const a = cell(tr, "");
+      ["en", "zh-TW"].forEach((lang) => { const l = el("a", "", t("val.report_" + lang)); l.href = `/api/validation/runs/${r.id}/report?lang=${lang}`; l.target = "_blank"; l.rel = "noopener"; a.appendChild(l); a.appendChild(document.createTextNode(" ")); });
+      runs.appendChild(tr);
+    });
+    if (!(VA.runs || []).length) runs.appendChild(el("tr")).appendChild(el("td", "muted", t("val.no_runs")));
+    const cases = $("#va-cases"); cases.replaceChildren();
+    const ch = el("tr"); ["val.f_name", "val.f_source", "val.col_values", "val.col_expected", ""].forEach((k) => cell(ch, k ? t(k) : "", "th")); cases.appendChild(ch);
+    VA.cases.forEach((c) => {
+      const tr = el("tr"); cell(tr, c.name); cell(tr, c.source); cell(tr, String(c.n_values)); cell(tr, String(c.expected.length));
+      const a = cell(tr, "");
+      const edit = el("button", "", t("plan.edit")); edit.addEventListener("click", () => openCaseEditor(c.id)); a.appendChild(edit);
+      cases.appendChild(tr);
+    });
+    if (!VA.cases.length) cases.appendChild(el("tr")).appendChild(el("td", "muted", t("val.no_cases")));
+  }
+  async function openCaseEditor(id) {
+    let c = { name: "", description: "", source: "", values: [], subgroup_size: null, request: {}, expected: [] };
+    if (id) await guarded(async () => { c = await api(`/api/validation/cases/${id}`); });
+    VA.editing = id || "new";
+    $("#va-editor-title").textContent = id ? t("val.edit_title", { name: c.name }) : t("val.new");
+    $("#vae-name").value = c.name; $("#vae-description").value = c.description; $("#vae-source").value = c.source;
+    $("#vae-subgroup").value = c.subgroup_size ?? "";
+    const { stage, lsl, usl, ...rest } = c.request;
+    $("#vae-stage").value = stage || "production"; $("#vae-lsl").value = lsl ?? ""; $("#vae-usl").value = usl ?? "";
+    $("#vae-settings").value = Object.keys(rest).length ? JSON.stringify(rest) : "";
+    $("#vae-values").value = c.values.join("\n");
+    $("#vae-expected").value = c.expected.map((e) => `${e.path} ${e.value} ${e.tol}`).join("\n");
+    $("#va-editor").hidden = false;
+  }
+  function readCaseEditor() {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    let extra = {};
+    const raw = $("#vae-settings").value.trim();
+    if (raw) { try { extra = JSON.parse(raw); } catch (e) { throw { code: "invalid_input", message: t("val.bad_settings"), params: { message: t("val.bad_settings") } }; } }
+    const request = { ...extra, stage: $("#vae-stage").value };
+    if (num("#vae-lsl") !== null) request.lsl = num("#vae-lsl");
+    if (num("#vae-usl") !== null) request.usl = num("#vae-usl");
+    const values = $("#vae-values").value.split(/[\s;,]+/).filter(Boolean).map(Number);
+    const expected = $("#vae-expected").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+      const [path, value, tol] = l.split(/\s+/);
+      return { path, value: Number(value), ...(tol !== undefined ? { tol: Number(tol) } : {}) };
+    });
+    return { name: $("#vae-name").value, description: $("#vae-description").value, source: $("#vae-source").value, values, subgroup_size: num("#vae-subgroup"), request, expected };
+  }
+  async function saveCase() {
+    await guarded(async () => {
+      const record = readCaseEditor();
+      if (VA.editing === "new") await post("/api/validation/cases", { record }); else await put(`/api/validation/cases/${VA.editing}`, { record });
+      $("#va-editor").hidden = true;
+      VA.cases = (await api("/api/validation/cases")).cases;
+    });
+    renderValidation();
+  }
+  async function runValidation() {
+    await guarded(async () => { await post("/api/validation/runs", {}); VA.runs = (await api("/api/validation/runs")).runs; });
+    renderValidation();
+  }
+  function wireValidation() {
+    $("#va-run").addEventListener("click", runValidation);
+    $("#va-new").addEventListener("click", () => openCaseEditor(null));
+    $("#vae-save").addEventListener("click", saveCase);
+    $("#vae-cancel").addEventListener("click", () => { $("#va-editor").hidden = true; });
+  }
+
   // ---------------------------------------------------------------- control plan and SPC roles (draft 6.7, 6.8)
   const PL = { list: [], view: null, editing: null, lines: [], lineIndex: null, roles: null, person: null, people: [] };
   const showPlanView = (which) => { ["#pl-list-view", "#pl-editor", "#pl-detail"].forEach((sel) => { $(sel).hidden = sel !== which; }); };
@@ -2506,6 +2584,7 @@
     if (state.user && MS.view && !$("#ms-detail").hidden) renderMsa();
     if (state.user && PL.view && !$("#pl-detail").hidden) renderPlan();
     if (state.user && !$("#pl-list-view").hidden && !$("#tab-plan").hidden) renderPlanList();
+    if (state.user && !$("#tab-validation").hidden) renderValidation();
     if (state.user && PL.roles && !$("#tab-roles").hidden) { renderRoleMatrix(); renderResponsibilities(); renderPeople(); renderPerson(); }
     if (state.user && !$("#ms-list-view").hidden && !$("#tab-msa").hidden) loadMsa();
     if (state.user && !$("#st-list-view").hidden && !$("#tab-study").hidden) loadStudies();
@@ -2552,6 +2631,7 @@
     wireStudy();
     wireMsa();
     wirePlan();
+    wireValidation();
     wireRoles();
     $("#a-profile").addEventListener("change", onProfileChange);
     $("#pf-new").addEventListener("click", () => openProfileEditor(null));

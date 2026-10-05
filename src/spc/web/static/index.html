@@ -58,6 +58,7 @@
   <button role="tab" data-tab="plan" aria-selected="false" data-i18n="nav.plan"></button>
   <button role="tab" data-tab="roles" aria-selected="false" data-i18n="nav.roles"></button>
   <button role="tab" data-tab="msa" aria-selected="false" data-i18n="nav.msa"></button>
+  <button role="tab" data-tab="validation" aria-selected="false" data-i18n="nav.validation"></button>
   <button role="tab" data-tab="study" aria-selected="false" data-i18n="nav.study"></button>
   <button role="tab" data-tab="saved" aria-selected="false" data-i18n="nav.saved"></button>
   <button role="tab" data-tab="tools" aria-selected="false" data-i18n="nav.tools"></button>
@@ -777,6 +778,37 @@
 </section>
 
 <!-- saved -->
+<!-- Verification and validation of the software (draft 11.2) -->
+<section id="tab-validation" class="panel" hidden>
+  <h2 data-i18n="val.title"></h2>
+  <p class="note" data-i18n="val.intro"></p>
+  <p data-needs="engineer"><button id="va-run" class="primary" data-i18n="val.run"></button></p>
+  <h3 data-i18n="val.runs"></h3>
+  <div class="scroll"><table id="va-runs" class="grid"></table></div>
+  <h3 data-i18n="val.cases"></h3>
+  <p class="note" data-i18n="val.cases_note"></p>
+  <div class="scroll"><table id="va-cases" class="grid"></table></div>
+  <p data-needs="engineer"><button id="va-new" data-i18n="val.new"></button></p>
+  <div id="va-editor" class="card" hidden>
+    <h4 id="va-editor-title"></h4>
+    <div class="form-grid">
+      <label><span data-i18n="val.f_name"></span><input id="vae-name" type="text" maxlength="100"></label>
+      <label class="wide"><span data-i18n="val.f_description"></span><input id="vae-description" type="text" maxlength="2000"></label>
+      <label class="wide"><span data-i18n="val.f_source"></span><input id="vae-source" type="text" maxlength="500"></label>
+      <label><span data-i18n="val.f_subgroup"></span><input id="vae-subgroup" type="number" min="2" max="100" step="1"></label>
+      <label><span data-i18n="analysis.lsl"></span><input id="vae-lsl" type="number" step="any"></label>
+      <label><span data-i18n="analysis.usl"></span><input id="vae-usl" type="number" step="any"></label>
+      <label><span data-i18n="val.f_stage"></span>
+        <select id="vae-stage"><option value="production">production</option><option value="preliminary">preliminary</option><option value="machine">machine</option></select></label>
+      <label class="wide"><span data-i18n="val.f_settings"></span><input id="vae-settings" type="text" placeholder='{"alpha": 0.0027}'></label>
+      <label class="wide"><span data-i18n="val.f_values"></span><textarea id="vae-values" rows="5"></textarea></label>
+      <label class="wide"><span data-i18n="val.f_expected"></span><textarea id="vae-expected" rows="5" placeholder="indices.pk 1.2345 1e-6"></textarea></label>
+    </div>
+    <p class="note" data-i18n="val.f_expected_note"></p>
+    <p class="row"><button id="vae-save" class="primary" data-i18n="plan.save"></button><button id="vae-cancel" data-i18n="admin.pf_cancel"></button></p>
+  </div>
+</section>
+
 <!-- Control plan (draft 6.7) -->
 <section id="tab-plan" class="panel" hidden>
   <h2 data-i18n="plan.title"></h2>

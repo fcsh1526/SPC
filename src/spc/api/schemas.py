@@ -204,6 +204,12 @@ class ReasonBody(Strict):
     reason: str = Field(max_length=2000)
 
 
+class ValidationCaseBody(Strict):
+    """A reference case of the user; checked in spc.validation.custom."""
+
+    record: dict
+
+
 class MsaBody(Strict):
     """A measurement system: name, resolution, tolerance and policy; checked in spc.msa.service.validate_record."""
 

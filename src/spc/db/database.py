@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE users (
@@ -190,6 +190,41 @@ CREATE TABLE spc_people (
     data       TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+;
+CREATE TABLE validation_cases (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+);
+CREATE TABLE validation_runs (
+    id         INTEGER PRIMARY KEY,
+    data       TEXT NOT NULL,
+    digest     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+);
+"""
+
+
+MIGRATION_6_TO_7 = """
+CREATE TABLE validation_cases (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+);
+CREATE TABLE validation_runs (
+    id         INTEGER PRIMARY KEY,
+    data       TEXT NOT NULL,
+    digest     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+)
 """
 
 
@@ -277,7 +312,7 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2, 3, 4, 5):
+        elif version in (1, 2, 3, 4, 5, 6):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
@@ -295,11 +330,18 @@ class Database:
                 self._conn.execute(MIGRATION_4_TO_5)
                 self._conn.execute("PRAGMA user_version = 5")
                 self._conn.execute("COMMIT")
-            self._conn.execute("BEGIN IMMEDIATE")  # version 6 adds the control plans and the SPC roles of people
-            for statement in MIGRATION_5_TO_6.split(";"):
+            if version <= 5:
+                self._conn.execute("BEGIN IMMEDIATE")  # version 6 adds the control plans and the SPC roles of people
+                for statement in MIGRATION_5_TO_6.split(";"):
+                    if statement.strip():
+                        self._conn.execute(statement)
+                self._conn.execute("PRAGMA user_version = 6")
+                self._conn.execute("COMMIT")
+            self._conn.execute("BEGIN IMMEDIATE")  # version 7 adds the validation cases and runs
+            for statement in MIGRATION_6_TO_7.split(";"):
                 if statement.strip():
                     self._conn.execute(statement)
-            self._conn.execute("PRAGMA user_version = 6")
+            self._conn.execute("PRAGMA user_version = 7")
             self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")

@@ -25,6 +25,8 @@ from spc.api.monitors import add_monitor_routes
 from spc.api.studies import add_study_routes
 from spc.api.msa import add_msa_routes
 from spc.api.plans import add_plan_routes
+from spc.api.validation import add_validation_routes
+from spc.validation.service import ValidationError, ValidationService
 from spc.plan.model import PlanError
 from spc.plan.service import PeopleService, PlanNameTaken, PlanNotFound, PlanService
 from spc.msa.service import MsaProblem, MsaService, SystemNameTaken, SystemNotFound
@@ -164,6 +166,8 @@ def create_app(
     people = PeopleService(db, audit, auth)
     plan_service = PlanService(db, audit, people, monitors, msa_systems)
     app.state.people, app.state.plans = people, plan_service
+    validation_service = ValidationService(db, audit)
+    app.state.validation = validation_service
 
     # ------------------------------------------------------------------ plumbing
 
@@ -218,6 +222,10 @@ def create_app(
 
     @app.exception_handler(PlanError)
     async def _plan_error(_: Request, exc: PlanError):
+        return _error(exc.status, exc.code, str(exc), exc.params)
+
+    @app.exception_handler(ValidationError)
+    async def _validation_error(_: Request, exc: ValidationError):
         return _error(exc.status, exc.code, str(exc), exc.params)
 
     @app.exception_handler(PlanNotFound)
@@ -303,6 +311,7 @@ def create_app(
     add_study_routes(app, studies, reader, writer, admin)
     add_msa_routes(app, msa_systems, reader, writer, admin)
     add_plan_routes(app, plan_service, people, reader, writer, admin)
+    add_validation_routes(app, validation_service, reader, writer, admin)
 
     # ------------------------------------------------------------------ import
 
