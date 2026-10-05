@@ -492,6 +492,7 @@
     await guarded(async () => {
       const body = buildAnalysisBody();
       state.result = await post(`/api/datasets/${state.dataset.id}/analyze`, body);
+      fillMsaSelect($("#rp-msa"), $("#rp-msa").value);
       state.lastAnalysisBody = body;
       state.reportOut = null;
       renderReportOut();
@@ -2215,7 +2216,7 @@
     if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); refreshImportForm(); }
     if (state.dataset) renderData();
     if (state.result) renderResult();
-    fillMsaSelect($("#rp-msa"), $("#rp-msa").value);
+    if (state.user) fillMsaSelect($("#rp-msa"), $("#rp-msa").value);
     renderModelSuggestion();
     renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
     if (state.user && M.view && !$("#mon-detail").hidden) renderMonitor();

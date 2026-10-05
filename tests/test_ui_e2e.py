@@ -211,6 +211,7 @@ def test_report_and_archive_check_in_the_browser(server, browser, tmp_path):
     page.fill("#rp-uncertainty", "0.0211")
     page.fill("#rp-recommendations", "keep sampling")
     page.select_option("#rp-language", "en")
+    assert page.locator("#rp-msa option").count() >= 1  # "(none)" and the measurement systems
     page.click("#rp-create")
     expect(page.locator("#rp-created")).to_contain_text("was created")
     href = page.locator("#rp-open").get_attribute("href")
