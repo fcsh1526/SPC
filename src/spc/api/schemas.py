@@ -195,6 +195,17 @@ class ReasonBody(Strict):
     reason: str = Field(max_length=2000)
 
 
+class StudyBody(Strict):
+    """The descriptive part of a machine performance study; checked in spc.study.checklist.validate_record."""
+
+    record: dict
+
+
+class StudyItemBody(Strict):
+    status: str = Field(max_length=20)
+    note: str = Field(default="", max_length=2000)
+
+
 class EventBody(Strict):
     kind: Literal["ack", "action", "observation", "escalation"]
     step: str = Field(default="", max_length=40)

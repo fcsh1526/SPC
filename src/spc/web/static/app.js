@@ -153,6 +153,7 @@
     $$("main > section").forEach((s) => { s.hidden = s.id !== "tab-" + name; });
     if (name === "monitor") loadMonitors();
     if (name === "saved") loadSaved();
+    if (name === "study") loadStudies();
     if (name === "admin") loadAdmin();
     if (name === "password") renderPasswordPanel();
   }
@@ -1710,6 +1711,143 @@
     $("#og-report").addEventListener("click", ongoingReport);
   }
 
+  // ---------------------------------------------------------------- machine performance studies (draft 8.1 to 8.3)
+  const ST = { view: null, editing: null };
+  const canEditStudy = () => state.user && ["engineer", "admin"].includes(state.user.role);
+  const put = (path, body) => api(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const showStudyView = (which) => { ["#st-list-view", "#st-editor", "#st-detail"].forEach((sel) => { $(sel).hidden = sel !== which; }); };
+  const EFFECTIVE_CLASS = { ok: "status-ok", warn: "status-warning", fail: "status-alarm", open: "status-alarm", deviation: "status-warning", not_applicable: "", not_done: "" };
+
+  async function loadStudies() {
+    if (ST.view && !$("#st-detail").hidden) return;  // an open study stays open when the tab is shown again
+    await guarded(async () => { renderStudyList((await api("/api/studies")).studies); showStudyView("#st-list-view"); });
+  }
+  function renderStudyList(list) {
+    const table = $("#st-list"); table.replaceChildren();
+    const head = el("tr");
+    ["study.f_name", "study.f_machine", "study.f_characteristic", "study.f_station", "study.col_state", ""].forEach((k) => cell(head, k ? t(k) : "", "th"));
+    table.appendChild(head);
+    list.forEach((s) => {
+      const tr = el("tr");
+      cell(tr, s.name); cell(tr, s.machine); cell(tr, s.characteristic); cell(tr, s.station);
+      const text = s.closed ? t("study.state_closed", { at: when(s.closed.at) }) : s.ready ? t("study.state_ready") : t("study.state_blocked", { n: s.blockers });
+      const c = cell(tr, text + (s.flagged ? ` · ${t("study.state_flagged", { n: s.flagged })}` : "")); c.className = s.closed || s.ready ? "status-ok" : "status-warning";
+      const open = el("button", "", t("mon.open")); open.addEventListener("click", () => openStudy(s.id));
+      cell(tr, "").appendChild(open);
+      table.appendChild(tr);
+    });
+    if (!list.length) table.appendChild(el("tr")).appendChild(el("td", "muted", t("study.none")));
+  }
+  async function openStudy(id) {
+    await guarded(async () => { ST.view = await api(`/api/studies/${id}`); });
+    if (ST.view) { renderStudy(); showStudyView("#st-detail"); }  // after guarded: it gives the buttons their old state back
+  }
+  function resultText(row) {
+    const r = row.result;
+    if (!r) return "";
+    const p = { ...r };
+    if (r.result === "unknown") return t("study.res.unknown." + r.reason);
+    if (r.offset_share !== undefined) p.share = sig(r.offset_share * 100, 3), p.limit = sig(r.limit * 100, 3);
+    if (r.location !== undefined) { p.loc = sig(r.location, 5); p.lo = sig(r.area[0], 5); p.hi = sig(r.area[1], 5); p.range = r.range === null ? "–" : sig(r.range, 4); p.rlim = sig(r.range_limit, 4); }
+    if (r.p_value !== undefined) p.p = sig(r.p_value, 3);
+    if (r.cycles !== undefined) p.cycles = r.cycles === null ? "–" : r.cycles;
+    const key = `study.res.${row.key}.${r.result === "fail" && r.reason ? r.reason : r.result}`;
+    return key in state.msgs || key in state.fallback ? t(key, p) : t(`study.res.${row.key}.${r.result}`, p);
+  }
+  function renderStudy() {
+    const { study: s, evaluation: ev } = ST.view;
+    $("#st-title").textContent = s.name;
+    $("#st-sub").textContent = t("study.sub", { machine: s.machine || "–", characteristic: s.characteristic, station: s.station || "–", rev: ST.view.study.revision });
+    $("#st-verdict").textContent = s.closed ? "" : ev.ready ? t("study.verdict_ready", { flagged: ev.flagged.length }) : t("study.verdict_blocked", { n: ev.blockers.length });
+    $("#st-verdict").className = "strong " + (ev.ready ? "status-ok" : "status-warning");
+    const closedLine = $("#st-closed-line");
+    closedLine.hidden = !s.closed;
+    if (s.closed) closedLine.textContent = t("study.closed_line", { by: s.closed.by, at: when(s.closed.at), reason: s.closed.reason });
+    const edit = canEditStudy();
+    $("#st-edit").hidden = !edit || !!s.closed;
+    $("#st-close-box").hidden = !edit;
+    $("#st-close-label").textContent = t(s.closed ? "study.reopen_reason" : "study.close_reason");
+    $("#st-close").textContent = t(s.closed ? "study.reopen" : "study.close");
+    $("#st-close").disabled = !s.closed && !ev.ready;
+    const table = $("#st-items"); table.replaceChildren();
+    const head = el("tr");
+    ["study.col_section", "study.col_item", "study.col_auto", "study.col_status", "study.col_note", "study.col_result"].forEach((k) => cell(head, t(k), "th"));
+    table.appendChild(head);
+    ev.items.forEach((row) => {
+      const tr = el("tr", row.blocking ? "blocking" : "");
+      cell(tr, row.section);
+      cell(tr, t("study.item." + row.key) + (row.optional ? ` (${t("study.optional")})` : ""));
+      cell(tr, resultText(row));
+      const sel = el("select"), choices = row.auto ? ["open", "deviation", "not_applicable"] : ["open", "ok", "not_applicable", "deviation"];
+      choices.forEach((c) => { const o = el("option", "", t(row.auto && c === "open" ? "study.status_auto" : "study.status_" + c)); o.value = c; sel.appendChild(o); });
+      sel.value = row.status; sel.disabled = !edit || !!s.closed;
+      cell(tr, "").appendChild(sel);
+      const note = el("input"); note.type = "text"; note.maxLength = 2000; note.value = row.note || ""; note.disabled = !edit || !!s.closed;
+      note.title = row.by ? `${row.by}, ${when(row.at)}` : "";
+      const nc = cell(tr, ""); nc.appendChild(note);
+      if (edit && !s.closed) {
+        const save = el("button", "", t("study.save_item"));
+        save.addEventListener("click", () => saveStudyItem(row.key, sel.value, note.value));
+        nc.appendChild(save);
+      }
+      const eff = cell(tr, t("study.eff_" + row.effective)); eff.className = EFFECTIVE_CLASS[row.effective] || "";
+      table.appendChild(tr);
+    });
+  }
+  async function saveStudyItem(key, status, note) {
+    await guarded(async () => { ST.view = await put(`/api/studies/${ST.view.study.id}/items/${key}`, { status, note }); });
+    renderStudy();
+  }
+  async function closeOrReopenStudy() {
+    const s = ST.view.study, reason = $("#st-close-reason").value;
+    await guarded(async () => {
+      ST.view = await post(`/api/studies/${s.id}/${s.closed ? "reopen" : "close"}`, { reason });
+      $("#st-close-reason").value = "";
+    });
+    renderStudy();
+  }
+  async function openStudyEditor(study) {
+    ST.editing = study ? study.id : "new";
+    $("#st-editor-title").textContent = study ? t("study.edit_title", { name: study.name }) : t("study.new");
+    const s = study || { name: "", machine: "", characteristic: "", station: "", unit: "", dataset_id: null, specs: {}, sample: {}, preproduction: {} };
+    ["name", "machine", "characteristic", "station", "unit"].forEach((k) => { $("#se-" + k).value = s[k] || ""; });
+    $("#se-lsl").value = s.specs.lsl ?? ""; $("#se-usl").value = s.specs.usl ?? ""; $("#se-natural").value = s.specs.natural || "";
+    $("#se-reduced-by").value = s.sample.reduced_approved_by || ""; $("#se-reduced-reason").value = s.sample.reduced_reason || "";
+    $("#se-wear").checked = !!s.sample.tool_wear_high; $("#se-cycles").value = s.sample.dressing_cycles ?? "";
+    $("#se-pre-one").value = s.preproduction.one ?? ""; $("#se-pre-five").value = (s.preproduction.five || []).join(", ");
+    const sel = $("#se-dataset"); await fillDatasetSelect(sel);
+    const none = el("option", "", t("study.no_dataset")); none.value = ""; sel.insertBefore(none, sel.firstChild);
+    sel.value = s.dataset_id || "";
+    showStudyView("#st-editor");
+  }
+  function readStudyEditor() {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const five = $("#se-pre-five").value.trim();
+    return {
+      name: $("#se-name").value, machine: $("#se-machine").value, characteristic: $("#se-characteristic").value, station: $("#se-station").value, unit: $("#se-unit").value,
+      dataset_id: $("#se-dataset").value || null,
+      specs: { lsl: num("#se-lsl"), usl: num("#se-usl"), natural: $("#se-natural").value || null },
+      sample: { reduced_approved_by: $("#se-reduced-by").value, reduced_reason: $("#se-reduced-reason").value, tool_wear_high: $("#se-wear").checked, dressing_cycles: num("#se-cycles") },
+      preproduction: { one: num("#se-pre-one"), five: five === "" ? null : five.split(/[\s,;]+/).filter((x) => x !== "").map(Number) },
+    };
+  }
+  async function saveStudy() {
+    await guarded(async () => {
+      const record = readStudyEditor();
+      ST.view = ST.editing === "new" ? await post("/api/studies", { record }) : await put(`/api/studies/${ST.editing}`, { record });
+      ST.saved = true;
+    });
+    if (ST.saved) { ST.saved = false; renderStudy(); showStudyView("#st-detail"); }
+  }
+  function wireStudy() {
+    $("#st-new").addEventListener("click", () => openStudyEditor(null));
+    $("#se-cancel").addEventListener("click", () => { if (ST.editing !== "new" && ST.view) showStudyView("#st-detail"); else { ST.view = null; loadStudies(); } });
+    $("#se-save").addEventListener("click", saveStudy);
+    $("#st-back").addEventListener("click", () => { ST.view = null; loadStudies(); });
+    $("#st-edit").addEventListener("click", () => openStudyEditor(ST.view.study));
+    $("#st-close").addEventListener("click", closeOrReopenStudy);
+  }
+
   // ---------------------------------------------------------------- saved data and reports
   function cell(tr, text, tag = "td") { const c = el(tag, "", text); tr.appendChild(c); return c; }
   function linkButton(label, href, newTab) {
@@ -1856,6 +1994,8 @@
     if (state.result) renderResult();
     renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
     if (state.user && M.view && !$("#mon-detail").hidden) renderMonitor();
+    if (state.user && ST.view && !$("#st-detail").hidden) renderStudy();
+    if (state.user && !$("#st-list-view").hidden && !$("#tab-study").hidden) loadStudies();
     if (state.user && !$("#mon-list-view").hidden && !$("#tab-monitor").hidden) renderMonitorList();
     if (state.user && state.profile) { onProfileChange(); }
     if (state.user && !$("#tab-saved").hidden) loadSaved();
@@ -1895,6 +2035,7 @@
     $("#password-form").addEventListener("submit", (e) => { e.preventDefault(); doChangePassword(); });
     $("#nu-create").addEventListener("click", createUser);
     wireMonitor();
+    wireStudy();
     $("#a-profile").addEventListener("change", onProfileChange);
     $("#pf-new").addEventListener("click", () => openProfileEditor(null));
     $("#pf-save").addEventListener("click", saveProfile);

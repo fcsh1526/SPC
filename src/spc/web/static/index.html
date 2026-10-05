@@ -55,6 +55,7 @@
   <button role="tab" data-tab="data" aria-selected="false" aria-disabled="true" data-i18n="nav.data"></button>
   <button role="tab" data-tab="analysis" aria-selected="false" aria-disabled="true" data-i18n="nav.analysis"></button>
   <button role="tab" data-tab="monitor" aria-selected="false"><span data-i18n="nav.monitor"></span> <span id="alert-badge" class="badge" hidden></span></button>
+  <button role="tab" data-tab="study" aria-selected="false" data-i18n="nav.study"></button>
   <button role="tab" data-tab="saved" aria-selected="false" data-i18n="nav.saved"></button>
   <button role="tab" data-tab="tools" aria-selected="false" data-i18n="nav.tools"></button>
   <button role="tab" data-tab="admin" data-needs="admin" aria-selected="false" data-i18n="nav.admin"></button>
@@ -753,6 +754,67 @@
 </section>
 
 <!-- saved -->
+<!-- Machine performance studies: the checklist of draft 8.1 to 8.3 -->
+<section id="tab-study" class="panel" hidden>
+  <h2 data-i18n="study.title"></h2>
+  <div id="st-list-view">
+    <p class="note" data-i18n="study.intro"></p>
+    <div class="scroll"><table id="st-list" class="grid"></table></div>
+    <p data-needs="engineer"><button id="st-new" class="primary" data-i18n="study.new"></button></p>
+  </div>
+
+  <div id="st-editor" class="card" hidden>
+    <h3 id="st-editor-title"></h3>
+    <div class="form-grid">
+      <label><span data-i18n="study.f_name"></span><input id="se-name" type="text" maxlength="100"></label>
+      <label><span data-i18n="study.f_machine"></span><input id="se-machine" type="text" maxlength="200"></label>
+      <label><span data-i18n="study.f_characteristic"></span><input id="se-characteristic" type="text" maxlength="200"></label>
+      <label><span data-i18n="study.f_station"></span><input id="se-station" type="text" maxlength="100"></label>
+      <label><span data-i18n="study.f_unit"></span><input id="se-unit" type="text" maxlength="40"></label>
+      <label><span data-i18n="study.f_dataset"></span><select id="se-dataset"></select></label>
+    </div>
+    <fieldset>
+      <legend data-i18n="study.f_specs"></legend>
+      <div class="form-grid">
+        <label><span data-i18n="analysis.lsl"></span><input id="se-lsl" type="number" step="any"></label>
+        <label><span data-i18n="analysis.usl"></span><input id="se-usl" type="number" step="any"></label>
+        <label><span data-i18n="study.f_natural"></span>
+          <select id="se-natural"><option value="" data-i18n="study.natural_none"></option><option value="lsl" data-i18n="study.natural_lsl"></option><option value="usl" data-i18n="study.natural_usl"></option></select></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="study.f_sample"></legend>
+      <div class="form-grid">
+        <label><span data-i18n="study.f_reduced_by"></span><input id="se-reduced-by" type="text" maxlength="200"></label>
+        <label class="wide"><span data-i18n="study.f_reduced_reason"></span><input id="se-reduced-reason" type="text" maxlength="1000"></label>
+        <label class="check"><input id="se-wear" type="checkbox"><span data-i18n="study.f_tool_wear"></span></label>
+        <label><span data-i18n="study.f_cycles"></span><input id="se-cycles" type="number" min="0" step="any"></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="study.f_pre"></legend>
+      <div class="form-grid">
+        <label><span data-i18n="study.f_pre_one"></span><input id="se-pre-one" type="number" step="any"></label>
+        <label><span data-i18n="study.f_pre_five"></span><input id="se-pre-five" type="text" placeholder="10.00, 10.01, 9.99, 10.02, 10.00"></label>
+      </div>
+    </fieldset>
+    <p class="row"><button id="se-save" class="primary" data-i18n="study.save"></button><button id="se-cancel" data-i18n="admin.pf_cancel"></button></p>
+  </div>
+
+  <div id="st-detail" hidden>
+    <p class="row"><button id="st-back" data-i18n="study.back"></button><button id="st-edit" data-needs="engineer" data-i18n="study.edit"></button></p>
+    <h3 id="st-title"></h3>
+    <p id="st-sub" class="muted"></p>
+    <p id="st-verdict" class="strong"></p>
+    <div class="scroll"><table id="st-items" class="grid"></table></div>
+    <div id="st-close-box" class="card" data-needs="engineer">
+      <p class="row"><label class="wide"><span id="st-close-label"></span><input id="st-close-reason" type="text" maxlength="2000"></label></p>
+      <p class="row"><button id="st-close" class="primary"></button></p>
+    </div>
+    <p id="st-closed-line" class="strong" hidden></p>
+  </div>
+</section>
+
 <section id="tab-saved" class="panel" hidden>
   <h2 data-i18n="saved.title"></h2>
   <p class="note" data-i18n="saved.intro"></p>

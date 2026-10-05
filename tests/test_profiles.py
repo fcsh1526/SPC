@@ -148,14 +148,14 @@ def test_customer_targets_replace_the_draft_values_in_the_verdict():
 # ------------------------------------------------------------------ the database
 
 def old_database(path, version):
-    """A database as an older release made it: no profiles before 2, no monitors and no 'operator' role before 3."""
+    """A database as an older release made it: no profiles before 2, no monitors and no 'operator' role before 3, no studies before 4."""
     conn = sqlite3.connect(path)
     for statement in SCHEMA.split(";"):
-        if not statement.strip() or "monitor" in statement:
+        if not statement.strip() or "studies" in statement or (version < 3 and "monitor" in statement):
             continue
         if version < 2 and "profiles" in statement:
             continue
-        conn.execute(statement.replace("'viewer', 'operator'", "'viewer'"))
+        conn.execute(statement if version >= 3 else statement.replace("'viewer', 'operator'", "'viewer'"))
     conn.execute(f"PRAGMA user_version = {version}")
     conn.execute("INSERT INTO users (username, password_hash, role, created_at, updated_at) VALUES ('old', 'x', 'admin', 'a', 'a')")
     conn.execute("INSERT INTO sessions (token_hash, user_id, csrf, created_at, last_seen, expires_at) VALUES ('t', 1, 'c', 1, 1, 9e9)")
@@ -163,20 +163,20 @@ def old_database(path, version):
     conn.close()
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3])
 def test_an_old_database_is_migrated_without_losing_anything(tmp_path, version):
     path = tmp_path / "old.sqlite3"
     old_database(path, version)
     db = Database(path)
-    assert db.one("PRAGMA user_version")[0] == 3
+    assert db.one("PRAGMA user_version")[0] == 4
     assert db.one("SELECT username FROM users")["username"] == "old"  # nothing was lost
     assert db.one("SELECT COUNT(*) AS n FROM sessions")["n"] == 1  # the rebuild did not cascade into the sessions
-    assert db.all("SELECT * FROM profiles") == [] and db.all("SELECT * FROM monitors") == []
+    assert db.all("SELECT * FROM profiles") == [] and db.all("SELECT * FROM monitors") == [] and db.all("SELECT * FROM studies") == []
     db.execute("INSERT INTO users (username, password_hash, role, created_at, updated_at) VALUES ('op', 'x', 'operator', 'a', 'a')")
     with pytest.raises(sqlite3.IntegrityError):
         db.execute("INSERT INTO users (username, password_hash, role, created_at, updated_at) VALUES ('bad', 'x', 'boss', 'a', 'a')")
     db.close()
-    assert Database(path).one("PRAGMA user_version")[0] == 3  # opens again without migrating twice
+    assert Database(path).one("PRAGMA user_version")[0] == 4  # opens again without migrating twice
 
 
 # ------------------------------------------------------------------ the API

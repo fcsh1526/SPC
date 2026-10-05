@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from spc import __version__
 from spc.api.accounts import add_account_routes
 from spc.api.monitors import add_monitor_routes
+from spc.api.studies import add_study_routes
 from spc.api.errors import ApiError, error_response as _error
 from spc.api.schemas import (
     AnalyzeBody,
@@ -39,6 +40,8 @@ from spc.monitor.model import MonitorError
 from spc.monitor.notify import Notifier
 from spc.monitor.service import MonitorService
 from spc.monitor.store import IncidentNotFound, MonitorNameTaken, MonitorNotFound
+from spc.study.checklist import StudyError
+from spc.study.service import StudyNameTaken, StudyNotFound, StudyService
 from spc.core.arl_oc import alarm_probability, arl, required_subgroup_size
 from spc.core.capability import Stage, TargetAdjustmentNotAllowed, required_targets
 from spc.core.charts import attribute as attr
@@ -147,6 +150,8 @@ def create_app(
     app.state.profiles = profiles
     monitors = MonitorService(db, audit, store, notifiers or [])
     app.state.monitors = monitors
+    studies = StudyService(db, audit, store)
+    app.state.studies = studies
 
     # ------------------------------------------------------------------ plumbing
 
@@ -199,6 +204,18 @@ def create_app(
     async def _incident_missing(_: Request, exc: IncidentNotFound):
         return _error(404, "incident_not_found", "incident not found")
 
+    @app.exception_handler(StudyError)
+    async def _study_error(_: Request, exc: StudyError):
+        return _error(exc.status, exc.code, str(exc), exc.params)
+
+    @app.exception_handler(StudyNotFound)
+    async def _study_missing(_: Request, exc: StudyNotFound):
+        return _error(404, "study_not_found", "study not found")
+
+    @app.exception_handler(StudyNameTaken)
+    async def _study_taken(_: Request, exc: StudyNameTaken):
+        return _error(409, "study_name_taken", "a study with this name exists already")
+
     @app.exception_handler(MonitorNameTaken)
     async def _monitor_taken(_: Request, exc: MonitorNameTaken):
         return _error(409, "monitor_name_taken", "a monitor with this name exists already")
@@ -247,6 +264,7 @@ def create_app(
 
     add_account_routes(app, auth, audit, admin, secure_cookies)
     add_monitor_routes(app, monitors, store, reports, audit, db, reader, operator, writer, admin)
+    add_study_routes(app, studies, reader, writer, admin)
 
     # ------------------------------------------------------------------ import
 

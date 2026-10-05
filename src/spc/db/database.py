@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE users (
@@ -159,6 +159,15 @@ CREATE TABLE audit (
     prev_hash TEXT NOT NULL,
     hash      TEXT NOT NULL
 );
+CREATE TABLE studies (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    revision   INTEGER NOT NULL DEFAULT 1,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+);
 """
 
 
@@ -166,6 +175,17 @@ def _monitor_tables() -> str:
     start = SCHEMA.index("CREATE TABLE monitors")
     return SCHEMA[start : SCHEMA.index("CREATE TABLE audit (")]
 
+
+MIGRATION_3_TO_4 = """
+CREATE TABLE studies (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    revision   INTEGER NOT NULL DEFAULT 1,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+)"""
 
 MIGRATION_1_TO_2 = """
 CREATE TABLE profiles (
@@ -209,13 +229,18 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2):
+        elif version in (1, 2, 3):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
                 self._conn.execute("PRAGMA user_version = 2")
                 self._conn.execute("COMMIT")
-            self._migrate_2_to_3()
+            if version <= 2:
+                self._migrate_2_to_3()
+            self._conn.execute("BEGIN IMMEDIATE")  # version 4 adds the machine performance studies
+            self._conn.execute(MIGRATION_3_TO_4)
+            self._conn.execute("PRAGMA user_version = 4")
+            self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")
 

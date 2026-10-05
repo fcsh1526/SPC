@@ -1145,3 +1145,68 @@ def test_mcusum_monitor_in_the_browser(server, browser, app):
     expect(page.locator("#md-limits")).to_contain_text("決策界限")
     assert problems == [], problems
     ctx.close()
+
+
+def test_machine_study_checklist_in_the_browser(server, browser, app):
+    import numpy as np
+
+    from spc.data import Dataset
+    from spc.study import checklist as cl
+
+    expect = playwright_sync.expect
+    problems = []
+    rng = np.random.default_rng(8)
+    times = [f"2026-03-02T08:{i // 60:02d}:{i % 60:02d}" for i in range(50)]
+    admin = next(u for u in app.state.auth.list_users() if u.username == "admin")
+    app.state.store.add(Dataset.from_values([float(v) for v in rng.normal(10.0, 0.02, 50)], timestamp=times), admin.id, "Grinder run 1")
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=study]")
+    page.click("#st-new")
+    page.fill("#se-name", "Grinder 4 bore")
+    page.fill("#se-machine", "Grinder 4")
+    page.fill("#se-characteristic", "bore diameter")
+    page.fill("#se-station", "spindle 1")
+    page.select_option("#se-dataset", label="Grinder run 1 (50)")
+    page.fill("#se-lsl", "9.9")
+    page.fill("#se-usl", "10.1")
+    page.fill("#se-pre-one", "10.01")
+    page.click("#se-save")
+    expect(page.locator("#st-title")).to_have_text("Grinder 4 bore")
+    expect(page.locator("#st-verdict")).to_contain_text("open or failed")
+    expect(page.locator("#st-close")).to_be_disabled()
+    rows = page.locator("#st-items tr")
+    expect(rows).to_have_count(len(cl.ITEMS) + 1)
+    expect(page.locator("#st-items tr", has_text="Number of parts")).to_contain_text("50 parts (at least 50)")
+    expect(page.locator("#st-items tr", has_text="Pre-production run, 1 part")).to_contain_text("lies in the area")
+    first = page.locator("#st-items tr", has_text="HuMan")
+    first.locator("select").select_option("not_applicable")
+    first.locator("button").click()
+    expect(page.locator("#errors")).to_contain_text("A note is required")
+    page.click("#errors button")
+    first.locator("input").fill("automatic line, no operator")
+    first.locator("select").select_option("not_applicable")
+    first.locator("button").click()
+    expect(page.locator("#st-items tr", has_text="HuMan")).to_contain_text("does not apply")
+    # the rest is confirmed through the service, the browser then closes the study
+    study_id = app.state.studies.list()[0]["id"]
+    user = app.state.auth.get_user(next(u.id for u in app.state.auth.list_users() if u.username == "admin"))
+    for item in cl.ITEMS:
+        if not item.auto and item.key != "human":
+            app.state.studies.set_item(study_id, item.key, "ok", "", user)
+    page.click("#st-back")
+    page.click("#st-list button:has-text('Open')")
+    expect(page.locator("#st-verdict")).to_contain_text("can be closed")
+    page.fill("#st-close-reason", "all conditions met")
+    page.click("#st-close")
+    expect(page.locator("#st-closed-line")).to_contain_text("all conditions met")
+    expect(page.locator("#st-items select").first).to_be_disabled()
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#st-items tr", has_text="零件數")).to_contain_text("50 件")
+    page.click("#st-back")
+    expect(page.locator("#st-list")).to_contain_text("已於")
+    assert problems == [], problems
+    ctx.close()

@@ -162,3 +162,9 @@ body[data-role="viewer"] [data-needs="operator"] { display: none !important; }
 tr.invalid-point td { color: var(--muted); text-decoration: line-through; }
 #md-values input { width: 7em; }
 #me-ocap input { width: 100%; min-width: 8em; }
+
+/* machine study checklist */
+#st-items td { vertical-align: top; }
+#st-items td:nth-child(5) { white-space: nowrap; }
+#st-items input[type=text] { width: 14rem; max-width: 100%; }
+#st-items tr.blocking td:first-child { border-left: 3px solid var(--alarm); }
