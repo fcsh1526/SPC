@@ -155,6 +155,8 @@
     if (name === "saved") loadSaved();
     if (name === "study") loadStudies();
     if (name === "msa") loadMsa();
+    if (name === "plan") loadPlans();
+    if (name === "roles") loadRoles();
     if (name === "admin") loadAdmin();
     if (name === "password") renderPasswordPanel();
   }
@@ -1933,6 +1935,275 @@
     $("#mss-save").addEventListener("click", addMsaStudy);
   }
 
+  // ---------------------------------------------------------------- control plan and SPC roles (draft 6.7, 6.8)
+  const PL = { list: [], view: null, editing: null, lines: [], lineIndex: null, roles: null, person: null, people: [] };
+  const showPlanView = (which) => { ["#pl-list-view", "#pl-editor", "#pl-detail"].forEach((sel) => { $(sel).hidden = sel !== which; }); };
+  const RESULT_CLASS = { pass: "status-ok", warn: "status-warning", fail: "status-alarm" };
+  const LINE_FIELDS = ["step", "characteristic", "unit", "method", "frequency", "reaction", "note"];
+  const rolesList = () => (PL.roles ? PL.roles.roles : []);
+
+  async function loadPlans() {
+    if (PL.view && !$("#pl-detail").hidden) return;
+    await guarded(async () => { PL.list = (await api("/api/plans")).plans; if (!PL.roles) PL.roles = await api("/api/spc-roles"); });
+    renderPlanList(); showPlanView("#pl-list-view");
+  }
+  function renderPlanList() {
+    const table = $("#pl-list"); table.replaceChildren();
+    const head = el("tr");
+    ["plan.f_name", "plan.f_part", "plan.f_process", "plan.f_phase", "plan.col_state", ""].forEach((k) => cell(head, k ? t(k) : "", "th"));
+    table.appendChild(head);
+    PL.list.forEach((p) => {
+      const tr = el("tr");
+      cell(tr, p.name); cell(tr, p.part); cell(tr, p.process); cell(tr, t("plan.phase_" + p.phase));
+      const text = p.status === "released" ? t("plan.state_released", { rev: p.revision })
+        : p.ready ? t("plan.state_ready") : t("plan.state_draft", { n: p.blockers, a: p.approvals.length });
+      cell(tr, text).className = p.status === "released" ? "status-ok" : "status-warning";
+      const open = el("button", "", t("mon.open")); open.addEventListener("click", () => openPlan(p.id)); cell(tr, "").appendChild(open);
+      table.appendChild(tr);
+    });
+    if (!PL.list.length) table.appendChild(el("tr")).appendChild(el("td", "muted", t("plan.none")));
+  }
+  async function openPlan(id) {
+    await guarded(async () => { PL.view = await api(`/api/plans/${id}`); });
+    if (PL.view) { renderPlan(); showPlanView("#pl-detail"); }
+  }
+  function planCheckText(line, c) {
+    const p = { ...c, name: c.name || "", missing: (c.missing || []).map((f) => t("plan.l_" + f)).join(", "),
+      share: c.share !== undefined ? sig(c.share * 100, 3) : "", U: c.U !== undefined ? sig(c.U, 4) : "", guard_band: c.guard_band !== undefined ? sig(c.guard_band, 4) : "",
+      tolerance: c.tolerance !== undefined ? sig(c.tolerance, 4) : "", system: c.system !== undefined ? sig(c.system, 4) : "", line: c.line !== undefined ? sig(c.line, 4) : "",
+      status: c.status ? t("msa.gate_" + c.status) : "" };
+    let key = `plan.chk.${c.key}.${c.result}`;
+    if (c.reason) key += "." + c.reason;
+    if (c.key === "reaction" && c.from_monitor) key += ".monitor";
+    return t(key, p);
+  }
+  function renderPlan() {
+    const { plan, evaluation: ev } = PL.view;
+    $("#pl-title").textContent = plan.name;
+    $("#pl-sub").textContent = t("plan.sub", { part: plan.part || "–", process: plan.process || "–", phase: t("plan.phase_" + plan.phase), rev: plan.content_revision });
+    const v = $("#pl-verdict");
+    v.textContent = plan.status === "released" ? t("plan.verdict_released", { rev: plan.released_revision }) : ev.ready ? t("plan.verdict_ready") : t("plan.verdict_blocked", { n: ev.blockers.length });
+    v.className = "strong " + (plan.status === "released" || ev.ready ? "status-ok" : "status-warning");
+    const table = $("#pl-lines"); table.replaceChildren();
+    const head = el("tr");
+    ["plan.col_no", "plan.l_step", "plan.l_characteristic", "plan.col_spec", "plan.l_control", "plan.col_sampling", "plan.l_responsible", "plan.col_checks"].forEach((k) => cell(head, t(k), "th"));
+    table.appendChild(head);
+    plan.lines.forEach((l, i) => {
+      const tr = el("tr");
+      cell(tr, String(i + 1)); cell(tr, l.step); cell(tr, l.characteristic + (l.unit ? ` [${l.unit}]` : "") + (l.class ? ` (${t("analysis.class_" + l.class)})` : ""));
+      cell(tr, [l.lsl !== null ? `${t("analysis.lsl")} ${l.lsl}` : "", l.target !== null ? `${t("plan.l_target")} ${l.target}` : "", l.usl !== null ? `${t("analysis.usl")} ${l.usl}` : ""].filter(Boolean).join(", ") || "–");
+      cell(tr, t("plan.control_" + l.control));
+      cell(tr, [l.sample_size ? `n=${l.sample_size}` : "", l.frequency].filter(Boolean).join(", ") || "–");
+      cell(tr, l.responsible.map((r) => t("roles.role_" + r)).join(", ") || "–");
+      const c = cell(tr, ""); c.className = "checks-cell";
+      (ev.lines[String(i + 1)] || []).forEach((x) => { const d = el("div", RESULT_CLASS[x.result], `${t("plan.chk." + x.key)}: ${planCheckText(l, x)}`); c.appendChild(d); });
+      table.appendChild(tr);
+    });
+    if (!plan.lines.length) table.appendChild(el("tr")).appendChild(el("td", "muted", t("plan.no_lines")));
+    ev.plan.filter((c) => c.key === "staffing" && c.result === "warn").forEach((c) => {
+      const tr = el("tr"); const td = el("td", "status-warning", t("plan.chk.staffing.warn", { roles: c.unstaffed.map((r) => t("roles.role_" + r)).join(", ") })); td.colSpan = 8; tr.appendChild(td); table.appendChild(tr);
+    });
+    renderApprovals();
+    const released = plan.status === "released";
+    $("#pl-release-label").textContent = t(released ? "plan.withdraw_reason" : "plan.release_reason");
+    $("#pl-release").textContent = t(released ? "plan.withdraw" : "plan.release");
+    $("#pl-release").disabled = !released && !ev.ready;
+    const hb = $("#pl-history-body"); hb.replaceChildren();
+    plan.released.slice().reverse().forEach((h) => hb.appendChild(el("p", "", t("plan.history_line", { rev: h.revision, at: when(h.at), by: h.by, reason: h.reason }))));
+    $("#pl-history").hidden = !plan.released.length;
+  }
+  function renderApprovals() {
+    const { plan } = PL.view;
+    const table = $("#pl-approvals"); table.replaceChildren();
+    const head = el("tr"); ["roles.col_role", "plan.col_approval", ""].forEach((k) => cell(head, k ? t(k) : "", "th")); table.appendChild(head);
+    PL.view.approvers.forEach((role) => {
+      const tr = el("tr"); cell(tr, t("roles.role_" + role));
+      const a = plan.approvals[role];
+      const c = cell(tr, a ? t("plan.approved", { by: a.by, at: when(a.at), note: a.note || "–" }) : t("plan.not_approved")); c.className = a ? "status-ok" : "status-warning";
+      const act = cell(tr, "");
+      if (!a && plan.status === "draft" && canEditStudy()) {
+        const b = el("button", "", t("plan.approve"));
+        b.addEventListener("click", () => { const note = window.prompt(t("plan.approve_prompt", { role: t("roles.role_" + role) })); if (note !== null) approvePlan(role, note); });
+        act.appendChild(b);
+      }
+      table.appendChild(tr);
+    });
+  }
+  async function approvePlan(role, note) {
+    await guarded(async () => { PL.view = await post(`/api/plans/${PL.view.plan.id}/approve`, { role, note }); });
+    renderPlan();
+  }
+  async function releasePlan() {
+    const reason = $("#pl-release-reason").value;
+    const released = PL.view.plan.status === "released";
+    await guarded(async () => { PL.view = await post(`/api/plans/${PL.view.plan.id}/${released ? "withdraw" : "release"}`, { reason }); $("#pl-release-reason").value = ""; });
+    renderPlan();
+  }
+  async function fillPlanSelects() {
+    const fill = async (select, path, key, label) => {
+      let list = [];
+      try { list = (await api(path))[key]; } catch (e) { /* none */ }
+      select.replaceChildren();
+      const none = el("option", "", t("plan.link_none")); none.value = ""; select.appendChild(none);
+      list.forEach((x) => { const o = el("option", "", label(x)); o.value = String(x.id); select.appendChild(o); });
+    };
+    await fill($("#pll-msa"), "/api/msa", "systems", (s) => `${s.name} (${t("msa.gate_" + s.status)})`);
+    await fill($("#pll-monitor"), "/api/monitors", "monitors", (m) => m.name);
+  }
+  async function openPlanEditor(view) {
+    PL.editing = view ? view.plan.id : "new";
+    const p = view ? view.plan : { name: "", part: "", process: "", phase: "production", description: "", lines: [] };
+    if (!PL.roles) PL.roles = await api("/api/spc-roles");
+    $("#pl-editor-title").textContent = view ? t("plan.edit_title", { name: p.name }) : t("plan.new");
+    ["name", "part", "process", "description"].forEach((k) => { $("#ple-" + k).value = p[k] || ""; });
+    $("#ple-phase").value = p.phase;
+    PL.lines = JSON.parse(JSON.stringify(p.lines));
+    await fillPlanSelects();
+    renderLineList(); closeLineForm();
+    showPlanView("#pl-editor");
+  }
+  function renderLineList() {
+    const table = $("#ple-lines"); table.replaceChildren();
+    const head = el("tr"); ["plan.col_no", "plan.l_step", "plan.l_characteristic", "plan.l_control", ""].forEach((k) => cell(head, k ? t(k) : "", "th")); table.appendChild(head);
+    PL.lines.forEach((l, i) => {
+      const tr = el("tr"); cell(tr, String(i + 1)); cell(tr, l.step); cell(tr, l.characteristic); cell(tr, t("plan.control_" + l.control));
+      const a = cell(tr, "");
+      const edit = el("button", "", t("plan.edit")); edit.addEventListener("click", () => openLineForm(i)); a.appendChild(edit);
+      const del = el("button", "", t("plan.remove_line")); del.addEventListener("click", () => { PL.lines.splice(i, 1); renderLineList(); closeLineForm(); }); a.appendChild(del);
+      table.appendChild(tr);
+    });
+  }
+  function closeLineForm() { PL.lineIndex = null; $("#ple-line-form").hidden = true; }
+  function openLineForm(index) {
+    PL.lineIndex = index;
+    const l = index === "new" ? { kind: "product_characteristic", control: "spc_chart", responsible: [], class: null } : PL.lines[index];
+    LINE_FIELDS.forEach((k) => { $("#pll-" + k).value = l[k] ?? ""; });
+    ["target", "lsl", "usl", "sample_size"].forEach((k) => { $("#pll-" + k).value = l[k] ?? ""; });
+    $("#pll-kind").value = l.kind; $("#pll-class").value = l.class || ""; $("#pll-control").value = l.control;
+    $("#pll-msa").value = l.msa_id ? String(l.msa_id) : ""; $("#pll-monitor").value = l.monitor_id ? String(l.monitor_id) : "";
+    const box = $("#pll-responsible"); box.replaceChildren();
+    rolesList().forEach((r) => {
+      const label = el("label", "check"); const cb = el("input"); cb.type = "checkbox"; cb.value = r; cb.checked = l.responsible.includes(r);
+      label.appendChild(cb); label.appendChild(el("span", "", t("roles.role_" + r))); box.appendChild(label);
+    });
+    $("#ple-line-title").textContent = index === "new" ? t("plan.add_line") : t("plan.edit_line", { n: index + 1 });
+    $("#pll-save").textContent = t("plan.keep_line");
+    $("#ple-line-form").hidden = false;
+  }
+  function readLine() {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const line = { kind: $("#pll-kind").value, control: $("#pll-control").value, class: $("#pll-class").value || null,
+      target: num("#pll-target"), lsl: num("#pll-lsl"), usl: num("#pll-usl"), sample_size: num("#pll-sample_size"),
+      msa_id: $("#pll-msa").value ? Number($("#pll-msa").value) : null, monitor_id: $("#pll-monitor").value ? Number($("#pll-monitor").value) : null,
+      responsible: $$("#pll-responsible input:checked").map((c) => c.value) };
+    LINE_FIELDS.forEach((k) => { line[k] = $("#pll-" + k).value; });
+    return line;
+  }
+  function keepLine() {
+    const line = readLine();
+    if (PL.lineIndex === "new") PL.lines.push(line); else PL.lines[PL.lineIndex] = line;
+    renderLineList(); closeLineForm();
+  }
+  async function savePlan() {
+    await guarded(async () => {
+      const record = { name: $("#ple-name").value, part: $("#ple-part").value, process: $("#ple-process").value, phase: $("#ple-phase").value, description: $("#ple-description").value, lines: PL.lines };
+      PL.view = PL.editing === "new" ? await post("/api/plans", { record }) : await put(`/api/plans/${PL.editing}`, { record });
+      PL.saved = true;
+    });
+    if (PL.saved) { PL.saved = false; renderPlan(); showPlanView("#pl-detail"); }
+  }
+  function wirePlan() {
+    $("#pl-new").addEventListener("click", () => openPlanEditor(null));
+    $("#pl-edit").addEventListener("click", () => openPlanEditor(PL.view));
+    $("#pl-back").addEventListener("click", () => { PL.view = null; loadPlans(); });
+    $("#ple-save").addEventListener("click", savePlan);
+    $("#ple-cancel").addEventListener("click", () => { if (PL.editing !== "new" && PL.view) showPlanView("#pl-detail"); else { PL.view = null; loadPlans(); } });
+    $("#pll-save").addEventListener("click", keepLine);
+    $("#pll-cancel").addEventListener("click", closeLineForm);
+    $("#pl-release").addEventListener("click", releasePlan);
+    const add = el("button", "", t("plan.add_line")); add.id = "ple-add-line"; add.type = "button";
+    add.addEventListener("click", () => openLineForm("new"));
+    $("#ple-lines").parentElement.after(add);
+  }
+
+  // roles
+  async function loadRoles() {
+    await guarded(async () => {
+      PL.roles = await api("/api/spc-roles");
+      PL.people = canEditStudy() ? (await api("/api/people")).people : [];
+    });
+    renderRoleMatrix(); renderResponsibilities(); renderPeople();
+  }
+  function renderRoleMatrix() {
+    const table = $("#rl-matrix"); table.replaceChildren();
+    const head = el("tr"); cell(head, t("roles.col_competence"), "th");
+    PL.roles.roles.forEach((r) => cell(head, t("roles.role_" + r), "th")); table.appendChild(head);
+    PL.roles.competences.forEach((c, ci) => {
+      const tr = el("tr"); cell(tr, t("roles.comp_" + c));
+      PL.roles.roles.forEach((r) => { const lv = PL.roles.matrix[r][c]; const td = cell(tr, t("roles.level_" + lv)); td.className = lv === 2 ? "status-ok" : lv === 1 ? "status-warning" : "muted"; });
+      table.appendChild(tr);
+    });
+    const tr = el("tr"); cell(tr, t("roles.staffing"));
+    PL.roles.roles.forEach((r) => { const s = PL.roles.staffing[r]; cell(tr, t("roles.staffing_cell", { q: s.qualified, a: s.assigned })).className = s.qualified ? "status-ok" : "status-warning"; });
+    table.appendChild(tr);
+  }
+  function renderResponsibilities() {
+    const box = $("#rl-resp"); box.replaceChildren();
+    PL.roles.roles.forEach((r) => { const p = el("p"); p.appendChild(el("strong", "", t("roles.role_" + r) + ": ")); p.appendChild(document.createTextNode(t("roles.resp_" + r))); box.appendChild(p); });
+  }
+  function renderPeople() {
+    const table = $("#rl-people"); table.replaceChildren();
+    const head = el("tr"); ["roles.col_user", "roles.col_roles", ""].forEach((k) => cell(head, k ? t(k) : "", "th")); table.appendChild(head);
+    PL.people.forEach((p) => {
+      const tr = el("tr"); cell(tr, `${p.user.display_name || p.user.username} (${p.user.username})`);
+      cell(tr, p.roles.map((r) => `${t("roles.role_" + r)}${p.qualification[r] ? "" : " ⚠"}`).join(", ") || "–");
+      const b = el("button", "", t("mon.open")); b.addEventListener("click", () => openPerson(p.user.id)); cell(tr, "").appendChild(b);
+      table.appendChild(tr);
+    });
+    $("#rl-person").hidden = !PL.person;
+  }
+  async function openPerson(id) {
+    await guarded(async () => { PL.person = await api(`/api/people/${id}`); });
+    renderPerson();
+  }
+  function renderPerson() {
+    const d = PL.person; if (!d) return;
+    $("#rl-person").hidden = false;
+    $("#rl-person-title").textContent = `${d.user.display_name || d.user.username} (${d.user.username})`;
+    const box = $("#rl-person-roles"); box.replaceChildren();
+    PL.roles.roles.forEach((r) => {
+      const label = el("label", "check"); const cb = el("input"); cb.type = "checkbox"; cb.value = r; cb.checked = d.roles.includes(r);
+      label.appendChild(cb); label.appendChild(el("span", "", t("roles.role_" + r))); box.appendChild(label);
+    });
+    const table = $("#rl-comp"); table.replaceChildren();
+    const head = el("tr"); ["roles.col_competence", "roles.col_needed", "roles.col_achieved", "roles.col_evidence", ""].forEach((k) => cell(head, k ? t(k) : "", "th")); table.appendChild(head);
+    const needed = (c) => Math.max(0, ...d.roles.map((r) => PL.roles.matrix[r][c]));
+    PL.roles.competences.forEach((c) => {
+      const e = d.competences[c]; const need = needed(c); const have = e ? e.level : 0;
+      const tr = el("tr"); cell(tr, t("roles.comp_" + c)); cell(tr, t("roles.level_" + need));
+      cell(tr, t("roles.level_" + have)).className = have >= need ? "status-ok" : "status-alarm";
+      cell(tr, e ? t("roles.evidence", { date: e.date, by: e.by, note: e.note || "–" }) : "–");
+      const a = cell(tr, ""); const b = el("button", "", t("roles.record"));
+      b.addEventListener("click", () => recordCompetence(c)); a.appendChild(b);
+      table.appendChild(tr);
+    });
+  }
+  async function recordCompetence(c) {
+    const level = window.prompt(t("roles.prompt_level", { competence: t("roles.comp_" + c) }));
+    if (level === null) return;
+    const note = window.prompt(t("roles.prompt_note"));
+    if (note === null) return;
+    const date = new Date().toISOString().slice(0, 10);
+    await guarded(async () => { PL.person = await post(`/api/people/${PL.person.user.id}/competences`, { competence: c, level: Number(level), date, note }); PL.roles = await api("/api/spc-roles"); PL.people = (await api("/api/people")).people; });
+    renderRoleMatrix(); renderPeople(); renderPerson();
+  }
+  async function savePersonRoles() {
+    const roles = $$("#rl-person-roles input:checked").map((c) => c.value);
+    await guarded(async () => { PL.person = await put(`/api/people/${PL.person.user.id}/roles`, { roles }); PL.roles = await api("/api/spc-roles"); PL.people = (await api("/api/people")).people; });
+    renderRoleMatrix(); renderPeople(); renderPerson();
+  }
+  function wireRoles() { $("#rl-person-save-roles").addEventListener("click", savePersonRoles); }
+
   // ---------------------------------------------------------------- machine performance studies (draft 8.1 to 8.3)
   const ST = { view: null, editing: null };
   const canEditStudy = () => state.user && ["engineer", "admin"].includes(state.user.role);
@@ -2222,6 +2493,9 @@
     if (state.user && M.view && !$("#mon-detail").hidden) renderMonitor();
     if (state.user && ST.view && !$("#st-detail").hidden) renderStudy();
     if (state.user && MS.view && !$("#ms-detail").hidden) renderMsa();
+    if (state.user && PL.view && !$("#pl-detail").hidden) renderPlan();
+    if (state.user && !$("#pl-list-view").hidden && !$("#tab-plan").hidden) renderPlanList();
+    if (state.user && PL.roles && !$("#tab-roles").hidden) { renderRoleMatrix(); renderResponsibilities(); renderPeople(); renderPerson(); }
     if (state.user && !$("#ms-list-view").hidden && !$("#tab-msa").hidden) loadMsa();
     if (state.user && !$("#st-list-view").hidden && !$("#tab-study").hidden) loadStudies();
     if (state.user && !$("#mon-list-view").hidden && !$("#tab-monitor").hidden) renderMonitorList();
@@ -2266,6 +2540,8 @@
     wireMonitor();
     wireStudy();
     wireMsa();
+    wirePlan();
+    wireRoles();
     $("#a-profile").addEventListener("change", onProfileChange);
     $("#pf-new").addEventListener("click", () => openProfileEditor(null));
     $("#pf-save").addEventListener("click", saveProfile);

@@ -216,6 +216,28 @@ class MsaStudyBody(Strict):
     input: dict
 
 
+class PlanBody(Strict):
+    """The record of a control plan; checked in spc.plan.model.validate_record."""
+
+    record: dict
+
+
+class PlanApproveBody(Strict):
+    role: str = Field(max_length=40)
+    note: str = Field(default="", max_length=2000)
+
+
+class PeopleRolesBody(Strict):
+    roles: list[str] = Field(max_length=7)
+
+
+class CompetenceBody(Strict):
+    competence: str = Field(max_length=40)
+    level: int = Field(ge=0, le=2)
+    date: str = Field(max_length=10)
+    note: str = Field(default="", max_length=1000)
+
+
 class StudyBody(Strict):
     """The descriptive part of a machine performance study; checked in spc.study.checklist.validate_record."""
 

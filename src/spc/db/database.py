@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE users (
@@ -177,6 +177,19 @@ CREATE TABLE msa_systems (
     updated_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
 );
+CREATE TABLE control_plans (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+);
+CREATE TABLE spc_people (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    data       TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -195,6 +208,21 @@ CREATE TABLE studies (
     updated_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
 )"""
+
+MIGRATION_5_TO_6 = """
+CREATE TABLE control_plans (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+);
+CREATE TABLE spc_people (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    data       TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);"""
 
 MIGRATION_4_TO_5 = """
 CREATE TABLE msa_systems (
@@ -249,7 +277,7 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2, 3, 4):
+        elif version in (1, 2, 3, 4, 5):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
@@ -262,9 +290,16 @@ class Database:
                 self._conn.execute(MIGRATION_3_TO_4)
                 self._conn.execute("PRAGMA user_version = 4")
                 self._conn.execute("COMMIT")
-            self._conn.execute("BEGIN IMMEDIATE")  # version 5 adds the measurement systems (MSA gate)
-            self._conn.execute(MIGRATION_4_TO_5)
-            self._conn.execute("PRAGMA user_version = 5")
+            if version <= 4:
+                self._conn.execute("BEGIN IMMEDIATE")  # version 5 adds the measurement systems (MSA gate)
+                self._conn.execute(MIGRATION_4_TO_5)
+                self._conn.execute("PRAGMA user_version = 5")
+                self._conn.execute("COMMIT")
+            self._conn.execute("BEGIN IMMEDIATE")  # version 6 adds the control plans and the SPC roles of people
+            for statement in MIGRATION_5_TO_6.split(";"):
+                if statement.strip():
+                    self._conn.execute(statement)
+            self._conn.execute("PRAGMA user_version = 6")
             self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")

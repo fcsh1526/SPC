@@ -24,6 +24,9 @@ from spc.api.accounts import add_account_routes
 from spc.api.monitors import add_monitor_routes
 from spc.api.studies import add_study_routes
 from spc.api.msa import add_msa_routes
+from spc.api.plans import add_plan_routes
+from spc.plan.model import PlanError
+from spc.plan.service import PeopleService, PlanNameTaken, PlanNotFound, PlanService
 from spc.msa.service import MsaProblem, MsaService, SystemNameTaken, SystemNotFound
 from spc.api.errors import ApiError, error_response as _error
 from spc.service.model_suggestion import suggest_for_dataset
@@ -158,6 +161,9 @@ def create_app(
     app.state.monitors = monitors
     studies = StudyService(db, audit, store, msa_systems)
     app.state.studies = studies
+    people = PeopleService(db, audit, auth)
+    plan_service = PlanService(db, audit, people, monitors, msa_systems)
+    app.state.people, app.state.plans = people, plan_service
 
     # ------------------------------------------------------------------ plumbing
 
@@ -209,6 +215,18 @@ def create_app(
     @app.exception_handler(IncidentNotFound)
     async def _incident_missing(_: Request, exc: IncidentNotFound):
         return _error(404, "incident_not_found", "incident not found")
+
+    @app.exception_handler(PlanError)
+    async def _plan_error(_: Request, exc: PlanError):
+        return _error(exc.status, exc.code, str(exc), exc.params)
+
+    @app.exception_handler(PlanNotFound)
+    async def _plan_missing(_: Request, exc: PlanNotFound):
+        return _error(404, "plan_not_found", "control plan not found")
+
+    @app.exception_handler(PlanNameTaken)
+    async def _plan_taken(_: Request, exc: PlanNameTaken):
+        return _error(409, "plan_name_taken", "a control plan with this name exists already")
 
     @app.exception_handler(MsaProblem)
     async def _msa_problem(_: Request, exc: MsaProblem):
@@ -284,6 +302,7 @@ def create_app(
     add_monitor_routes(app, monitors, store, reports, audit, db, reader, operator, writer, admin)
     add_study_routes(app, studies, reader, writer, admin)
     add_msa_routes(app, msa_systems, reader, writer, admin)
+    add_plan_routes(app, plan_service, people, reader, writer, admin)
 
     # ------------------------------------------------------------------ import
 

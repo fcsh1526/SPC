@@ -1336,3 +1336,66 @@ def test_measurement_system_and_the_gate_in_the_browser(server, browser, app):
     expect(page.locator("#md-msa")).to_contain_text("閘門封鎖")
     assert problems == [], problems
     ctx.close()
+
+
+def test_control_plan_and_roles_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    problems = []
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1100}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=roles]")
+    matrix = page.locator("#rl-matrix")
+    expect(matrix.locator("tr", has_text="Statistics")).to_be_visible()
+    expect(matrix.locator("tr").first).to_contain_text("Line operator")
+    page.locator("#rl-people tr", has_text="Eva Engineer").locator("button").click()
+    page.locator("#rl-person-roles label", has_text="Quality planning").locator("input").check()
+    page.click("#rl-person-save-roles")
+    expect(page.locator("#rl-people tr", has_text="Eva Engineer")).to_contain_text("Quality planning ⚠")  # not qualified yet
+    answers = ["2", "trained and tested in 2026"]  # the prompts of the page are answered in this order
+    page.on("dialog", lambda d: d.accept(answers.pop(0)))
+    page.locator("#rl-comp tr", has_text="Quality management system").locator("button").click()
+    expect(page.locator("#rl-comp tr", has_text="Quality management system")).to_contain_text("trained and tested in 2026")
+
+    page.click("nav.tabs button[data-tab=plan]")
+    page.click("#pl-new")
+    page.fill("#ple-name", "Housing line 1")
+    page.fill("#ple-part", "H-100")
+    page.click("#ple-add-line")
+    page.fill("#pll-step", "Turning")
+    page.fill("#pll-characteristic", "bore")
+    page.fill("#pll-lsl", "9.9")
+    page.fill("#pll-usl", "10.1")
+    page.select_option("#pll-control", "other")
+    page.fill("#pll-sample_size", "5")
+    page.fill("#pll-frequency", "every hour")
+    page.fill("#pll-method", "air gauge")
+    page.locator("#pll-responsible label", has_text="Line operator").locator("input").check()
+    page.click("#pll-save")
+    page.click("#ple-save")
+    expect(page.locator("#pl-title")).to_have_text("Housing line 1")
+    expect(page.locator("#pl-lines tr", has_text="Turning")).to_contain_text("no reaction plan")
+    expect(page.locator("#pl-verdict")).to_contain_text("Not releasable")
+    expect(page.locator("#pl-release")).to_be_disabled()
+    page.click("#pl-edit")
+    page.locator("#ple-lines tr", has_text="Turning").locator("button", has_text="Edit").click()
+    page.fill("#pll-reaction", "sort the lot and call the supervisor")
+    page.click("#pll-save")
+    page.click("#ple-save")
+    expect(page.locator("#pl-lines tr", has_text="Turning")).not_to_contain_text("no reaction plan")
+    # an approval needs the role: the engineer holds only quality planning
+    answers.append("ok")
+    page.locator("#pl-approvals tr", has_text="Product developer").locator("button").click()
+    expect(page.locator("#errors")).to_contain_text("do not hold this SPC role")
+    page.click("#errors button")
+    answers.append("plan reviewed")
+    page.locator("#pl-approvals tr", has_text="Quality planning").locator("button").click()
+    expect(page.locator("#pl-approvals tr", has_text="Quality planning")).to_contain_text("plan reviewed")
+    expect(page.locator("#pl-verdict")).to_contain_text("Not releasable")  # three approvals are missing
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#pl-verdict")).to_contain_text("無法發行")
+    expect(page.locator("#pl-lines")).to_contain_text("沒有合格人員")
+    assert problems == [], problems
+    ctx.close()
