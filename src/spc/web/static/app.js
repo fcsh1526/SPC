@@ -462,7 +462,7 @@
     const W = 960, H = 280, ml = 70, mr = 150, mt = 16, mb = 34;
     const n = part.values.length;
     const flat = (v) => (Array.isArray(v) ? v : [v]);  // limits are one number, or one per point after a restart
-    const ys = part.values.concat(flat(part.lcl), flat(part.ucl), flat(part.center), flat(part.wlcl ?? null), flat(part.wucl ?? null)).filter((v) => v !== null);
+    const ys = part.values.concat(part.values2 || [], flat(part.lcl), flat(part.ucl), flat(part.center), flat(part.wlcl ?? null), flat(part.wucl ?? null)).filter((v) => v !== null);
     let lo = Math.min(...ys), hi = Math.max(...ys);
     if (hi === lo) { hi += 1; lo -= 1; }
     const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
@@ -511,6 +511,14 @@
       root.appendChild(svg("text", { class: "limit-label", x: W - mr + 6, y: Y(v) + 4 }, `${name} ${sig(v, 5)}`));
     });
     root.appendChild(svg("polyline", { class: "series", points: part.values.map((v, i) => `${X(i)},${Y(v)}`).join(" ") }));
+    if (part.values2) {  // a second series on the same limits: the lower CUSUM
+      root.appendChild(svg("polyline", { class: "series2", points: part.values2.map((v, i) => `${X(i)},${Y(v)}`).join(" ") }));
+      part.values2.forEach((v, i) => {
+        const c = svg("circle", { class: "dot2" + (part.alarms2 && part.alarms2.includes(i) ? " alarm" : ""), cx: X(i), cy: Y(v), r: n > 300 ? 1.8 : 3.2 });
+        c.appendChild(svg("title", {}, t("result.point", { label: part.labels[i] || i + 1, value: sig(v) })));
+        root.appendChild(c);
+      });
+    }
     const alarmSet = new Set(part.alarms.map((a) => a.index));
     part.values.forEach((v, i) => {
       const c = svg("circle", { class: "dot" + (alarmSet.has(i) ? " alarm" : ""), cx: X(i), cy: Y(v), r: n > 300 ? 1.8 : 3.2 });
@@ -1024,16 +1032,18 @@
   const isCount = (kind) => COUNT_KINDS.includes(kind);
   const COUNT_RULES = ["beyond_limits", "run", "trend"];
   const ACC_KINDS = ["acc-xbar", "acc-median", "acc-x"];
+  const SEQ_KINDS = ["cusum", "ewma"];
+  const SEQ_RULES = ["shift_up", "shift_down"];
   const isTol = (kind) => ACC_KINDS.includes(kind) || kind === "pre";
   const BASE_KIND = { "acc-xbar": "xbar-s", "acc-median": "median-r", "acc-x": "imr" };
   const baseKind = (kind) => BASE_KIND[kind] || kind;
   const PRE_RULES = ["pre_red", "pre_two_yellow_same_side", "pre_two_yellow_opposite"];
   // which rules, and which sources of limits, fit a kind of monitor
-  const rulesOf = (kind) => (isCount(kind) ? COUNT_RULES : ACC_KINDS.includes(kind) ? ["beyond_limits"] : kind === "pre" ? PRE_RULES : RULES);
+  const rulesOf = (kind) => (SEQ_KINDS.includes(kind) ? SEQ_RULES : isCount(kind) ? COUNT_RULES : ACC_KINDS.includes(kind) ? ["beyond_limits"] : kind === "pre" ? PRE_RULES : RULES);
   const SOURCES = (kind) => (isCount(kind) ? ["rate", "counts"] : kind === "pre" ? ["tolerance"] : ["parameters", "dataset"]);
   const parseList = (text) => text.split(/[\s,;]+/).filter((x) => x !== "").map(Number);
   const RULES = ["beyond_limits", "run", "trend", "middle_third", "two_of_three_beyond_2s", "four_of_five_beyond_1s", "fifteen_within_1s"];
-  const ALL_RULES = RULES.concat(PRE_RULES);
+  const ALL_RULES = RULES.concat(PRE_RULES, SEQ_RULES);
   const showMonitorView = (which) => {
     ["#mon-list-view", "#mon-editor", "#mon-detail"].forEach((sel) => { $(sel).hidden = sel !== which; });
   };
@@ -1130,8 +1140,9 @@
       }
     }
     $("#md-entry-card").hidden = !m.active;
-    $("#md-chart-var").hidden = isCount(m.kind) || m.kind === "pre";
+    $("#md-chart-var").hidden = isCount(m.kind) || m.kind === "pre" || SEQ_KINDS.includes(m.kind);
     $("#md-no-spec").hidden = isCount(m.kind) || isTol(m.kind);
+    $("#md-seq-note").hidden = !SEQ_KINDS.includes(m.kind);
     $("#md-ongoing-box").hidden = isCount(m.kind) || m.kind === "pre";
     $("#md-pre-note").hidden = m.kind !== "pre";
     const q = v.qualification;
@@ -1164,7 +1175,15 @@
   }
   function monitorPart(which) {
     const v = M.view, lim = v.limits[which === "loc" ? "location" : "variation"];
-    if (isCount(v.monitor.kind)) {  // limits follow the sample size: one band per point
+    if (v.monitor.kind === "cusum") {  // upper and lower CUSUM on the decision interval +-h
+      const rows = v.points.filter((p) => p.valid);
+      const l = v.limits.location;
+      return { values: rows.map((p) => p.loc), values2: rows.map((p) => p.var), labels: rows.map((p) => p.label || `#${p.seq}`),
+        lcl: l.lcl, center: l.cl, ucl: l.ucl, wlcl: null, wucl: null,
+        alarms: rows.map((p, i) => ({ index: i, hit: p.alarms.some((a) => a.rule === "shift_up") })).filter((a) => a.hit),
+        alarms2: rows.map((p, i) => (p.alarms.some((a) => a.rule === "shift_down") ? i : -1)).filter((i) => i >= 0) };
+    }
+    if (isCount(v.monitor.kind) || v.monitor.kind === "ewma") {  // limits follow the sample size (counts) or the place in the run (EWMA): one band per point
       const rows = v.points.filter((p) => p.valid && p.band);
       const col = (k) => rows.map((p) => p.band[k] ?? null);
       return { values: rows.map((p) => p.loc), labels: rows.map((p) => p.label || `#${p.seq}`), lcl: col("lcl"), center: col("cl"), ucl: col("ucl"),
@@ -1182,10 +1201,10 @@
   }
   function drawMonitorCharts() {
     const m = M.view.monitor;
-    const loc = monitorPart("loc"), vr = isCount(m.kind) || m.kind === "pre" ? null : monitorPart("var");
+    const loc = monitorPart("loc"), vr = isCount(m.kind) || m.kind === "pre" || SEQ_KINDS.includes(m.kind) ? null : monitorPart("var");
     const draw = (sel, part, title) => { if (part.values.length) drawChart($(sel), part, title); else $(sel).replaceChildren(el("p", "muted", t("mon.no_points"))); };
     const b = baseKind(m.kind);
-    draw("#md-chart-loc", loc, isCount(m.kind) || m.kind === "pre" ? t("result.kind_" + m.kind)
+    draw("#md-chart-loc", loc, isCount(m.kind) || m.kind === "pre" || SEQ_KINDS.includes(m.kind) ? t("result.kind_" + m.kind)
       : `${t("result.chart_location")} – ${t(b === "imr" ? "result.series_location_imr" : b === "median-r" ? "result.series_location_median" : "result.series_location_xbar")}`);
     if (vr) draw("#md-chart-var", vr, `${t("result.chart_variation")} – ${t("result.series_variation_" + b)}`);
   }
@@ -1291,6 +1310,14 @@
       box.appendChild(el("p", "", t("mon.limits_now_count", { rev: lim.revision, center: sig(lim.center, 6) })));
       box.appendChild(el("p", "muted", t("mon.limits_per_size")));
       box.appendChild(el("p", "", row(t("result.kind_" + v.monitor.kind), lim.location)));
+    } else if (SEQ_KINDS.includes(v.monitor.kind)) {
+      const d = lim.design, kind = v.monitor.kind;
+      box.appendChild(el("p", "", kind === "cusum"
+        ? t("mon.limits_cusum", { rev: lim.revision, mu: sig(lim.mu, 6), sigma: sig(lim.sigma, 5), k: sig(d.k, 3), h: sig(d.h, 4), fir: sig(d.fir, 2), arl0: sig(lim.arl0, 4) })
+        : t("mon.limits_ewma", { rev: lim.revision, mu: sig(lim.mu, 6), sigma: sig(lim.sigma, 5), lam: sig(d.lambda, 3), L: sig(d.L, 4), arl0: sig(lim.arl0, 4) })));
+      box.appendChild(el("p", "", row(t("result.kind_" + kind), lim.location)));
+      box.appendChild(el("p", "", t("mon.arl_by_shift", { table: lim.arl.map((r) => `${r.shift}: ${sig(r.arl, 3)}`).join(" · ") })));
+      box.appendChild(el("p", "muted", t(kind === "cusum" ? "mon.cusum_restart_note" : "mon.ewma_limits_note")));
     } else if (v.monitor.kind === "pre") {
       box.appendChild(el("p", "", t("mon.limits_now_pre", { rev: lim.revision })));
       box.appendChild(el("p", "", row(t("result.kind_pre"), lim.location)));
@@ -1318,6 +1345,8 @@
       : type === "rate" ? { type, rate: num("#nl-rate") }
       : type === "counts" ? countsSource($("#nl-counts").value, $("#nl-sizes").value)
       : type === "parameters" ? (isTol(M.view.monitor.kind) ? { type, sigma: num("#nl-sigma") } : { type, mu: num("#nl-mu"), sigma: num("#nl-sigma") }) : { type, dataset_id: $("#nl-dataset").value };
+    const kind = M.view.monitor.kind;
+    if (SEQ_KINDS.includes(kind) && type !== "rate") Object.assign(source, kind === "cusum" ? { k: num("#nl-k"), fir: num("#nl-fir") } : { lambda: num("#nl-lambda") });
     await guarded(async () => {
       M.view = await post(`/api/monitors/${M.id}/limits`, { source, reason: $("#nl-reason").value });
       $("#nl-reason").value = ""; renderMonitor();
@@ -1338,6 +1367,7 @@
       $("#nl-mu-label").hidden = type !== "parameters" || isTol(M.view.monitor.kind);
       if ($("#nl-type").selectedOptions[0] && $("#nl-type").selectedOptions[0].disabled) { $("#nl-type").value = ok[0]; return syncSourceFields(); }
       const sizes = M.view.monitor.kind === "p" || M.view.monitor.kind === "u";
+      $$(".nl-seq").forEach((e) => { e.hidden = !(SEQ_KINDS.includes(M.view.monitor.kind) && e.classList.contains("nl-" + (M.view.monitor.kind === "cusum" ? "cusum" : "ewma"))); });
       $$(".nl-sizes").forEach((e) => { e.hidden = type !== "counts" || !sizes; });
     }
   }
@@ -1435,15 +1465,20 @@
     else if (kind === "pre") $("#me-n").value = 2;
     else if (count) { if (!($("#me-n").dataset.kind && isCount($("#me-n").dataset.kind))) $("#me-n").value = 50; }
     else if (Number($("#me-n").value) < 2 || Number($("#me-n").value) > (kind === "xbar-s" || kind === "acc-xbar" ? 25 : 10)) $("#me-n").value = 5;
+    if (SEQ_KINDS.includes(kind) && !SEQ_KINDS.includes($("#me-n").dataset.kind || "")) $("#me-n").value = 1;  // individual values unless asked otherwise
     $("#me-n").dataset.kind = kind;
     $("#me-n-label").textContent = t(count ? (kind === "p" || kind === "u" ? "mon.f_n_typical" : "mon.f_n_size") : "mon.f_n");
     if (!$("#me-kind").disabled) $("#me-n").disabled = kind === "imr" || kind === "c" || kind === "acc-x" || kind === "pre";
     const tol = isTol(kind);
-    $("#me-warn-label").hidden = tol; if (tol) $("#me-warn").value = "";
+    $("#me-warn-label").hidden = tol || SEQ_KINDS.includes(kind); if (tol || SEQ_KINDS.includes(kind)) $("#me-warn").value = "";
     $("#me-accept-box").hidden = !ACC_KINDS.includes(kind);
-    $$(".mon-r-runtrend").forEach((e) => { e.hidden = tol; if (tol) $("input", e).checked = false; });
+    const seq = SEQ_KINDS.includes(kind);
+    $("#me-seq-box").hidden = !seq; $("#me-k-label").hidden = $("#me-fir-label").hidden = kind !== "cusum"; $("#me-lambda-label").hidden = kind !== "ewma";
+    if (seq) { $("#me-n").disabled = !!$("#me-kind").disabled; }
+    $$(".mon-r-runtrend").forEach((e) => { e.hidden = tol || seq; if (tol || seq) $("input", e).checked = false; });
     $("#me-specs-box").hidden = count;
-    $$(".mon-r-normal").forEach((e) => { e.hidden = count || tol; if (count || tol) $("input", e).checked = false; });
+    if (SEQ_KINDS.includes(kind) && Number($("#me-n").value) > 25) $("#me-n").value = 1;
+    $$(".mon-r-normal").forEach((e) => { e.hidden = count || tol || seq; if (count || tol || seq) $("input", e).checked = false; });
     $$("#me-ocap tr[data-key]").forEach((tr) => { tr.hidden = tr.dataset.key !== "default" && !rulesOf(kind).includes(tr.dataset.key); });
     // sources that fit the kind
     const okSources = SOURCES(kind);
@@ -1462,7 +1497,7 @@
   function readMonitorEditor() {
     const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
     const editing = M.editing !== "new" ? M.view.monitor : null;
-    const warn = editing ? editing.warn_alpha : isTol($("#me-kind").value) ? null : num("#me-warn");
+    const warn = editing ? editing.warn_alpha : isTol($("#me-kind").value) || SEQ_KINDS.includes($("#me-kind").value) ? null : num("#me-warn");
     const config = {
       name: $("#me-name").value, process: $("#me-process").value, characteristic: $("#me-characteristic").value, unit: $("#me-unit").value, line: $("#me-line").value,
       kind: editing ? editing.kind : $("#me-kind").value, n: editing ? editing.n : Number($("#me-n").value), warn_alpha: warn,
@@ -1482,6 +1517,9 @@
           : type === "tolerance" ? { type }
           : type === "rate" ? { type, rate: Number($("#me-rate").value) }
           : type === "counts" ? countsSource($("#me-counts").value, $("#me-sizes").value) : { type, dataset_id: $("#me-dataset").value };
+        if (SEQ_KINDS.includes(config.kind) && type === "parameters" || SEQ_KINDS.includes(config.kind) && type === "dataset") {
+          Object.assign(source, config.kind === "cusum" ? { k: Number($("#me-k").value), fir: Number($("#me-fir").value) } : { lambda: Number($("#me-lambda").value) });
+        }
         M.view = await post("/api/monitors", { config, source });
       } else {
         M.view = await api(`/api/monitors/${M.editing}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config }) });

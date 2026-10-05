@@ -748,5 +748,20 @@
   "mon.qualified": "Released: the last {greens} parts are in the green zone (at least {needed} are needed).",
   "mon.not_qualified": "Not yet released: {greens} of {needed} consecutive parts in the green zone.",
   "mon.pre_note": "A pre-control chart only monitors a start-up from the tolerance. It does not control a process: use it only until process related limits exist. The draft gives no rules for it; these are the classical ones.",
-  "error.report_not_for_precontrol": "A pre-control chart has no capability report: it only monitors a start-up."
+  "error.report_not_for_precontrol": "A pre-control chart has no capability report: it only monitors a start-up.",
+  "analysis.chart_cusum": "CUSUM chart (cumulative sum)",
+  "analysis.chart_ewma": "EWMA chart (exponentially weighted moving average)",
+  "result.kind_cusum": "CUSUM chart – upper (CO) and lower (CU) cumulative sum",
+  "result.kind_ewma": "EWMA chart – exponentially weighted moving average",
+  "alarmrule.shift_up": "Upward shift of the mean detected",
+  "alarmrule.shift_down": "Downward shift of the mean detected",
+  "mon.f_cusum_k": "Reference value k (shift to detect, in standard errors of the mean)",
+  "mon.f_cusum_fir": "Head start as a share of h (0 = none; 0.5 = fast initial response)",
+  "mon.f_ewma_lambda": "Weight of the newest sample (lambda)",
+  "mon.seq_note": "A chart with memory finds small, lasting shifts of the mean. Large jumps it finds more slowly than a Shewhart chart: run an X-bar monitor next to it (draft 10.3.5.5). It assumes a stable variation. The chart starts again from its reference state after every signal.",
+  "mon.limits_cusum": "Limits revision {rev}. CUSUM with target {mu}, standard deviation {sigma}, k = {k}, decision interval h = {h} (head start {fir}), average run length when in control {arl0}. Lower limit / zero / upper limit of the sums:",
+  "mon.limits_ewma": "Limits revision {rev}. EWMA with target {mu}, standard deviation {sigma}, lambda = {lam}, L = {L}, average run length when in control {arl0}. Lower limit / target / upper limit once the chart has run in:",
+  "mon.arl_by_shift": "Average run length by shift of the mean (in standard errors): {table}",
+  "mon.cusum_restart_note": "The values shown are the upper sum CO (blue) and the lower sum CU (purple). After a signal both start again at their starting value.",
+  "mon.ewma_limits_note": "The limits are narrower at the start and widen with every sample until they reach the values above. The run lengths in the table are for the wide limits, so a shift right at the start is found a little sooner. After a signal the chart starts again at the target."
 }

@@ -152,6 +152,15 @@ class MonitorStore:
             (monitor_id, limits_rev, limit))[::-1]
         return [(r["loc"], (json.loads(r["vals"]) + [None])[1]) for r in rows]
 
+    def run_state(self, monitor_id: int, limits_rev: int):
+        """The statistics of the last valid point, if the chart has not signalled on it (then it starts again): {'loc', 'var'}."""
+        r = self.db.one(
+            "SELECT loc, var, alarms FROM monitor_points WHERE monitor_id = ? AND limits_rev = ? AND valid = 1 ORDER BY seq DESC LIMIT 1",
+            (monitor_id, limits_rev))
+        if r is None or json.loads(r["alarms"]):
+            return None
+        return {"loc": r["loc"], "var": r["var"]}
+
     def previous_value(self, monitor_id: int) -> float | None:
         r = self.db.one("SELECT loc FROM monitor_points WHERE monitor_id = ? AND valid = 1 ORDER BY seq DESC LIMIT 1", (monitor_id,))
         return None if r is None else r["loc"]

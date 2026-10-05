@@ -21,6 +21,7 @@ import numpy as np
 from scipy.stats import chi2
 
 from spc.core.charts.attribute import exact_limits
+from spc.core.charts.sequential import arl_table, cusum_h, cusum_step, ewma_half_width, ewma_l
 from spc.core.charts.variable import imr, median_r, xbar_r, xbar_s
 from spc.core.constants import ALPHA_3SIGMA, c4, cn, d2, u_quantile, w_quantile
 from spc.core.rules import RuleSet, evaluate
@@ -33,7 +34,11 @@ ACCEPT_KINDS = ("acc-xbar", "acc-median", "acc-x")
 PRE_KIND = "pre"
 TOLERANCE_KINDS = (*ACCEPT_KINDS, PRE_KIND)
 BASE_KIND = {"acc-xbar": "xbar-s", "acc-median": "median-r", "acc-x": "imr"}
-KINDS = (*SUBGROUP_KINDS, "imr", *ATTRIBUTE_KINDS, *ACCEPT_KINDS, PRE_KIND)
+# charts with memory (draft 10.3.5.4 and 10.3.5.5): they plot a statistic that carries the earlier samples along
+SEQ_KINDS = ("cusum", "ewma")
+SEQ_RULES = ("shift_up", "shift_down")
+SEQ_DEFAULTS = {"k": 0.5, "lambda": 0.2, "fir": 0.0}  # reference value k (in standard errors), EWMA weight, head start (share of h)
+KINDS = (*SUBGROUP_KINDS, "imr", *ATTRIBUTE_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS)
 PRE_RULES = ("pre_red", "pre_two_yellow_same_side", "pre_two_yellow_opposite")
 ACCEPT_DEFAULTS = {"accept_p": 0.01, "accept_pa": 0.99}  # draft 10.3.4: 1 % out of tolerance is detected with 99 %
 PRE_QUALIFY = 5  # consecutive parts in the green zone before a run is released (classical pre-control)
@@ -95,7 +100,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         raise ValueError(f"kind must be one of {KINDS}")
     out["kind"] = d["kind"]
     kind = d["kind"]
-    n = d.get("n", 1 if kind in ("imr", "c", "acc-x") else (2 if kind == PRE_KIND else None))
+    n = d.get("n", 1 if kind in ("imr", "c", "acc-x") else (2 if kind == PRE_KIND else (1 if kind in SEQ_KINDS else None)))
     if isinstance(n, bool) or not isinstance(n, int):
         raise ValueError("n must be a whole number")
     if kind in ("imr", "c", "acc-x") and n != 1:
@@ -110,14 +115,16 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         raise ValueError("the median chart is defined for subgroup sizes 2 to 10")
     if kind in ("p", "np", "u") and not 1 <= n <= MAX_COUNT_SIZE:
         raise ValueError(f"n (the usual sample size) must be between 1 and {MAX_COUNT_SIZE}")
+    if kind in SEQ_KINDS and not 1 <= n <= MAX_N:
+        raise ValueError(f"n must be between 1 and {MAX_N}: the plotted value is the mean of the sample")
     out["n"] = n
     for key, default in (("alpha", ALPHA_3SIGMA), ("warn_alpha", None)):
         v = d.get(key, default)
         if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 1):
             raise ValueError(f"{key} must be between 0 and 1")
         out[key] = None if v is None else float(v)
-    if kind in TOLERANCE_KINDS and out["warn_alpha"] is not None:
-        raise ValueError("a tolerance related chart has no warning limits")
+    if kind in (*TOLERANCE_KINDS, *SEQ_KINDS) and out["warn_alpha"] is not None:
+        raise ValueError("this chart has no warning limits")
     if out["warn_alpha"] is not None and not out["warn_alpha"] > out["alpha"]:
         raise ValueError("warn_alpha must be larger than alpha: warning limits lie inside the control limits")
     try:
@@ -128,11 +135,11 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         extra = [name for name in RULE_NAMES if name not in ATTRIBUTE_RULES and out["rules"].get(name)]
         if extra:
             raise ValueError(f"for counts only the control limits, runs and trends apply (not {extra}): the distribution is not normal")
-    if kind in TOLERANCE_KINDS:
+    if kind in (*TOLERANCE_KINDS, *SEQ_KINDS):
         extra = [name for name in ("run_length", "trend_length", "middle_third", "two_of_three_beyond_2s", "four_of_five_beyond_1s",
                                    "fifteen_within_1s") if out["rules"].get(name)]
         if not out["rules"].get("beyond_limits") or extra:
-            raise ValueError("a tolerance related chart signals only when a limit is crossed: the zone criteria do not apply")
+            raise ValueError("this chart signals only when its own limit is crossed: the run, trend and zone criteria do not apply")
     specs = dict(d.get("specs") or {})
     if set(specs) - {"lsl", "usl", "target_class", "model", "controlled_stable", "edition", "accept_p", "accept_pa"}:
         raise ValueError("specs: unknown setting(s)")
@@ -166,7 +173,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
     if set(ocap) - {"default", "rules"}:
         raise ValueError("ocap: unknown setting(s)")
     rules = dict(ocap.get("rules") or {})
-    bad = [r for r in rules if r not in RULE_NAMES and r not in PRE_RULES]
+    bad = [r for r in rules if r not in RULE_NAMES and r not in PRE_RULES and r not in SEQ_RULES]
     if bad:
         raise ValueError(f"ocap.rules: unknown criteria {bad}")
     out["ocap"] = {"default": _step_config(ocap.get("default"), "ocap.default"),
@@ -303,6 +310,71 @@ def check_pre_point(limits: Mapping, values) -> tuple[list, list]:
     return alarms, warnings
 
 
+# ---- CUSUM and EWMA. The limits revision holds the whole design. The plotted statistic is kept in the point:
+#      CUSUM: loc = CO (upper, >= 0), var = CU (lower, <= 0).   EWMA: loc = z, var = the position i in the run (1, 2, ...).
+#      After a signal the chart starts again from its reference state, so every run length is counted like the ARL.
+
+def sequential_limits(kind: str, n: int, alpha: float, mu: float, sigma: float, k: float | None = None, lam: float | None = None,
+                      fir: float | None = None) -> dict:
+    """Design from the target mu, the standard deviation sigma of the individual values and the in-control ARL 1/alpha."""
+    if not sigma > 0:
+        raise ValueError("the standard deviation of the reference must be positive")
+    arl0 = 1.0 / alpha
+    sx = sigma / math.sqrt(n)
+    out: dict[str, Any] = {"mu": float(mu), "sigma": float(sigma), "alpha": alpha, "warn_alpha": None, "sigma_x": sx, "arl0": arl0}
+    if kind == "cusum":
+        k = SEQ_DEFAULTS["k"] if k is None else k
+        fir = SEQ_DEFAULTS["fir"] if fir is None else fir
+        if not 0.05 <= k <= 3.0:
+            raise ValueError("k, the shift to be detected in standard errors of the mean, must be between 0.05 and 3 (the draft's table uses 0.5)")
+        if not 0.0 <= fir < 1.0:
+            raise ValueError("the head start is a share of h, from 0 up to 1")
+        h = cusum_h(k, arl0)
+        out["design"] = {"k": float(k), "h": h, "fir": float(fir), "reference": float(k * sx), "decision": float(h * sx),
+                         "start": float(fir * h * sx)}
+        out["location"] = {"lcl": -h * sx, "cl": 0.0, "ucl": h * sx}
+    else:
+        lam = SEQ_DEFAULTS["lambda"] if lam is None else lam
+        if not 0.02 <= lam <= 1.0:
+            raise ValueError("lambda, the weight of the newest sample, must be between 0.02 and 1")
+        l_mult = ewma_l(lam, arl0)
+        half = ewma_half_width(sx, l_mult, lam, 10 ** 6)
+        out["design"] = {"lambda": float(lam), "L": l_mult}
+        out["location"] = {"lcl": mu - half, "cl": float(mu), "ucl": mu + half}  # the limits that every point approaches
+    out["arl"] = arl_table(kind, out["design"])
+    return out
+
+
+def ewma_band(limits: Mapping, i: int) -> dict[str, float]:
+    d = limits["design"]
+    half = ewma_half_width(limits["sigma_x"], d["L"], d["lambda"], max(1, int(i)))
+    return {"lcl": limits["mu"] - half, "cl": limits["mu"], "ucl": limits["mu"] + half}
+
+
+def check_sequential_point(kind: str, limits: Mapping, prev: Mapping | None, mean: float) -> tuple[float, float | None, list, list]:
+    """The new statistics and the signal. `prev` is the last valid point of the run ({'loc', 'var'}), None at the start."""
+    if kind == "cusum":
+        d = limits["design"]
+        co0, cu0 = (d["start"], -d["start"]) if prev is None else (prev["loc"], prev["var"])
+        co, cu = cusum_step(co0, cu0, mean, limits["mu"], d["reference"])
+        alarms = []
+        if co > d["decision"]:
+            alarms.append({"chart": "location", "rule": "shift_up"})
+        if cu < -d["decision"]:
+            alarms.append({"chart": "location", "rule": "shift_down"})
+        return co, cu, alarms, []
+    lam = limits["design"]["lambda"]
+    z0, i0 = (limits["mu"], 0) if prev is None else (prev["loc"], int(prev["var"]))
+    z, i = lam * mean + (1.0 - lam) * z0, i0 + 1
+    b = ewma_band(limits, i)
+    alarms = []
+    if z > b["ucl"]:
+        alarms.append({"chart": "location", "rule": "shift_up"})
+    elif z < b["lcl"]:
+        alarms.append({"chart": "location", "rule": "shift_down"})
+    return z, float(i), alarms, []
+
+
 # ---- attribute charts (draft 10.3.6): exact binomial and Poisson limits, one chart, no variation chart
 
 def _center_in_plot_units(kind: str, n: int, rate: float) -> float:
@@ -359,7 +431,7 @@ def limits_from_counts(kind: str, n: int, alpha: float, warn_alpha: float | None
 def check_values(config: Mapping, values) -> list[float]:
     """The measured values of one sample, checked for the kind of monitor. Returns them as floats."""
     kind, n = config["kind"], config["n"]
-    need = 2 if kind in ("p", "u") else (n if kind in (*SUBGROUP_KINDS, *ACCEPT_KINDS, PRE_KIND) else 1)
+    need = 2 if kind in ("p", "u") else (n if kind in (*SUBGROUP_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS) else 1)
     if not isinstance(values, (list, tuple)) or len(values) != need or not all(
             isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values):
         raise MonitorError("wrong_value_count", f"this monitor takes {need} value(s) per sample", need=need, n=need)

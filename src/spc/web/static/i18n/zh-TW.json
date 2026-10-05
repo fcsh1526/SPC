@@ -748,5 +748,20 @@
   "mon.qualified": "可放行：最近連續 {greens} 件在綠區（至少需要 {needed} 件）。",
   "mon.not_qualified": "尚未放行：連續在綠區的零件 {greens} 件，需要 {needed} 件。",
   "mon.pre_note": "預控制圖只依公差監視開機階段，不能用來控制製程：只在還沒有以製程為基礎的界限時使用。草案沒有給它的規則，這裡用的是傳統規則。",
-  "error.report_not_for_precontrol": "預控制圖沒有製程能力報告：它只監視開機階段。"
+  "error.report_not_for_precontrol": "預控制圖沒有製程能力報告：它只監視開機階段。",
+  "analysis.chart_cusum": "CUSUM 圖（累積和）",
+  "analysis.chart_ewma": "EWMA 圖（指數加權移動平均）",
+  "result.kind_cusum": "CUSUM 圖：上累積和（CO）與下累積和（CU）",
+  "result.kind_ewma": "EWMA 圖：指數加權移動平均",
+  "alarmrule.shift_up": "偵測到平均值向上偏移",
+  "alarmrule.shift_down": "偵測到平均值向下偏移",
+  "mon.f_cusum_k": "參考值 k（要偵測的偏移量，單位為平均值的標準誤）",
+  "mon.f_cusum_fir": "起始偏置（佔 h 的比例；0 為無，0.5 為快速起始反應）",
+  "mon.f_ewma_lambda": "最新樣本的權重（λ）",
+  "mon.seq_note": "有記憶的管制圖擅長找出小而持續的平均值偏移，但找大幅跳動比休哈特圖慢：請在旁邊另設一個 X̄ 監控（草案 10.3.5.5）。它以穩定的變異為前提。每次發出警報後，圖從參考狀態重新開始。",
+  "mon.limits_cusum": "界限第 {rev} 版。CUSUM：目標值 {mu}、標準差 {sigma}、k = {k}、決策區間 h = {h}（起始偏置 {fir}）、受控時平均連串長度 {arl0}。累積和的下限／零／上限：",
+  "mon.limits_ewma": "界限第 {rev} 版。EWMA：目標值 {mu}、標準差 {sigma}、λ = {lam}、L = {L}、受控時平均連串長度 {arl0}。圖跑開之後的下限／目標值／上限：",
+  "mon.arl_by_shift": "依平均值偏移量（單位為標準誤）的平均連串長度：{table}",
+  "mon.cusum_restart_note": "圖上畫的是上累積和 CO（藍）與下累積和 CU（紫）。發出警報後，兩者都回到起始值重新開始。",
+  "mon.ewma_limits_note": "界限在開始時較窄，隨每個樣本變寬，直到上列數值。表中的連串長度是以寬界限計算的，所以一開始就發生的偏移會稍快被找到。發出警報後，圖從目標值重新開始。"
 }

@@ -13,6 +13,7 @@
   --ok: #1f7a4d;
   --alarm: #c62828;
   --series: #1f5fbf;
+  --series2: #7b3fa0;
   --limit: #8a5a00;
   --center: #5d6877;
   --suspect: #fff2c2;
@@ -34,6 +35,7 @@
     --ok: #5fcf97;
     --alarm: #ff6b6b;
     --series: #6aa4ff;
+    --series2: #c79bff;
     --limit: #e0b252;
     --center: #9aa5b4;
     --suspect: #4a4115;
@@ -121,6 +123,9 @@ ul.alarms { font-size: 0.9rem; color: var(--alarm); }
 .chart .series { fill: none; stroke: var(--series); stroke-width: 1.5; }
 .chart .dot { fill: var(--series); }
 .chart .dot.alarm { fill: var(--alarm); }
+.chart .series2 { fill: none; stroke: var(--series2); stroke-width: 1.5; }
+.chart .dot2 { fill: var(--series2); }
+.chart .dot2.alarm { fill: var(--alarm); }
 .chart .limit { stroke: var(--limit); stroke-width: 1.2; stroke-dasharray: 6 4; }
 .chart .center { stroke: var(--center); stroke-width: 1; }
 .chart .axis { stroke: var(--line); }

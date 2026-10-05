@@ -848,3 +848,63 @@ def test_acceptance_and_pre_control_monitors_in_the_browser(server, browser, app
     expect(page.locator("#md-qual")).to_contain_text("尚未放行")
     assert problems == [], problems
     ctx.close()
+
+
+def test_cusum_and_ewma_monitors_in_the_browser(server, browser, app):
+    expect = playwright_sync.expect
+    problems = []
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=monitor]")
+
+    def create(name, kind):
+        page.click("#mon-new")
+        page.fill("#me-name", name)
+        page.fill("#me-characteristic", "fill weight")
+        page.select_option("#me-kind", kind)
+        expect(page.locator("#me-seq-box")).to_be_visible()
+        expect(page.locator("#me-warn-label")).to_be_hidden()
+        page.fill("#me-mu", "100")
+        page.fill("#me-sigma", "1")
+        page.locator("#me-ocap tr[data-key=default] input").nth(0).fill("Check the filler")
+        page.locator("#me-ocap tr[data-key=default] input").nth(1).fill("Setter")
+
+    create("Filler CUSUM", "cusum")
+    expect(page.locator("#me-k-label")).to_be_visible()
+    expect(page.locator("#me-lambda-label")).to_be_hidden()
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Filler CUSUM")
+    expect(page.locator("#md-seq-note")).to_be_visible()
+    expect(page.locator("#md-chart-var")).to_be_hidden()
+    page.click("#md-ack-btn")
+    for i in range(10):  # a shift of one standard deviation adds 0.5 to the upper sum each time: the tenth sample passes h = 4.77
+        page.fill("#md-v0", "101")
+        page.click("#md-submit")
+        expect(page.locator("#md-points tr")).to_have_count(i + 2)
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("Upward shift")
+    expect(page.locator("#md-chart-loc svg polyline.series2")).to_have_count(1)
+    page.locator("#md-limits").locator("xpath=ancestor::details").locator("summary").click()
+    expect(page.locator("#md-limits")).to_contain_text("decision interval h = 4.77")
+    expect(page.locator("#md-limits")).to_contain_text("Average run length by shift")
+    page.click("#mon-back")
+
+    create("Filler EWMA", "ewma")
+    expect(page.locator("#me-lambda-label")).to_be_visible()
+    expect(page.locator("#me-k-label")).to_be_hidden()
+    page.fill("#me-lambda", "0.2")
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Filler EWMA")
+    page.click("#md-ack-btn")
+    for i in range(4):  # z = 1.5 (1 - 0.8^i) first passes the narrow limits of the start at the fourth sample
+        page.fill("#md-v0", "101.5")
+        page.click("#md-submit")
+        expect(page.locator("#md-points tr")).to_have_count(i + 2)
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("Upward shift")
+    expect(page.locator("#md-chart-loc svg circle.alarm")).to_have_count(1)
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#md-seq-note")).to_contain_text("有記憶的管制圖")
+    assert problems == [], problems
+    ctx.close()

@@ -707,3 +707,109 @@ def test_an_acceptance_monitor_and_a_pre_control_monitor_end_to_end(env):
     assert c["eng"].post(f"/api/monitors/{pre}/ongoing-report", json={}).status_code == 400
     assert c["eng"].post("/api/monitors", json={"config": {"name": "z", "characteristic": "z", "kind": "pre", "specs": {"lsl": 1, "usl": 2}},
                                                 "source": PARAMS}).status_code == 400
+
+
+# ------------------------------------------------------------------ CUSUM and EWMA
+
+def test_the_cusum_arl_reproduces_the_table_of_the_draft():
+    from spc.core.charts.sequential import cusum_arl, cusum_h
+    h = cusum_h(0.5, 370.4)
+    assert h == pytest.approx(4.775, abs=0.002)
+    draft = {0.0: 370.4, 0.2: 163.6, 0.4: 54.5, 0.6: 24.6, 0.8: 14.4, 1.0: 9.9, 1.2: 7.5, 1.4: 6.1, 1.6: 5.1, 1.8: 4.4, 2.0: 3.9,
+             2.2: 3.5, 2.4: 3.1, 2.6: 2.9, 2.8: 2.7, 3.0: 2.5}
+    for shift, value in draft.items():
+        assert cusum_arl(h, 0.5, shift) == pytest.approx(value, abs=0.06), shift
+
+
+@pytest.mark.parametrize("kind,shift", [("cusum", 0.0), ("cusum", 1.0), ("ewma", 0.0), ("ewma", 1.0), ("ewma", 0.5)])
+def test_the_calculated_arl_agrees_with_a_simulation_of_the_monitor_rule(kind, shift):
+    from spc.monitor.model import check_sequential_point, sequential_limits
+    lim = sequential_limits(kind, 1, 1 / 100.0, 10.0, 0.1)  # in-control ARL 100: short enough to simulate
+    expected = {r["shift"]: r["arl"] for r in lim["arl"]}.get(shift)
+    if expected is None:
+        from spc.core.charts.sequential import ewma_arl
+        expected = ewma_arl(lim["design"]["L"], lim["design"]["lambda"], shift)
+    rng = np.random.default_rng(4)
+    lengths = []
+    for _ in range(1500):
+        # the table is for the limits that an EWMA approaches; the exact limits are narrower at the start (tested below)
+        prev, i = ({"loc": 10.0, "var": 10.0 ** 6} if kind == "ewma" else None), 0
+        while True:
+            i += 1
+            loc, var, alarms, _w = check_sequential_point(kind, lim, prev, 10.0 + shift * 0.1 + rng.normal(0, 0.1))
+            if alarms:
+                break
+            prev = {"loc": loc, "var": var + 1 if kind == "ewma" else var}
+        lengths.append(i)
+    assert np.mean(lengths) == pytest.approx(expected, rel=0.12)
+
+
+def test_ewma_limits_at_the_start_are_narrower_so_a_shift_at_the_start_is_found_sooner():
+    from spc.monitor.model import check_sequential_point, ewma_band, sequential_limits
+    lim = sequential_limits("ewma", 1, 1 / 100.0, 10.0, 0.1)
+    assert ewma_band(lim, 1)["ucl"] < ewma_band(lim, 5)["ucl"] < ewma_band(lim, 1000)["ucl"] == pytest.approx(lim["location"]["ucl"])
+
+
+def test_cusum_and_ewma_configurations_and_limits():
+    cfg = {"name": "x", "characteristic": "y", "kind": "cusum", "n": 4}
+    assert validate_config(cfg)["n"] == 4 and validate_config({**cfg, "kind": "ewma", "n": 1})["warn_alpha"] is None
+    for change in ({"warn_alpha": 0.05}, {"rules": {"run_length": 7}}, {"n": 0}, {"n": 26}):
+        with pytest.raises(ValueError):
+            validate_config({**cfg, **change})
+    from spc.monitor.model import sequential_limits
+    for bad in ({"k": 0.0}, {"fir": 1.0}):
+        with pytest.raises(ValueError):
+            sequential_limits("cusum", 1, ALPHA_3SIGMA, 10, 0.1, **bad)
+    with pytest.raises(ValueError):
+        sequential_limits("ewma", 1, ALPHA_3SIGMA, 10, 0.1, lam=1.5)
+    c = sequential_limits("cusum", 4, ALPHA_3SIGMA, 10.0, 0.2, fir=0.5)
+    assert c["location"]["ucl"] == pytest.approx(4.775 * 0.1, rel=0.01) and c["design"]["start"] == pytest.approx(c["design"]["decision"] / 2)
+
+
+def test_a_cusum_monitor_finds_a_small_lasting_shift_that_shewhart_misses_and_starts_again_after_the_signal(env):
+    app, c = env
+    cfg = {"name": "Fill weight", "characteristic": "weight", "kind": "cusum", "n": 1}
+    mid = make_monitor(c["eng"], cfg, {"type": "parameters", "mu": 100.0, "sigma": 1.0})
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    assert lim["design"]["h"] == pytest.approx(4.775, abs=0.01) and any(r["shift"] == 1.0 for r in lim["arl"])
+    ack(c["oper"], mid)
+    status, first = [], None
+    for i in range(30):  # a shift of 1 sigma: far inside the 3 sigma limits of a Shewhart chart
+        r = enter(c["oper"], mid, [101.0 + (0.05 if i % 2 else -0.05)])
+        status.append(r["status"])
+        if r["status"] == "alarm" and first is None:
+            first = i
+            assert r["point"]["alarms"][0]["rule"] == "shift_up" and r["point"]["loc"] > lim["design"]["decision"]
+            break
+    assert first is not None and first < 15
+    nxt = enter(c["oper"], mid, [100.0])  # the chart starts again after the signal
+    assert nxt["point"]["loc"] == 0.0 and nxt["status"] != "alarm"
+    down = [enter(c["oper"], mid, [99.0])["status"] for _ in range(12)]
+    assert "alarm" in down
+    view = c["view"].get(f"/api/monitors/{mid}").json()
+    assert all(p["var"] <= 0.0 for p in view["points"] if p["valid"])  # var holds the lower CUSUM
+    r = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [1.0, 2.0]})
+    assert r.status_code == 400
+
+
+def test_an_ewma_monitor_has_limits_that_widen_from_the_start(env):
+    app, c = env
+    mid = make_monitor(c["eng"], {"name": "Moisture", "characteristic": "moisture", "kind": "ewma", "n": 3},
+                       {"type": "parameters", "mu": 5.0, "sigma": 0.3, "lambda": 0.1})
+    ack(c["oper"], mid)
+    for v in ([5.0, 5.1, 4.9], [5.05, 5.0, 5.1], [4.95, 5.0, 5.0]):
+        assert enter(c["oper"], mid, v)["status"] == "ok"
+    view = c["view"].get(f"/api/monitors/{mid}").json()
+    widths = [p["band"]["ucl"] - p["band"]["lcl"] for p in view["points"]]
+    assert widths[0] < widths[1] < widths[2] < view["limits"]["location"]["ucl"] - view["limits"]["location"]["lcl"]
+    assert [p["var"] for p in view["points"]] == [1.0, 2.0, 3.0]
+    z = view["points"][0]["loc"]
+    assert z == pytest.approx(0.1 * 5.0 + 0.9 * 5.0)
+    r = enter(c["oper"], mid, [5.8, 5.9, 5.85])
+    assert r["status"] in ("ok", "alarm")
+    for _ in range(10):
+        r = enter(c["oper"], mid, [5.7, 5.75, 5.8])
+        if r["status"] == "alarm":
+            break
+    assert r["status"] == "alarm" and r["point"]["alarms"][0]["rule"] == "shift_up"
+    assert c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code in (200, 409)
