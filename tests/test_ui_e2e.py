@@ -1103,3 +1103,45 @@ def test_autocorrelated_and_multistream_monitors_in_the_browser(server, browser,
     expect(page.locator("#md-dep-note")).to_contain_text("多個串流")
     assert problems == [], problems
     ctx.close()
+
+
+def test_mcusum_monitor_in_the_browser(server, browser, app):
+    expect = playwright_sync.expect
+    problems = []
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=monitor]")
+    page.click("#mon-new")
+    page.fill("#me-name", "Pair MCUSUM")
+    page.fill("#me-characteristic", "pair")
+    page.select_option("#me-kind", "mcusum")
+    expect(page.locator("#me-k-label")).to_be_visible()
+    expect(page.locator("#me-fir-label")).to_be_hidden()
+    expect(page.locator("#me-lambda-label")).to_be_hidden()
+    expect(page.locator("#me-mv-box")).to_be_visible()
+    page.fill("#me-mv-names", "length, width")
+    page.fill("#me-mv-mu", "10, 5")
+    page.fill("#me-mv-cov", "0.04 0.012\n0.012 0.0225")
+    page.locator("#me-ocap tr[data-key=default] input").nth(0).fill("Check the setup")
+    page.locator("#me-ocap tr[data-key=default] input").nth(1).fill("Setter")
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Pair MCUSUM")
+    expect(page.locator("#md-values input")).to_have_count(2)
+    page.click("#md-ack-btn")
+    for i in range(12):
+        page.fill("#md-v0", "10.25")
+        page.fill("#md-v1", "5.15")
+        page.click("#md-submit")
+        expect(page.locator("#md-points tr")).to_have_count(i + 2)
+        if page.locator("#md-result .alarm-box").count():
+            break
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("OUT OF CONTROL")
+    page.locator("#md-limits").locator("xpath=ancestor::details").locator("summary").click()
+    expect(page.locator("#md-limits")).to_contain_text("MCUSUM (Crosier)")
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#md-limits")).to_contain_text("決策界限")
+    assert problems == [], problems
+    ctx.close()

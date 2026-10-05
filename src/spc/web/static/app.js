@@ -1038,7 +1038,7 @@
   const BASE_KIND = { "acc-xbar": "xbar-s", "acc-median": "median-r", "acc-x": "imr", zmr: "imr", "ext-xbar": "xbar-s" };
   const SHAPE_KINDS = ["ext-xbar", "pearson"];
   const DEP_KINDS = ["ar", "multistream"];
-  const VEC_KINDS = ["t2", "mewma"];
+  const VEC_KINDS = ["t2", "mewma", "mcusum"];
   const isVec = (kind) => VEC_KINDS.includes(kind);
   const lines = (text) => text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== "");
   const numbers = (text) => text.split(/[\s,;]+/).filter((x) => x !== "").map(Number);
@@ -1405,10 +1405,10 @@
       box.appendChild(el("p", "", row(t("result.kind_" + v.monitor.kind), lim.location)));
     } else if (isVec(v.monitor.kind)) {
       const kind = v.monitor.kind;
-      box.appendChild(el("p", "", t(kind === "t2" ? (lim.n_ref ? "mon.limits_t2_estimated" : "mon.limits_t2") : "mon.limits_mewma_mv",
+      box.appendChild(el("p", "", t(kind === "t2" ? (lim.n_ref ? "mon.limits_t2_estimated" : "mon.limits_t2") : kind === "mcusum" ? "mon.limits_mcusum_mv" : "mon.limits_mewma_mv",
         { rev: lim.revision, p: lim.p, names: lim.names.join(", "), target: lim.target.map((x) => sig(x, 6)).join(", "), n: lim.n_ref, ucl: sig(lim.location.ucl, 5),
-          lam: lim.design.lambda, arl0: sig(lim.arl0, 4) })));
-      if (kind === "mewma") box.appendChild(el("p", "muted", t("mon.mewma_simulated_note")));
+          lam: lim.design.lambda, k: lim.design.k, arl0: sig(lim.arl0, 4) })));
+      if (kind === "mewma" || kind === "mcusum") box.appendChild(el("p", "muted", t("mon.mewma_simulated_note")));
     } else if (v.monitor.kind === "ar") {
       const d = lim.diagnostics || {};
       box.appendChild(el("p", "", t("mon.limits_ar", { rev: lim.revision, order: lim.order, phi: lim.phi.map((x) => sig(x, 4)).join(", "), mu: sig(lim.process_mean, 6), sigma: sig(lim.sigma, 5) })));
@@ -1476,6 +1476,7 @@
     const kind = M.view.monitor.kind;
     if (SEQ_KINDS.includes(kind) && type !== "rate") Object.assign(source, kind === "cusum" ? { k: num("#nl-k"), fir: num("#nl-fir") } : { lambda: num("#nl-lambda") });
     if (kind === "mewma") source.lambda = num("#nl-lambda");
+    if (kind === "mcusum") source.k = num("#nl-k");
     if (SHAPE_KINDS.includes(kind)) Object.assign(source, shapeExtra("nl", kind, type));
     if (DEP_KINDS.includes(kind)) source = depSource("nl", kind, type, source);
     await guarded(async () => {
@@ -1505,7 +1506,7 @@
       if (!vec) $("#nl-mu-label").hidden = type !== "parameters" || isTol(M.view.monitor.kind);
       if ($("#nl-type").selectedOptions[0] && $("#nl-type").selectedOptions[0].disabled) { $("#nl-type").value = ok[0]; return syncSourceFields(); }
       const sizes = M.view.monitor.kind === "p" || M.view.monitor.kind === "u";
-      $$(".nl-seq").forEach((e) => { e.hidden = !((SEQ_KINDS.includes(M.view.monitor.kind) || M.view.monitor.kind === "mewma") && e.classList.contains("nl-" + M.view.monitor.kind)); });
+      $$(".nl-seq").forEach((e) => { e.hidden = !((SEQ_KINDS.includes(M.view.monitor.kind) || M.view.monitor.kind === "mewma" || M.view.monitor.kind === "mcusum") && e.classList.contains("nl-" + M.view.monitor.kind)); });
       $$(".nl-sizes").forEach((e) => { e.hidden = type !== "counts" || !sizes; });
     }
   }
@@ -1617,7 +1618,8 @@
     $("#me-warn-label").hidden = tol || SEQ_KINDS.includes(kind) || isVec(kind) || SHAPE_KINDS.includes(kind) || kind === "multistream"; if (tol || SEQ_KINDS.includes(kind) || isVec(kind) || SHAPE_KINDS.includes(kind) || kind === "multistream") $("#me-warn").value = "";
     $("#me-accept-box").hidden = !ACC_KINDS.includes(kind);
     const seq = SEQ_KINDS.includes(kind);
-    $("#me-seq-box").hidden = !(seq || kind === "mewma"); $("#me-k-label").hidden = $("#me-fir-label").hidden = kind !== "cusum"; $("#me-lambda-label").hidden = !(kind === "ewma" || kind === "mewma");
+    $("#me-seq-box").hidden = !(seq || kind === "mewma" || kind === "mcusum"); $("#me-k-label").hidden = !(kind === "cusum" || kind === "mcusum");
+    $("#me-fir-label").hidden = kind !== "cusum"; $("#me-lambda-label").hidden = !(kind === "ewma" || kind === "mewma");
     if (kind === "mewma" && $("#me-lambda").dataset.kind !== "mewma") $("#me-lambda").value = 0.1;
     if (kind === "ewma" && $("#me-lambda").dataset.kind === "mewma") $("#me-lambda").value = 0.2;
     $("#me-lambda").dataset.kind = kind;
@@ -1670,7 +1672,7 @@
         let source = type === "parameters" && !isVec(config.kind) ? (isTol(config.kind) ? { type, sigma: Number($("#me-sigma").value) } : { type, mu: Number($("#me-mu").value), sigma: Number($("#me-sigma").value) })
           : type === "tolerance" ? { type }
           : type === "parts" ? partsSource($("#me-parts").value)
-          : isVec(config.kind) ? vectorSource(type, $("#me-mv-names").value, $("#me-mv-mu").value, $("#me-mv-cov").value, $("#me-mv-rows").value, config.kind === "mewma" ? { lambda: Number($("#me-lambda").value) } : {})
+          : isVec(config.kind) ? vectorSource(type, $("#me-mv-names").value, $("#me-mv-mu").value, $("#me-mv-cov").value, $("#me-mv-rows").value, config.kind === "mewma" ? { lambda: Number($("#me-lambda").value) } : config.kind === "mcusum" ? { k: Number($("#me-k").value) } : {})
           : type === "rate" ? { type, rate: Number($("#me-rate").value) }
           : type === "counts" ? countsSource($("#me-counts").value, $("#me-sizes").value) : { type, dataset_id: $("#me-dataset").value };
         if (SEQ_KINDS.includes(config.kind) && type === "parameters" || SEQ_KINDS.includes(config.kind) && type === "dataset") {

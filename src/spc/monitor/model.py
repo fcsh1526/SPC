@@ -44,7 +44,7 @@ SEQ_DEFAULTS = {"k": 0.5, "lambda": 0.2, "fir": 0.0}  # reference value k (in st
 # short runs (draft 10.3.2.9): Z-MR, the values of several products are standardised with the target and the standard
 # deviation of their product. Several related characteristics (draft 10.3.2.8): Hotelling's T2 and MEWMA.
 ZMR_KIND = "zmr"
-VECTOR_KINDS = ("t2", "mewma")
+VECTOR_KINDS = ("t2", "mewma", "mcusum")
 MAX_PARTS = 500
 BASE_KIND["zmr"] = "imr"
 # charts for processes that are not plain normal and stable (draft 10.3.5.2 Pearson, 10.3.5.3 extended limits): the limits
@@ -450,7 +450,8 @@ def estimate_reference(rows):
     return mu, cov, n
 
 
-def vector_limits(kind: str, m: int, alpha: float, names, mu, cov, n_ref: int | None, lam: float | None = None) -> dict:
+def vector_limits(kind: str, m: int, alpha: float, names, mu, cov, n_ref: int | None, lam: float | None = None,
+                  k: float | None = None) -> dict:
     cov_a = mv.check_covariance(cov)
     mu_a = np.asarray(mu, dtype=float)
     if mu_a.ndim != 1 or mu_a.size != cov_a.shape[0] or not np.all(np.isfinite(mu_a)):
@@ -461,6 +462,12 @@ def vector_limits(kind: str, m: int, alpha: float, names, mu, cov, n_ref: int | 
     if kind == "t2":
         out["design"] = {"estimated": n_ref is not None}
         out["location"] = {"lcl": None, "cl": mv.hotelling_center(p, n_ref), "ucl": mv.hotelling_ucl(p, alpha, n_ref)}
+    elif kind == "mcusum":
+        k = 0.5 if k is None else k
+        if not 0.05 <= k <= 3.0:
+            raise ValueError("k, the reference value in standard distances, must be between 0.05 and 3 (0.5 is usual)")
+        out["design"] = {"k": float(k), "h_simulated": True}
+        out["location"] = {"lcl": None, "cl": None, "ucl": mv.mcusum_h(p, float(k), round(1.0 / alpha, 4))}
     else:
         lam = 0.1 if lam is None else lam
         if not 0.02 <= lam <= 1.0:
@@ -479,6 +486,8 @@ def check_vector_point(kind: str, limits: Mapping, m: int, earlier, values) -> t
     detail = None
     if kind == "t2":
         loc = mv.t2_value(xbar, mu, cov, m, limits["n_ref"])
+    elif kind == "mcusum":
+        loc = mv.mcusum_y([*earlier, xbar], mu, cov, m, limits["design"]["k"])
     else:
         loc = mv.mewma_q([*earlier, xbar], mu, cov, m, limits["design"]["lambda"])
     alarms = []

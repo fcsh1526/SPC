@@ -499,6 +499,7 @@
           <option value="zmr" data-i18n="analysis.chart_zmr"></option>
           <option value="t2" data-i18n="analysis.chart_t2"></option>
           <option value="mewma" data-i18n="analysis.chart_mewma"></option>
+          <option value="mcusum" data-i18n="analysis.chart_mcusum"></option>
           <option value="ext-xbar" data-i18n="analysis.chart_ext-xbar"></option>
           <option value="pearson" data-i18n="analysis.chart_pearson"></option>
           <option value="ar" data-i18n="analysis.chart_ar"></option>
@@ -718,7 +719,7 @@
           <label class="nl-dep nl-ms nl-par nl-obs" hidden><span data-i18n="mon.f_stream_names"></span><input id="nl-ms-names" type="text" placeholder="S1, S2, S3, S4"></label>
           <label class="nl-dep nl-ms nl-par" hidden><span data-i18n="mon.f_stream_offsets"></span><input id="nl-ms-offsets" type="text" placeholder="0.3, -0.1, 0, -0.2"></label>
           <label class="nl-dep nl-ms nl-par" hidden><span data-i18n="mon.f_stream_sigma_time"></span><input id="nl-ms-sigma-time" type="number" step="any" min="0" value="0"></label>
-          <label class="nl-seq nl-cusum" hidden><span data-i18n="mon.f_cusum_k"></span><input id="nl-k" type="number" min="0.05" max="3" step="any" value="0.5"></label>
+          <label class="nl-seq nl-cusum nl-mcusum" hidden><span data-i18n="mon.f_cusum_k"></span><input id="nl-k" type="number" min="0.05" max="3" step="any" value="0.5"></label>
           <label class="nl-seq nl-cusum" hidden><span data-i18n="mon.f_cusum_fir"></span><input id="nl-fir" type="number" min="0" max="0.95" step="any" value="0"></label>
           <label class="nl-seq nl-ewma nl-mewma" hidden><span data-i18n="mon.f_ewma_lambda"></span><input id="nl-lambda" type="number" min="0.02" max="1" step="any" value="0.2"></label>
           <label class="nl-parts wide" hidden><span data-i18n="mon.src_parts_list"></span><textarea id="nl-parts" rows="4"></textarea></label>

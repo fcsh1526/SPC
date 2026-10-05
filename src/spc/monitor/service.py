@@ -326,12 +326,13 @@ class MonitorService:
         """T2 and MEWMA: the target and covariance of the characteristics, given or estimated from observations (or points of this monitor)."""
         kind, m, alpha = monitor["kind"], monitor["n"], monitor["alpha"]
         typ = source.get("type")
-        lam = source.get("lambda")
-        if lam is not None and (isinstance(lam, bool) or not isinstance(lam, (int, float)) or not math.isfinite(lam)):
-            raise MonitorError("bad_source", "lambda must be a number")
+        lam, kref = source.get("lambda"), source.get("k")
+        for name, v in (("lambda", lam), ("k", kref)):
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)):
+                raise MonitorError("bad_source", f"{name} must be a number")
         try:
             if typ == "parameters":
-                limits = vector_limits(kind, m, alpha, source.get("names"), source.get("mu"), source.get("cov"), None, lam)
+                limits = vector_limits(kind, m, alpha, source.get("names"), source.get("mu"), source.get("cov"), None, lam, kref)
                 described = {"type": "parameters", "p": limits["p"]}
             elif typ in ("observations", "points"):
                 if typ == "observations":
@@ -352,7 +353,7 @@ class MonitorService:
                     described = {"type": "points", "seq_from": lo, "seq_to": hi}
                     source = {**source, "names": prev["names"]}
                 mu, cov, n_ref = estimate_reference(rows)
-                limits = vector_limits(kind, m, alpha, source.get("names"), mu, cov, n_ref if kind == "t2" else None, lam)
+                limits = vector_limits(kind, m, alpha, source.get("names"), mu, cov, n_ref if kind == "t2" else None, lam, kref)
                 described["n_observations"] = n_ref
             else:
                 raise ValueError("source.type must be parameters, observations or points")
@@ -363,6 +364,8 @@ class MonitorService:
             raise MonitorError("bad_source", str(exc)) from None
         if limits["design"].get("lambda") is not None:
             described["lambda"] = limits["design"]["lambda"]
+        if limits["design"].get("k") is not None:
+            described["k"] = limits["design"]["k"]
         return limits, described
 
     def _tolerance_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
@@ -532,7 +535,7 @@ class MonitorService:
                 if len(values) != monitor["n"] * p_now:
                     raise MonitorError("wrong_value_count", f"give {monitor['n']} row(s) of {p_now} value(s)", n=monitor["n"] * p_now)
                 earlier = []
-                if monitor["kind"] == "mewma":  # the state is recomputed from the run, so declared invalid samples drop out correctly
+                if monitor["kind"] in ("mewma", "mcusum"):  # the state is recomputed from the run, so declared invalid samples drop out correctly
                     for vals, signalled in self.store.run_points(monitor_id, limits["revision"]):
                         if signalled:
                             break

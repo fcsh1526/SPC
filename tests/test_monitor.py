@@ -1206,3 +1206,70 @@ def test_a_multistream_monitor_end_to_end(env):
                              {"type": "observations", "rows": [row[:3] for row in rows]})):
         assert c["eng"].post("/api/monitors", json={"config": {**cfg, "name": f"bad {i}"}, "source": bad}).status_code == 400
     assert c["eng"].post("/api/monitors", json={"config": {**cfg, "name": "one stream", "n": 1}, "source": par}).status_code == 400
+
+
+# ------------------------------------------------------------------ MCUSUM
+
+def test_the_mcusum_limit_agrees_with_crosier_and_the_recursion_is_the_published_one():
+    from spc.core.charts import multivariate as mv
+    h = mv.mcusum_h(2, 0.5, 200.0)
+    assert h == pytest.approx(5.5, abs=0.12)  # Crosier 1988: p = 2, k = 0.5, in-control ARL about 200
+    assert mv._mcusum_run_length(2, 0.5, 5.5, 20000, 9, 20000) == pytest.approx(200.0, rel=0.07)
+    # one step by hand: S0 = 0, x - mu = (3, 4): C = 5 > k, S = (3, 4)(1 - 0.5/5) = (2.7, 3.6), Y = 4.5
+    assert mv.mcusum_y([[3.0, 4.0]], [0.0, 0.0], np.eye(2), 1, 0.5) == pytest.approx(4.5)
+    # inside the reference value the sum is reset to zero
+    assert mv.mcusum_y([[0.2, 0.1]], [0.0, 0.0], np.eye(2), 1, 0.5) == 0.0
+    # two steps: S1 = (2.7, 3.6); v = S1 + (1, 0) = (3.7, 3.6), C = 5.162, S2 = v (1 - 0.5/C)
+    c = math.hypot(3.7, 3.6)
+    assert mv.mcusum_y([[3.0, 4.0], [1.0, 0.0]], [0.0, 0.0], np.eye(2), 1, 0.5) == pytest.approx(c - 0.5)
+    # the mean of m = 4 observations has the covariance S/4: covariance 4 I and m = 4 is the identity for the mean
+    assert mv.mcusum_y([[3.0, 4.0]], [1.0, 1.0], 4 * np.eye(2), 4, 0.5) == pytest.approx(mv.mcusum_y([[2.0, 3.0]], [0.0, 0.0], np.eye(2), 1, 0.5))
+
+
+def test_mcusum_finds_a_small_shift_much_sooner_than_t2():
+    from spc.core.charts import multivariate as mv
+    from spc.monitor.model import check_vector_point, vector_limits
+    cov = np.array([[0.04, 0.012], [0.012, 0.0225]])
+    mu = np.array([10.0, 5.0])
+    chol = np.linalg.cholesky(cov)
+    shift = chol @ np.array([0.75, 0.0])  # 0.75 standard deviations in the whitened space
+    rng = np.random.default_rng(41)
+    run = {}
+    for kind in ("t2", "mcusum"):
+        lim = vector_limits(kind, 1, 1 / 200.0, None, mu, cov, None, None, 0.5)
+        lengths = []
+        for _ in range(250):
+            earlier, i = [], 0
+            while i < 3000:
+                i += 1
+                x = mu + shift + chol @ rng.standard_normal(2)
+                _loc, alarms, _w = check_vector_point(kind, lim, 1, earlier, list(x))
+                if alarms:
+                    break
+                earlier.append(x)
+            lengths.append(i)
+        run[kind] = np.mean(lengths)
+    assert run["mcusum"] < run["t2"] / 3, run
+
+
+def test_an_mcusum_monitor_end_to_end(env):
+    app, c = env
+    cov = [[0.04, 0.012], [0.012, 0.0225]]
+    mid = make_monitor(c["eng"], {"name": "Pair MCUSUM", "characteristic": "pair", "kind": "mcusum", "n": 1},
+                       {"type": "parameters", "mu": [10, 5], "cov": cov, "k": 0.5})
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    assert lim["design"]["k"] == 0.5 and 3.5 < lim["location"]["ucl"] < 7.0
+    ack(c["oper"], mid)
+    first = enter(c["oper"], mid, [10.0, 5.0])
+    assert first["status"] == "ok" and first["point"]["loc"] == 0.0
+    status = []
+    for _ in range(40):  # a small lasting shift of both characteristics
+        status.append(enter(c["oper"], mid, [10.2, 5.12])["status"])
+        if status[-1] == "alarm":
+            break
+    assert status[-1] == "alarm" and len(status) < 40
+    nxt = enter(c["oper"], mid, [10.0, 5.0])  # starts again after the signal
+    assert nxt["status"] != "alarm" and nxt["point"]["loc"] == 0.0
+    for bad in ({"type": "parameters", "mu": [10, 5], "cov": cov, "k": 0.0}, {"type": "parameters", "mu": [10, 5], "cov": cov, "k": "x"}):
+        assert c["eng"].post("/api/monitors", json={"config": {"name": f"m{bad['k']}", "characteristic": "x", "kind": "mcusum"}, "source": bad}).status_code == 400
+    assert c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code in (400, 409)

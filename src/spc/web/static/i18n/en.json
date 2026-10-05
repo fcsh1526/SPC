@@ -840,5 +840,8 @@
   "mon.chart_level": "Level (mean over the streams)",
   "mon.stream": "Stream",
   "mon.stream_offset": "Fixed difference from the mean",
-  "mon.stream_detail": "Streams (z = deviation from the mean over the streams and from the stream's own offset, in standard deviations): {list}"
+  "mon.stream_detail": "Streams (z = deviation from the mean over the streams and from the stream's own offset, in standard deviations): {list}",
+  "analysis.chart_mcusum": "MCUSUM chart (several characteristics, cumulative sum)",
+  "result.kind_mcusum": "MCUSUM chart – several characteristics together",
+  "mon.limits_mcusum_mv": "Limits revision {rev}. MCUSUM (Crosier) of {p} characteristics ({names}), k = {k}, target {target}. Decision limit h = {ucl} for an in-control run length of {arl0}; there is no lower limit. After a signal the sum starts again at zero."
 }

@@ -8,12 +8,16 @@ The draft names the charts and gives no formulas, so the standard ones are used 
   There is no lower limit: only a large T2 signals.
 * MEWMA: Z_i = lambda x_i + (1 - lambda) Z_(i-1), Z_0 = 0 (x_i centred), Q_i = Z_i' [lambda/(2-lambda) (1 - (1-lambda)^(2i)) S/m]^-1 Z_i.
   Signal when Q_i > h. h is found by simulating the run length for the in-control ARL asked for (no closed form exists).
+* MCUSUM (Crosier 1988): C_i = sqrt((S_(i-1) + x_i - mu)' S^-1 (S_(i-1) + x_i - mu)),
+  S_i = (S_(i-1) + x_i - mu)(1 - k / C_i) when C_i > k, else 0; signal when Y_i = sqrt(S_i' S^-1 S_i) > h. k = 0.5 is usual.
+  h by simulating the run length, like the MEWMA. Crosier's value for p = 2, k = 0.5, ARL 200 is h = 5.5.
 * A signal says that the *combination* of the characteristics is unusual. The share of each characteristic is shown by
   d_j = T2 - T2 without characteristic j (Runger, Alt and Montgomery 1996).
 """
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 
 import numpy as np
@@ -127,6 +131,63 @@ def mewma_h(p: int, lam: float, arl0: float, runs: int = 4000, seed: int = 20260
     for _ in range(4):
         h = a + (target - ya) * (b - a) / (yb - ya) if yb != ya else (a + b) / 2.0
         yh = np.log(_mean_run_length(p, lam, h, runs, seed, cap))
+        if abs(yh - target) < 0.01:
+            break
+        if yh < target:
+            a, ya = h, yh
+        else:
+            b, yb = h, yh
+    return float(h)
+
+
+def mcusum_y(xbars, mu, cov, m: int, k: float) -> float:
+    """Y after the sample means `xbars` (oldest first) of one run, started at zero."""
+    mu = np.asarray(mu, dtype=float)
+    s = np.zeros(mu.size)
+    cov_m = cov / m
+    for xb in xbars:
+        v = s + np.asarray(xb, dtype=float) - mu
+        c = math.sqrt(float(v @ np.linalg.solve(cov_m, v)))
+        s = v * (1.0 - k / c) if c > k else np.zeros_like(v)
+    return float(math.sqrt(max(0.0, float(s @ np.linalg.solve(cov_m, s)))))
+
+
+def _mcusum_run_length(p: int, k: float, h: float, runs: int, seed: int, cap: int) -> float:
+    rng = np.random.default_rng(seed)
+    s = np.zeros((runs, p))
+    alive = np.arange(runs)
+    length = np.full(runs, float(cap))
+    for t in range(1, cap + 1):
+        v = s[alive] + rng.standard_normal((alive.size, p))
+        c = np.sqrt(np.einsum("ij,ij->i", v, v))
+        f = np.where(c > k, 1.0 - k / np.maximum(c, 1e-300), 0.0)
+        s[alive] = v * f[:, None]
+        hit = np.sqrt(np.einsum("ij,ij->i", s[alive], s[alive])) > h
+        length[alive[hit]] = t
+        alive = alive[~hit]
+        if alive.size == 0:
+            break
+    return float(length.mean())
+
+
+@lru_cache(maxsize=64)
+def mcusum_h(p: int, k: float, arl0: float, runs: int = 4000, seed: int = 20260202) -> float:
+    """The decision limit h for the in-control ARL asked for, by simulation (about 2 % uncertain in the ARL)."""
+    cap = int(30 * arl0)
+    lo, hi = 0.3, 4.0 * math.sqrt(p) + 12.0
+    for _ in range(11):
+        mid = (lo + hi) / 2.0
+        if _mcusum_run_length(p, k, mid, 300, seed, cap) < arl0:
+            lo = mid
+        else:
+            hi = mid
+    a, b = lo * 0.96, hi * 1.04
+    ya, yb = np.log(_mcusum_run_length(p, k, a, runs, seed, cap)), np.log(_mcusum_run_length(p, k, b, runs, seed, cap))
+    target = np.log(arl0)
+    h = (a + b) / 2.0
+    for _ in range(4):
+        h = a + (target - ya) * (b - a) / (yb - ya) if yb != ya else (a + b) / 2.0
+        yh = np.log(_mcusum_run_length(p, k, h, runs, seed, cap))
         if abs(yh - target) < 0.01:
             break
         if yh < target:

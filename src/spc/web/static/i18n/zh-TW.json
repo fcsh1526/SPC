@@ -840,5 +840,8 @@
   "mon.chart_level": "水準（各串流的平均）",
   "mon.stream": "串流",
   "mon.stream_offset": "相對平均的固定差異",
-  "mon.stream_detail": "各串流（z ＝ 相對各串流平均與該串流自身差異的偏差，單位為標準差）：{list}"
+  "mon.stream_detail": "各串流（z ＝ 相對各串流平均與該串流自身差異的偏差，單位為標準差）：{list}",
+  "analysis.chart_mcusum": "MCUSUM 圖（多個特性的累積和）",
+  "result.kind_mcusum": "MCUSUM 圖：多個特性合併監控",
+  "mon.limits_mcusum_mv": "界限第 {rev} 版。{p} 個特性（{names}）的 MCUSUM（Crosier），k = {k}，目標值 {target}。決策界限 h = {ucl}，對應受控連串長度 {arl0}；沒有下限。發出警報後，累積和從零重新開始。"
 }
