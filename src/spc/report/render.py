@@ -95,6 +95,34 @@ def _plan_html(plan: dict, L) -> str:
             f'<h3>{esc(L("cp.approvals"))}</h3><table class="kv">{appr}</table>')
 
 
+def multistate_view(ms: dict, L) -> dict:
+    """The text of the multi-state result: shared by the HTML and the Excel report."""
+    r, o = ms["result"], ms["options"]
+    f = lambda x, d=4: f"{x:.{d}g}"
+    decided = [L("ms.decided_widths", v=L("ms.equal" if o["widths_equal"] else "ms.different")) if o.get("widths_equal") is not None else "",
+               L("ms.decided_locations", v=L("ms.equal" if o["locations_equal"] else "ms.different")) if o.get("locations_equal") is not None else "",
+               L("ms.decided_variable") if o.get("delta_m_variable") else "",
+               L("ms.decided_physical", d=L("ms.dir_" + o["outlier_direction"])) if o.get("outlier_physical") else ""]
+    lines = [L("ms.settings", lsl=f(ms["lsl"], 6), usl=f(ms["usl"], 6), by=ms["by"] if ms["by"] != "subgroup" else L("ms.by_subgroup"), loc=L("ms.loc_" + r["location"]),
+               alpha=f(r["alpha"]), res=f(o["resolution"]) if o.get("resolution") else "–"), *[d for d in decided if d]]
+    lines.append(L("ms.type", type=r["type"]) + ": " + L("ms.type_" + str(r["type"])))
+    lines += [L("ms.outlier", state=x["state"], value=f(x["value"], 6), g=f(x["g"]), crit=f(x["critical"]), da=f(x["delta_a"])) for x in r["outliers"]] or [L("ms.no_outlier")]
+    w, l = r["widths"], r["locations"]
+    lines.append(L("ms.test_widths_" + w["name"], stat=f(w["statistic"]), p=f(w["p"], 3), result=L("ms.equal" if w["equal"] else "ms.different")))
+    lines.append(L("ms.test_locations_" + l["name"], stat=f(l["statistic"]), p=f(l["p"], 3), result=L("ms.equal" if l["equal"] else "ms.different")))
+    heads = [L(k) for k in ("ms.col_state", "ms.col_n", "ms.col_mean", "ms.col_median", "ms.col_s", "ms.col_x0135", "ms.col_x99865", "ms.col_dl", "ms.col_du")]
+    rows = [[n, str(s["n"]), f(s["mean"], 6), f(s["median"], 6), f(s["s"]), f(s["x0135"], 6), f(s["x99865"], 6), f(s["d_l"]), f(s["d_u"])] for n, s in r["states"].items()]
+    tail = [L("ms.summary", dm=f(r["delta_m"]), sigma=f(r["sigma_pooled"]), dof=r["dof"]), L("ms.result", pm=f(r["pm"], 3), pmk=f(r["pmk"], 3), pmkl=f(r["pmk_l"], 3), pmku=f(r["pmk_u"], 3))]
+    return {"lines": lines, "heads": heads, "rows": rows, "tail": tail}
+
+
+def _multistate_html(ms: dict, L) -> str:
+    v = multistate_view(ms, L)
+    head = "".join(f"<th>{esc(h)}</th>" for h in v["heads"])
+    body = "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in row) + "</tr>" for row in v["rows"])
+    return ("".join(f"<p>{esc(x)}</p>" for x in v["lines"]) + f"<table><tr>{head}</tr>{body}</table>" + "".join(f"<p><strong>{esc(x)}</strong></p>" for x in v["tail"]))
+
+
 def render_html(rep: Report) -> str:
     lang, m, f, r = rep.lang, rep.meta, rep.facts, rep.result
     L = lambda key, **p: T(lang, key, **p)
@@ -338,6 +366,7 @@ def render_html(rep: Report) -> str:
         rows_b.append((L("f.archive_digest"), f"<code>{esc(rep.archive_digest)}</code>"))
     annex_b = kv(rows_b)
     annex_c = _plan_html(rep.control_plan, L) if rep.control_plan else ""
+    annex_d = _multistate_html(rep.multistate, L) if rep.multistate else ""
 
     note = L("doc.draft_note") if tr["edition"] == "draft" else L("doc.final_note")
     stage_line = L("doc.stage_" + f["stage"])
@@ -369,6 +398,7 @@ def render_html(rep: Report) -> str:
         + f'<section class="el"><h2>{esc(L("doc.annex_a"))}</h2>{annex_a}</section>'
         + f'<section class="el"><h2>{esc(L("doc.annex_b"))}</h2>{annex_b}</section>'
         + (f'<section class="el"><h2>{esc(L("doc.annex_c"))}</h2>{annex_c}</section>' if annex_c else "")
+        + (f'<section class="el"><h2>{esc(L("doc.annex_d"))}</h2>{annex_d}</section>' if annex_d else "")
         + f"<footer>{footer}</footer>"
         + "</main></body></html>"
     )

@@ -1525,3 +1525,40 @@ def test_state_tests_in_the_browser(server, browser, tmp_path):
     expect(res).to_contain_text("所有狀態共用一個分散")
     assert problems == [], problems
     ctx.close()
+
+
+def test_multistate_result_in_the_report_in_the_browser(server, browser, tmp_path):
+    expect = playwright_sync.expect
+    rng = np.random.default_rng(14)
+    rows = ["machine,v"]
+    for m, mu, sd in (("M1", 10.0, 0.2), ("M2", 10.6, 0.2), ("M3", 10.2, 0.25)):
+        rows += [f"{m},{rng.normal(mu, sd):.3f}" for _ in range(25)]
+    path = tmp_path / "states.csv"
+    path.write_text("\n".join(rows) + "\n")
+    ctx = browser.new_context(viewport={"width": 1200, "height": 1100}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.set_input_files("#file", str(path))
+    page.select_option("#col-value", "v")
+    page.select_option("#col-subgroup", "machine")
+    page.click("#import-btn")
+    page.click("#to-analysis")
+    page.fill("#a-lsl", "9")
+    page.fill("#a-usl", "12")
+    page.locator("#a-ms summary").click()
+    page.select_option("#ams-locations", "false")
+    page.click("#run-btn")
+    page.check("#rp-ms")
+    page.click("#rp-create")
+    expect(page.locator("#rp-created")).to_contain_text("was created")
+    href = page.locator("#rp-open").get_attribute("href")
+    report = ctx.new_page()
+    report.goto(server.rstrip("/") + href)
+    expect(report.locator("h2", has_text="Annex D")).to_be_visible()
+    content = report.content()
+    assert "Decided by the analyst: the locations of the local dispersions are different" in content and "Pm =" in content and "M2" in content
+    assert problems == [], problems
+    ctx.close()

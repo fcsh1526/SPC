@@ -85,6 +85,23 @@ class MultistateBody(Strict):
     outlier_direction: Literal["negative", "positive", "both"] = "both"
 
 
+class ReportMultistateBody(Strict):
+    """The machine performance of the states for a report. The limits default to those of the analysis."""
+
+    lsl: float | None = None
+    usl: float | None = None
+    by: str | None = Field(default=None, max_length=100)
+    alpha: float = Field(default=0.05, gt=0, lt=0.5)
+    resolution: float | None = Field(default=None, gt=0)
+    location: Literal["mean", "median"] = "mean"
+    widths_equal: bool | None = None
+    locations_equal: bool | None = None
+    delta_m_variable: bool = False
+    delta_m_star: float | None = Field(default=None, gt=0)
+    outlier_physical: bool = False
+    outlier_direction: Literal["negative", "positive", "both"] = "both"
+
+
 class TimeModelBody(Strict):
     """Optional help for the suggestion of the time-dependent model."""
 
@@ -189,6 +206,7 @@ class ReportBody(Strict):
     meta: ReportMetaBody = Field(default_factory=ReportMetaBody)
     language: Literal["zh-TW", "en"] = "en"  # not set: the profile's language, else English
     profile_id: int | None = Field(default=None, ge=1)  # also applies to the analysis unless that names its own
+    multistate: ReportMultistateBody | None = None  # the machine performance of the states (ISO 22514-8) goes into the report and the archive
     control_plan_id: int | None = Field(default=None, ge=1)  # a released plan: its snapshot goes into the report and the archive
     measurement_system_id: int | None = Field(default=None, ge=1)  # the MSA gate applies, and U and the guard band come from its studies
 

@@ -553,11 +553,25 @@ def create_app(
         elif meta.extra:
             raise ApiError(400, "report_field_unknown", "extra fields belong to a customer profile", fields=sorted(meta.extra))
         plan_snap = plan_service.snapshot(body.control_plan_id) if body.control_plan_id else None
-        g = generate(store.get(key), request, meta, language, created_by=user.label, profile=snap, control_plan=plan_snap)
+        ms_snap = None
+        if body.multistate is not None:
+            m = body.multistate
+            lsl = m.lsl if m.lsl is not None else request.lsl
+            usl = m.usl if m.usl is not None else request.usl
+            if lsl is None or usl is None:
+                raise ApiError(400, "multistate_needs_limits", "the machine performance of the states needs both specification limits")
+            options = m.model_dump(exclude={"lsl", "usl", "by"})
+            try:
+                res = multistate_for_dataset(store.get(key), lsl, usl, m.by, **options)
+            except ValueError as exc:
+                raise ApiError(400, "invalid_input", str(exc)) from None
+            ms_snap = {"lsl": lsl, "usl": usl, "by": res["by"], "options": options, "result": res}
+        g = generate(store.get(key), request, meta, language, created_by=user.label, profile=snap, control_plan=plan_snap, multistate=ms_snap)
         with db.tx():
             reports.add(g, key, user.id)
             audit.append("report_created", user_id=user.id, username=user.username, target=g.report_id,
                          detail={"dataset": key, "digest": g.archive["integrity"]["digest"],
+                                 **({"multistate": {"type": ms_snap["result"]["type"], "pm": ms_snap["result"]["pm"], "pmk": ms_snap["result"]["pmk"]}} if ms_snap else {}),
                                  **({"control_plan": plan_snap["name"], "control_plan_revision": plan_snap["revision"]} if plan_snap else {}),
                                  **({"profile": profile["name"], "profile_revision": profile["revision"],
                                      "deviations": sorted(deviations)} if profile else {})})

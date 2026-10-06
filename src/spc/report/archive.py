@@ -43,6 +43,7 @@ def build_archive(
     created_by: str = "",
     profile: dict | None = None,
     control_plan: dict | None = None,
+    multistate: dict | None = None,
 ) -> dict:
     body = {
         "format": FORMAT,
@@ -62,6 +63,8 @@ def build_archive(
         body["profile"] = profile
     if control_plan:  # the released control plan the study belongs to, as it stood (lines, checks, approvals)
         body["control_plan"] = control_plan
+    if multistate:  # the machine performance of the states (ISO 22514-8): the settings and the result, inside the digest
+        body["multistate"] = multistate
     digest = hashlib.sha256(canonical(body)).hexdigest()
     return {
         **body,
@@ -124,4 +127,13 @@ def reproduce(archive: dict) -> Reproduction:
     again = analyze(dataset, request)
     diffs: list[str] = []
     _compare(archive["result"], json.loads(json.dumps(again)), "result", diffs)
+    if archive.get("multistate"):  # the states of the stored data with the stored settings must give the stored result
+        from spc.service.state_tests import multistate_for_dataset
+
+        ms = archive["multistate"]
+        try:
+            redo = multistate_for_dataset(dataset, ms["lsl"], ms["usl"], ms["by"] if ms["by"] != "subgroup" else None, **ms["options"])
+            _compare(ms["result"], json.loads(json.dumps(redo)), "multistate", diffs)
+        except ValueError as exc:
+            diffs.append(f"multistate: {exc}")
     return Reproduction(ok, not diffs, archive.get("engine_version") == __version__, tuple(diffs[:20]))

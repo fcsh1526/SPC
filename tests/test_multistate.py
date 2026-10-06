@@ -185,3 +185,59 @@ def test_the_api_runs_the_procedure_and_refuses_what_cannot_be_analysed():
     two = app.state.store.add(Dataset.from_values([10.0, 10.1, 9.9, 10.2, 11.0, 11.1, 10.9, 11.2], subgroup=["a"] * 4 + ["b"] * 4), 1, "two")
     t = c.post(f"/api/datasets/{two}/multistate", json={"lsl": 8, "usl": 13}).json()
     assert t["widths"]["name"] == "fisher" and t["locations"]["name"] == "t"
+
+
+def test_a_report_carries_the_machine_performance_of_the_states_into_its_archive():
+    import copy
+
+    from spc.report import reproduce, verify_archive
+    from spc.validation.iso22514 import ADAPTERS
+
+    app = make_app()
+    c = logged_in_client(app, "eng")
+    labels = [k for k, v in ADAPTERS.items() for _ in v]
+    key = app.state.store.add(Dataset.from_values([x for v in ADAPTERS.values() for x in v], subgroup=labels), 1, "adapters")
+    base = {"analysis": {"stage": "machine", "lsl": 19.8, "usl": 20.2}, "language": "en"}
+    ms = {"outlier_physical": True, "outlier_direction": "negative", "locations_equal": None}
+    r = c.post(f"/api/datasets/{key}/reports", json={**base, "multistate": ms})
+    assert r.status_code == 200, r.text
+    rid = r.json()["id"]
+    arc = c.get(f"/api/reports/{rid}/archive.json").json()
+    m = arc["multistate"]
+    assert (m["lsl"], m["usl"], m["by"]) == (19.8, 20.2, "subgroup") and m["options"]["outlier_physical"] is True
+    assert m["result"]["type"] == 1 and round(m["result"]["pm"], 2) == 1.25 and round(m["result"]["pmk"], 2) == 1.08
+    assert verify_archive(arc) and reproduce(arc).reproduced
+    html = c.get(f"/api/reports/{rid}").text
+    assert "Annex D: machine performance of the states" in html and "Pm = 1.25" in html and "19.95" in html and "Decided by the analyst" not in html.split("Annex D")[0]
+    assert "Decided by the analyst: the outlier is real" in html or "the outlier is real and can occur downwards only" in html
+    zh = c.post(f"/api/datasets/{key}/reports", json={**base, "language": "zh-TW", "multistate": ms}).json()["id"]
+    assert "附錄 D：各狀態的機器性能" in c.get(f"/api/reports/{zh}").text
+    x = c.get(f"/api/reports/{rid}/report.xlsx")
+    assert x.status_code == 200
+    import io
+
+    from openpyxl import load_workbook
+
+    cells = [str(cell.value) for ws in load_workbook(io.BytesIO(x.content)).worksheets for row in ws.iter_rows() for cell in row if cell.value]
+    assert any("Annex D" in v for v in cells) and any(v.startswith("Pm = 1.25") for v in cells)
+    # a changed number breaks the digest, and a stored result that the data no longer give is found by the reproduction
+    bad = copy.deepcopy(arc)
+    bad["multistate"]["result"]["pm"] = 9.0
+    assert not verify_archive(bad)
+    from spc.report.archive import build_archive  # the same archive with a wrong result and a fresh digest: only the reproduction can tell
+
+    body = {k: v for k, v in bad.items() if k != "integrity"}
+    import hashlib
+
+    from spc.report.archive import canonical
+
+    bad["integrity"] = {**arc["integrity"], "digest": hashlib.sha256(canonical(body)).hexdigest()}
+    rep = reproduce(bad)
+    assert rep.integrity_ok and not rep.reproduced and any(d.startswith("multistate.pm") or "multistate.pm" in d for d in rep.differences)
+    # no multistate: nothing added; the limits of the analysis are used when the block names none; without limits or states: refused
+    plain = c.post(f"/api/datasets/{key}/reports", json=base).json()["id"]
+    assert "multistate" not in c.get(f"/api/reports/{plain}/archive.json").json() and "Annex D" not in c.get(f"/api/reports/{plain}").text
+    assert err(c.post(f"/api/datasets/{key}/reports", json={"analysis": {"stage": "machine", "lsl": 19.8}, "multistate": {}}))["code"] == "multistate_needs_limits"
+    assert c.post(f"/api/datasets/{key}/reports", json={"analysis": {"stage": "machine", "lsl": 19.8}, "multistate": {"usl": 20.2}}).status_code == 200  # the limits of the block complete those of the analysis
+    assert err(c.post(f"/api/datasets/{key}/reports", json={**base, "multistate": {"by": "nothing"}}))["code"] == "invalid_input"
+    assert any(e["action"] == "report_created" and e["detail"].get("multistate", {}).get("type") == 1 for e in app.state.audit.list(100))

@@ -1456,5 +1456,7 @@
   "ms.col_dl": "D lower",
   "ms.col_du": "D upper",
   "ms.summary": "Difference of the extreme locations Δm = {dm}; pooled standard deviation {sigma} with {dof} degrees of freedom.",
-  "ms.result": "Pm = {pm}   Pmk = {pmk}   (Pmk,l = {pmkl}, Pmk,u = {pmku})"
+  "ms.result": "Pm = {pm}   Pmk = {pmk}   (Pmk,l = {pmkl}, Pmk,u = {pmku})",
+  "report.multistate": "Include the machine performance of the states (ISO 22514-8) with the settings of the block in the analysis tab",
+  "error.multistate_needs_limits": "The machine performance of the states needs both specification limits."
 }

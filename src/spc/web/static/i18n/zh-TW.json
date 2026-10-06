@@ -1456,5 +1456,7 @@
   "ms.col_dl": "下側寬度",
   "ms.col_du": "上側寬度",
   "ms.summary": "極端位置的差 Δm = {dm}；合併標準差 {sigma}，自由度 {dof}。",
-  "ms.result": "Pm = {pm}   Pmk = {pmk}   （Pmk,l = {pmkl}，Pmk,u = {pmku}）"
+  "ms.result": "Pm = {pm}   Pmk = {pmk}   （Pmk,l = {pmkl}，Pmk,u = {pmku}）",
+  "report.multistate": "納入各狀態的機器性能（ISO 22514-8），設定取自分析頁的區塊",
+  "error.multistate_needs_limits": "各狀態的機器性能需要上下兩個規格限。"
 }

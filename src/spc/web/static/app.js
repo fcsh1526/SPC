@@ -470,14 +470,18 @@
     state.stateTests = r;
     renderStateTests();
   }
+  function multistateOptions() {  // the settings of the block "machine performance of the states"; the limits of the analysis are added by the server
+    const num = (sel) => { const v = $(sel).value.trim(); return v === "" ? null : Number(v); };
+    const tri = (sel) => { const v = $(sel).value; return v === "" ? null : v === "true"; };
+    return { by: $("#a-states-by").value.trim() || null, location: $("#ams-location").value, resolution: num("#ams-resolution"),
+      widths_equal: tri("#ams-widths"), locations_equal: tri("#ams-locations"), delta_m_variable: $("#ams-variable").checked, delta_m_star: num("#ams-star"),
+      outlier_physical: $("#ams-physical").checked, outlier_direction: $("#ams-direction").value };
+  }
   async function runMultistate() {
     const num = (sel) => { const v = $(sel).value.trim(); return v === "" ? null : Number(v); };
     const lsl = num("#a-lsl"), usl = num("#a-usl");
     if (lsl === null || usl === null) { showError({ code: "invalid_input", message: t("ms.need_limits"), params: { message: t("ms.need_limits") } }); return; }
-    const tri = (sel) => { const v = $(sel).value; return v === "" ? null : v === "true"; };
-    const body = { lsl, usl, by: $("#a-states-by").value.trim() || null, location: $("#ams-location").value, resolution: num("#ams-resolution"),
-      widths_equal: tri("#ams-widths"), locations_equal: tri("#ams-locations"), delta_m_variable: $("#ams-variable").checked, delta_m_star: num("#ams-star"),
-      outlier_physical: $("#ams-physical").checked, outlier_direction: $("#ams-direction").value };
+    const body = { lsl, usl, ...multistateOptions() };
     let r = null;
     await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/multistate`, body); });
     state.multistate = r;
@@ -801,6 +805,7 @@
         analysis: state.lastAnalysisBody, meta, language: $("#rp-language").value,
         measurement_system_id: $("#rp-msa").value ? Number($("#rp-msa").value) : null,
         control_plan_id: $("#rp-plan").value ? Number($("#rp-plan").value) : null,
+        multistate: $("#rp-ms").checked ? multistateOptions() : null,
       });
       state.reportOut = out;
       renderReportOut();
