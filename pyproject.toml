@@ -19,6 +19,9 @@ web = [
     "uvicorn>=0.27",
     "openpyxl>=3.1",
 ]
+opcua = [
+    "asyncua>=1.1",
+]
 excel = [
     "openpyxl>=3.1",
 ]
@@ -29,6 +32,7 @@ dev = [
     "uvicorn>=0.27",
     "openpyxl>=3.1",
     "formulas>=1.2",
+    "asyncua>=1.1",
 ]
 
 [project.scripts]

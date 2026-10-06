@@ -26,6 +26,9 @@ from spc.api.studies import add_study_routes
 from spc.api.msa import add_msa_routes
 from spc.api.plans import add_plan_routes
 from spc.api.validation import add_validation_routes
+from spc.api.equipment import add_equipment_routes
+from spc.equipment.model import EquipmentError
+from spc.equipment.service import EquipmentService
 from spc.validation.service import ValidationError, ValidationService
 from spc.plan.model import PlanError
 from spc.plan.service import PeopleService, PlanNameTaken, PlanNotFound, PlanService
@@ -168,6 +171,8 @@ def create_app(
     app.state.people, app.state.plans = people, plan_service
     validation_service = ValidationService(db, audit)
     app.state.validation = validation_service
+    equipment_service = EquipmentService(db, audit, monitors, auth)
+    app.state.equipment = equipment_service
 
     # ------------------------------------------------------------------ plumbing
 
@@ -222,6 +227,10 @@ def create_app(
 
     @app.exception_handler(PlanError)
     async def _plan_error(_: Request, exc: PlanError):
+        return _error(exc.status, exc.code, str(exc), exc.params)
+
+    @app.exception_handler(EquipmentError)
+    async def _equipment_error(_: Request, exc: EquipmentError):
         return _error(exc.status, exc.code, str(exc), exc.params)
 
     @app.exception_handler(ValidationError)
@@ -312,6 +321,7 @@ def create_app(
     add_msa_routes(app, msa_systems, reader, writer, admin)
     add_plan_routes(app, plan_service, people, reader, writer, admin)
     add_validation_routes(app, validation_service, reader, writer, admin)
+    add_equipment_routes(app, equipment_service, reader, writer, admin)
 
     # ------------------------------------------------------------------ import
 

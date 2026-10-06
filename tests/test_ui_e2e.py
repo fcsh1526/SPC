@@ -1433,3 +1433,43 @@ def test_validation_run_and_reference_case_in_the_browser(server, browser):
     assert href.endswith("report?lang=zh-TW")
     assert problems == [], problems
     ctx.close()
+
+
+def test_equipment_link_in_the_browser(server, browser, app):
+    expect = playwright_sync.expect
+    eng = next(u for u in app.state.auth.list_users() if u.username == "eng")
+    config = {"name": "Link chart", "characteristic": "bore", "kind": "xbar-s", "n": 3, "ocap": {"default": {"operator_action": "Measure again"}}}
+    mid = app.state.monitors.create(config, {"type": "parameters", "mu": 10.0, "sigma": 0.1}, eng)["id"]
+    app.state.monitors.acknowledge_ocap(mid, eng)
+    app.state.equipment.prober = lambda link: {"ok": True, "error": None, "nodes": [
+        {"node_id": n["node_id"], "ok": True, "value": 10.0, "type": "Double", "quality": "good", "source_time": "2026-10-01T08:00:00Z", "error": None} for n in link["nodes"]]}
+    problems = []
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1100}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=equipment]")
+    expect(page.locator("#eq-list")).to_contain_text("No links yet")
+    page.click("#eq-new")
+    page.fill("#eqe-name", "Grinder 4")
+    page.fill("#eqe-endpoint", "opc.tcp://127.0.0.1:4840/grinder")
+    page.fill("#eqe-nodes", f"ns=2;s=Bore {mid} 0.001 0")
+    page.click("#eqe-save")
+    expect(page.locator("#eq-title")).to_have_text("Grinder 4")
+    expect(page.locator("#eq-test-table")).to_contain_text("not tested")
+    page.click("#eq-enable")
+    expect(page.locator("#errors")).to_contain_text("Run a test read first")
+    page.click("#errors button")
+    page.click("#eq-test")
+    expect(page.locator("#eq-test-table")).to_contain_text("Tested")
+    expect(page.locator("#eq-test-table")).to_contain_text("Double")
+    page.click("#eq-enable")
+    expect(page.locator("#eq-state")).to_contain_text("client not running")
+    expect(page.locator("#eq-enable")).to_have_text("Disable")
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#eq-state")).to_contain_text("用戶端未執行")
+    page.click("#eq-back")
+    expect(page.locator("#eq-list")).to_contain_text("Grinder 4")
+    assert problems == [], problems
+    ctx.close()

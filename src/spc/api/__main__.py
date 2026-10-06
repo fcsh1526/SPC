@@ -25,6 +25,10 @@ def main() -> None:
     db = Database(args.db)
     notifiers = [WebhookNotifier(args.alert_webhook)] if args.alert_webhook else []
     app = create_app(db, secure_cookies=True if args.secure_cookies else None, notifiers=notifiers)
+    try:  # the OPC UA links that are enabled connect now and reconnect by themselves
+        app.state.equipment.runner.start()
+    except Exception as exc:
+        print(f"OPC UA interface not started: {exc}")
     if app.state.auth.user_count() == 0:
         print(f"No users yet. Create the first administrator:  spc-admin --db {args.db} create-user NAME --role admin")
     if args.host not in ("127.0.0.1", "localhost", "::1") and not args.secure_cookies:

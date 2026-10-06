@@ -157,6 +157,7 @@
     if (name === "msa") loadMsa();
     if (name === "plan") loadPlans();
     if (name === "validation") loadValidation();
+    if (name === "equipment") loadEquipment();
     if (name === "roles") loadRoles();
     if (name === "admin") loadAdmin();
     if (name === "password") renderPasswordPanel();
@@ -1947,6 +1948,99 @@
     $("#mss-save").addEventListener("click", addMsaStudy);
   }
 
+  // ---------------------------------------------------------------- equipment interface, OPC UA (draft 11.1)
+  const EQ = { list: [], view: null, editing: null };
+  const showEqView = (which) => { ["#eq-list-view", "#eq-editor", "#eq-detail"].forEach((sel) => { $(sel).hidden = sel !== which; }); };
+  const RUNTIME_CLASS = { connected: "status-ok", connecting: "status-warning", error: "status-alarm", runner_stopped: "status-alarm", disabled: "" };
+  async function loadEquipment() {
+    if (EQ.view && !$("#eq-detail").hidden) return;
+    await guarded(async () => { const r = await api("/api/equipment/links"); EQ.list = r.links; EQ.runner = r.runner; });
+    renderEqList(); showEqView("#eq-list-view");
+  }
+  function renderEqList() {
+    $("#eq-runner").textContent = t(EQ.runner ? "eq.runner_on" : "eq.runner_off");
+    const table = $("#eq-list"); table.replaceChildren();
+    const head = el("tr"); ["eq.f_name", "eq.f_endpoint", "eq.col_nodes", "eq.col_state", "eq.col_readings", ""].forEach((k) => cell(head, k ? t(k) : "", "th")); table.appendChild(head);
+    EQ.list.forEach((l) => {
+      const tr = el("tr"); cell(tr, l.name); cell(tr, l.endpoint); cell(tr, String(l.nodes));
+      const s = cell(tr, t("eq.rt_" + l.runtime) + (l.tested ? "" : ` · ${t("eq.not_tested")}`)); s.className = RUNTIME_CLASS[l.runtime] || "";
+      cell(tr, t("eq.readings", { a: l.accepted, p: l.points, r: l.rejected }));
+      const b = el("button", "", t("mon.open")); b.addEventListener("click", () => openEq(l.id)); cell(tr, "").appendChild(b);
+      table.appendChild(tr);
+    });
+    if (!EQ.list.length) table.appendChild(el("tr")).appendChild(el("td", "muted", t("eq.none")));
+  }
+  async function openEq(id) {
+    await guarded(async () => { EQ.view = await api(`/api/equipment/links/${id}`); });
+    if (EQ.view) { renderEq(); showEqView("#eq-detail"); }
+  }
+  function renderEq() {
+    const { link, runtime, counters } = EQ.view;
+    $("#eq-title").textContent = link.name;
+    $("#eq-sub").textContent = t("eq.sub", { endpoint: link.endpoint, rev: link.revision, interval: link.interval_ms });
+    const st = $("#eq-state");
+    st.textContent = t("eq.rt_" + runtime.state) + (runtime.message ? `: ${runtime.message}` : "");
+    st.className = "strong " + (RUNTIME_CLASS[runtime.state] || "");
+    $("#eq-enable").textContent = t(link.enabled ? "eq.disable" : "eq.enable");
+    const tt = $("#eq-test-table"); tt.replaceChildren();
+    const lt = link.last_test;
+    if (!lt || lt.revision !== link.revision) tt.appendChild(el("tr")).appendChild(el("td", "muted", t("eq.not_tested")));
+    else {
+      const head = el("tr"); ["eq.col_node", "eq.col_value", "eq.col_type", "eq.col_quality", "eq.col_time", "eq.col_result"].forEach((k) => cell(head, t(k), "th")); tt.appendChild(head);
+      lt.nodes.forEach((n) => {
+        const tr = el("tr"); cell(tr, n.node_id); cell(tr, n.value === null ? "–" : String(n.value)); cell(tr, n.type || "–"); cell(tr, n.quality || "–"); cell(tr, n.source_time ? when(n.source_time) : "–");
+        cell(tr, n.ok ? t("eq.ok") : t("eq.failed", { why: n.error || "" })).className = n.ok ? "status-ok" : "status-alarm"; tt.appendChild(tr);
+      });
+      const tr = el("tr"); const td = el("td", lt.ok ? "status-ok" : "status-alarm", lt.error ? `${t("eq.connect_failed")}: ${lt.error}` : t("eq.tested_by", { at: when(lt.at), by: lt.by, rev: lt.revision })); td.colSpan = 6; tr.appendChild(td); tt.appendChild(tr);
+    }
+    const ct = $("#eq-counters"); ct.replaceChildren();
+    const ch = el("tr"); ["eq.col_node", "eq.col_accepted", "eq.col_points", "eq.col_buffered", "eq.col_rejected", "eq.col_last"].forEach((k) => cell(ch, t(k), "th")); ct.appendChild(ch);
+    link.nodes.forEach((n) => {
+      const c = counters[n.node_id] || {};
+      const tr = el("tr"); cell(tr, `${n.node_id} → #${n.monitor_id}`); cell(tr, String(c.accepted || 0)); cell(tr, String(c.points || 0)); cell(tr, String(c.buffered || 0));
+      cell(tr, Object.entries(c.rejected || {}).map(([k, v]) => `${t("eq.reason_" + k)}: ${v}`).join(", ") || "–");
+      cell(tr, c.last_error ? `${when(c.last_error.at)} ${t("eq.reason_" + c.last_error.reason)}` : c.last_time ? when(c.last_time) : "–"); ct.appendChild(tr);
+    });
+  }
+  function openEqEditor(view) {
+    EQ.editing = view ? view.link.id : "new";
+    const l = view ? view.link : { name: "", endpoint: "", description: "", security: "none", username: "", password_env: "", interval_ms: 1000, stale_after_s: 0, nodes: [] };
+    $("#eq-editor-title").textContent = view ? t("eq.edit_title", { name: l.name }) : t("eq.new");
+    $("#eqe-name").value = l.name; $("#eqe-endpoint").value = l.endpoint; $("#eqe-description").value = l.description; $("#eqe-security").value = l.security;
+    $("#eqe-username").value = l.username; $("#eqe-password_env").value = l.password_env; $("#eqe-interval").value = l.interval_ms; $("#eqe-stale").value = l.stale_after_s;
+    $("#eqe-nodes").value = l.nodes.map((n) => `${n.node_id} ${n.monitor_id} ${n.scale ?? 1} ${n.offset ?? 0}`).join("\n");
+    showEqView("#eq-editor");
+  }
+  function readEqEditor() {
+    const nodes = $("#eqe-nodes").value.split("\n").map((x) => x.trim()).filter(Boolean).map((x) => {
+      const [node_id, monitor_id, scale, offset] = x.split(/\s+/);
+      return { node_id, monitor_id: Number(monitor_id), ...(scale !== undefined ? { scale: Number(scale) } : {}), ...(offset !== undefined ? { offset: Number(offset) } : {}) };
+    });
+    return { name: $("#eqe-name").value, endpoint: $("#eqe-endpoint").value, description: $("#eqe-description").value, security: $("#eqe-security").value || "none",
+      username: $("#eqe-username").value, password_env: $("#eqe-password_env").value, interval_ms: Number($("#eqe-interval").value), stale_after_s: Number($("#eqe-stale").value), nodes };
+  }
+  async function saveEq() {
+    await guarded(async () => {
+      const record = readEqEditor();
+      EQ.view = EQ.editing === "new" ? await post("/api/equipment/links", { record }) : await put(`/api/equipment/links/${EQ.editing}`, { record });
+      EQ.saved = true;
+    });
+    if (EQ.saved) { EQ.saved = false; renderEq(); showEqView("#eq-detail"); }
+  }
+  async function eqAction(action) {
+    await guarded(async () => { EQ.view = await post(`/api/equipment/links/${EQ.view.link.id}/${action}`, {}); });
+    renderEq();
+  }
+  function wireEquipment() {
+    $("#eq-new").addEventListener("click", () => openEqEditor(null));
+    $("#eq-edit").addEventListener("click", () => openEqEditor(EQ.view));
+    $("#eq-back").addEventListener("click", () => { EQ.view = null; loadEquipment(); });
+    $("#eqe-save").addEventListener("click", saveEq);
+    $("#eqe-cancel").addEventListener("click", () => { if (EQ.editing !== "new" && EQ.view) showEqView("#eq-detail"); else { EQ.view = null; loadEquipment(); } });
+    $("#eq-test").addEventListener("click", () => eqAction("test"));
+    $("#eq-enable").addEventListener("click", () => eqAction(EQ.view.link.enabled ? "disable" : "enable"));
+  }
+
   // ---------------------------------------------------------------- verification and validation of the software (draft 11.2)
   const VA = { cases: [], editing: null };
   async function loadValidation() {
@@ -2585,6 +2679,8 @@
     if (state.user && PL.view && !$("#pl-detail").hidden) renderPlan();
     if (state.user && !$("#pl-list-view").hidden && !$("#tab-plan").hidden) renderPlanList();
     if (state.user && !$("#tab-validation").hidden) renderValidation();
+    if (state.user && EQ.view && !$("#eq-detail").hidden) renderEq();
+    if (state.user && !$("#eq-list-view").hidden && !$("#tab-equipment").hidden) renderEqList();
     if (state.user && PL.roles && !$("#tab-roles").hidden) { renderRoleMatrix(); renderResponsibilities(); renderPeople(); renderPerson(); }
     if (state.user && !$("#ms-list-view").hidden && !$("#tab-msa").hidden) loadMsa();
     if (state.user && !$("#st-list-view").hidden && !$("#tab-study").hidden) loadStudies();
@@ -2632,6 +2728,7 @@
     wireMsa();
     wirePlan();
     wireValidation();
+    wireEquipment();
     wireRoles();
     $("#a-profile").addEventListener("change", onProfileChange);
     $("#pf-new").addEventListener("click", () => openProfileEditor(null));

@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE users (
@@ -206,6 +206,14 @@ CREATE TABLE validation_runs (
     created_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
 );
+CREATE TABLE equipment_links (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+);
 """
 
 
@@ -223,6 +231,18 @@ CREATE TABLE validation_runs (
     data       TEXT NOT NULL,
     digest     TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+)
+"""
+
+
+MIGRATION_7_TO_8 = """
+CREATE TABLE equipment_links (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
 )
 """
@@ -312,7 +332,7 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2, 3, 4, 5, 6):
+        elif version in (1, 2, 3, 4, 5, 6, 7):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
@@ -337,11 +357,16 @@ class Database:
                         self._conn.execute(statement)
                 self._conn.execute("PRAGMA user_version = 6")
                 self._conn.execute("COMMIT")
-            self._conn.execute("BEGIN IMMEDIATE")  # version 7 adds the validation cases and runs
-            for statement in MIGRATION_6_TO_7.split(";"):
-                if statement.strip():
-                    self._conn.execute(statement)
-            self._conn.execute("PRAGMA user_version = 7")
+            if version <= 6:
+                self._conn.execute("BEGIN IMMEDIATE")  # version 7 adds the validation cases and runs
+                for statement in MIGRATION_6_TO_7.split(";"):
+                    if statement.strip():
+                        self._conn.execute(statement)
+                self._conn.execute("PRAGMA user_version = 7")
+                self._conn.execute("COMMIT")
+            self._conn.execute("BEGIN IMMEDIATE")  # version 8 adds the equipment interface (OPC UA links)
+            self._conn.execute(MIGRATION_7_TO_8)
+            self._conn.execute("PRAGMA user_version = 8")
             self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")

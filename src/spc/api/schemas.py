@@ -210,6 +210,12 @@ class ValidationCaseBody(Strict):
     record: dict
 
 
+class EquipmentBody(Strict):
+    """An OPC UA link; checked in spc.equipment.model."""
+
+    record: dict
+
+
 class MsaBody(Strict):
     """A measurement system: name, resolution, tolerance and policy; checked in spc.msa.service.validate_record."""
 
