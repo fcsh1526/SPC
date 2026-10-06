@@ -44,6 +44,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "spc.web" = ["static/*", "static/i18n/*"]
+"spc.validation" = ["data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

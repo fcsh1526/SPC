@@ -416,6 +416,7 @@
     const body = {
       stage: $("#a-stage").value,
       chart: $("#a-chart").value,
+      limit_method: $("#a-limit-method").value,
       subgroup_size: state.dataset.has_subgroup ? null : num("#a-size"),
       lsl: num("#a-lsl"), usl: num("#a-usl"),
       stability_mode: $("#a-mode").value,
@@ -438,7 +439,7 @@
     if (alpha) body.alpha = Number(alpha);
     if (state.profile) {  // the profile fixes what the customer agreed: those fields are not sent, the server applies them
       const fixed = state.profile.analysis;
-      ["alpha", "stability_mode", "edition", "rules"].forEach((k) => { if (k in fixed) delete body[k]; });
+      ["alpha", "stability_mode", "edition", "rules", "limit_method"].forEach((k) => { if (k in fixed) delete body[k]; });
       delete body.customer;
       body.profile_id = state.profile.id;
     }
@@ -2084,13 +2085,13 @@
     });
     if (!(VA.runs || []).length) runs.appendChild(el("tr")).appendChild(el("td", "muted", t("val.no_runs")));
     const iso = $("#va-iso"); iso.replaceChildren();
-    const ih = el("tr"); ["val.iso_no", "val.iso_what", "val.iso_state", ""].forEach((k) => cell(ih, k ? t(k) : "", "th")); iso.appendChild(ih);
+    const ih = el("tr"); ["val.iso_no", "val.iso_what", "val.iso_state"].forEach((k) => cell(ih, t(k), "th")); iso.appendChild(ih);
     (VA.iso || []).forEach((e) => {
       const tr = el("tr"); cell(tr, String(e.number));
-      cell(tr, t(e.known ? "iso.ex" + e.number : "iso.unknown") + (e.n ? ` (n = ${e.n})` : ""));
-      const st = e.case_id ? (e.last ? t("val.iso_" + e.last) : t("val.iso_entered")) : t("val.iso_missing");
-      cell(tr, st).className = e.last === "pass" ? "status-ok" : e.last === "fail" ? "status-alarm" : "status-warning";
-      const b = el("button", "", t(e.case_id ? "plan.edit" : "val.iso_create")); b.addEventListener("click", () => (e.case_id ? openCaseEditor(e.case_id) : openCaseEditor(null, e))); cell(tr, "").appendChild(b);
+      cell(tr, t("val.iso_desc", { model: e.model, dist: e.distribution, n: e.n, size: e.subgroup_size ?? "–", lsl: e.lsl, usl: e.usl }));
+      const l = e.last;
+      const c = cell(tr, l ? t("val.iso_last", { pass: l.pass || 0, known: l.known || 0, info: l.info || 0, fail: l.fail || 0 }) : t("val.iso_not_run"));
+      c.className = !l ? "status-warning" : l.fail ? "status-alarm" : "status-ok";
       iso.appendChild(tr);
     });
     const cases = $("#va-cases"); cases.replaceChildren();
@@ -2103,10 +2104,9 @@
     });
     if (!VA.cases.length) cases.appendChild(el("tr")).appendChild(el("td", "muted", t("val.no_cases")));
   }
-  async function openCaseEditor(id, example) {
+  async function openCaseEditor(id) {
     let c = { name: "", description: "", source: "", values: [], subgroup_size: null, request: {}, expected: [] };
     if (id) await guarded(async () => { c = await api(`/api/validation/cases/${id}`); });
-    if (example) c = { ...c, name: example.name, source: example.source, description: t(example.known ? "iso.ex" + example.number : "iso.unknown"), request: example.request };
     VA.editing = id || "new";
     $("#va-editor-title").textContent = id ? t("val.edit_title", { name: c.name }) : t("val.new");
     $("#vae-name").value = c.name; $("#vae-description").value = c.description; $("#vae-source").value = c.source;

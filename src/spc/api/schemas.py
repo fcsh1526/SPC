@@ -98,6 +98,7 @@ class AnalyzeBody(Strict):
     bootstrap_n: int = Field(default=200, ge=0, le=2000)
     seed: int = Field(default=20260701, ge=0, le=2**32 - 1)
     moving_n: int = Field(default=1, ge=1, le=10)
+    limit_method: Literal["draft", "iso7870"] = "draft"  # draft: exact limits of the draft; iso7870: the factors of ISO 7870-2
     profile_id: int | None = Field(default=None, ge=1)  # customer profile: fills what is not set here, see spc.profile
     target_table: dict | None = None
 

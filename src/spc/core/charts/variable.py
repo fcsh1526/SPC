@@ -18,7 +18,9 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import chi2
 
-from spc.core.constants import ALPHA_3SIGMA, check_alpha, cn, d2, u_quantile, w_quantile
+from spc.core.constants import ALPHA_3SIGMA, c4, check_alpha, cn, d2, d3, u_quantile, w_quantile
+
+LIMIT_METHODS = ("draft", "iso7870")
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,25 @@ class SubgroupChart:
     variation_values: np.ndarray
 
 
+def _check_method(method: str) -> str:
+    if method not in LIMIT_METHODS:
+        raise ValueError(f"limit_method must be one of {LIMIT_METHODS}")
+    return method
+
+
+def range_limits(n: int, rbar: float, sigma_hat: float, alpha: float, method: str) -> tuple[float, float]:
+    """Limits of the range chart. draft: quantiles of the w distribution (exact, probability limits). iso7870: D3 and D4 of ISO 7870-2,
+    that is R-bar -/+ u * d3 * sigma_hat with sigma_hat = R-bar / d2 (the 3 sigma limits; the lower one is not below 0)."""
+    if method == "iso7870":
+        u = u_quantile(alpha)
+        return max(0.0, rbar - u * d3(n) * sigma_hat), rbar + u * d3(n) * sigma_hat
+    return w_quantile(n, alpha / 2.0) * sigma_hat, w_quantile(n, 1.0 - alpha / 2.0) * sigma_hat
+
+
+def _ends(limits: tuple[float, float], center: float) -> tuple[float, float, float]:
+    return limits[0], center, limits[1]
+
+
 def _subgroups(data) -> np.ndarray:
     x = np.asarray(data, dtype=float)
     if x.ndim != 2:
@@ -62,20 +83,29 @@ def _subgroups(data) -> np.ndarray:
     return x
 
 
-def xbar_s(data, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
-    """X̄-s chart. Estimators: mu_hat = grand mean, sigma_hat = sqrt(mean of subgroup variances)."""
+def xbar_s(data, alpha: float = ALPHA_3SIGMA, method: str = "draft") -> SubgroupChart:
+    """X̄-s chart. draft: mu_hat = grand mean, sigma_hat = sqrt(mean of subgroup variances), exact chi-square limits for s.
+    iso7870: sigma_hat = s-bar / c4, limits mu_hat -/+ A3 s-bar and B3, B4 times s-bar (ISO 7870-2, table 1)."""
     check_alpha(alpha)
+    _check_method(method)
     x = _subgroups(data)
     k, n = x.shape
     means = x.mean(axis=1)
     s = x.std(axis=1, ddof=1)
     mu_hat = float(means.mean())
-    sigma_hat = float(np.sqrt(np.mean(s**2)))
     u = u_quantile(alpha)
-    half = u * sigma_hat / np.sqrt(n)
     f = n - 1
-    s_ucl = float(np.sqrt(chi2.ppf(1.0 - alpha / 2.0, f) / f) * sigma_hat)
-    s_lcl = float(np.sqrt(chi2.ppf(alpha / 2.0, f) / f) * sigma_hat)
+    if method == "iso7870":
+        sbar = float(s.mean())
+        sigma_hat = sbar / c4(n)
+        half = u * sigma_hat / np.sqrt(n)
+        spread = u * np.sqrt(1.0 - c4(n) ** 2) / c4(n)
+        s_lcl, s_ucl = max(0.0, sbar * (1.0 - spread)), sbar * (1.0 + spread)
+    else:
+        sigma_hat = float(np.sqrt(np.mean(s**2)))
+        half = u * sigma_hat / np.sqrt(n)
+        s_ucl = float(np.sqrt(chi2.ppf(1.0 - alpha / 2.0, f) / f) * sigma_hat)
+        s_lcl = float(np.sqrt(chi2.ppf(alpha / 2.0, f) / f) * sigma_hat)
     return SubgroupChart(
         kind="xbar-s",
         n=n,
@@ -90,9 +120,10 @@ def xbar_s(data, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
     )
 
 
-def xbar_r(data, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
-    """X̄-R chart. Estimators: mu_hat = grand mean, sigma_hat = R̄ / d2. R limits use the w distribution."""
+def xbar_r(data, alpha: float = ALPHA_3SIGMA, method: str = "draft") -> SubgroupChart:
+    """X̄-R chart. Estimators: mu_hat = grand mean, sigma_hat = R̄ / d2. R limits: the w distribution (draft) or D3, D4 (iso7870)."""
     check_alpha(alpha)
+    _check_method(method)
     x = _subgroups(data)
     k, n = x.shape
     means = x.mean(axis=1)
@@ -109,21 +140,18 @@ def xbar_r(data, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
         mu_hat=mu_hat,
         sigma_hat=sigma_hat,
         location=Limits(mu_hat - half, mu_hat, mu_hat + half),
-        variation=Limits(
-            w_quantile(n, alpha / 2.0) * sigma_hat,
-            rbar,
-            w_quantile(n, 1.0 - alpha / 2.0) * sigma_hat,
-        ),
+        variation=Limits(*_ends(range_limits(n, rbar, sigma_hat, alpha, method), rbar)),
         location_values=means,
         variation_values=ranges,
     )
 
 
-def median_r(data, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
+def median_r(data, alpha: float = ALPHA_3SIGMA, method: str = "draft") -> SubgroupChart:
     """Median and range chart (draft 10.3.3.4). mu_hat = mean of the subgroup medians (the choice of ISO 7870-2),
     sigma_hat = R̄ / d2. The location limits are mu_hat ± u(1-alpha/2) * c_n * sigma_hat / sqrt(n); the R chart is the same
     as for X̄-R. The median reacts more slowly to a changing process than the mean, and is less sensitive to a single extreme value."""
     check_alpha(alpha)
+    _check_method(method)
     x = _subgroups(data)
     k, n = x.shape
     medians = np.median(x, axis=1)
@@ -135,18 +163,19 @@ def median_r(data, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
     return SubgroupChart(
         kind="median-r", n=n, k=k, alpha=alpha, mu_hat=mu_hat, sigma_hat=sigma_hat,
         location=Limits(mu_hat - half, mu_hat, mu_hat + half),
-        variation=Limits(w_quantile(n, alpha / 2.0) * sigma_hat, rbar, w_quantile(n, 1.0 - alpha / 2.0) * sigma_hat),
+        variation=Limits(*_ends(range_limits(n, rbar, sigma_hat, alpha, method), rbar)),
         location_values=medians, variation_values=ranges,
     )
 
 
-def imr(values, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
+def imr(values, alpha: float = ALPHA_3SIGMA, method: str = "draft") -> SubgroupChart:
     """I-MR chart with moving range of 2.
 
     Estimators: mu_hat = mean, sigma_hat = MR̄ / d2(2). The MR limits use the w distribution for n = 2.
     For restarts and moving samples larger than 2 see `imr_moving`.
     """
     check_alpha(alpha)
+    _check_method(method)
     x = np.asarray(values, dtype=float)
     if x.ndim != 1 or x.size < 3:
         raise ValueError("values must be a 1-D array with at least 3 observations")
@@ -165,11 +194,7 @@ def imr(values, alpha: float = ALPHA_3SIGMA) -> SubgroupChart:
         mu_hat=mu_hat,
         sigma_hat=sigma_hat,
         location=Limits(mu_hat - half, mu_hat, mu_hat + half),
-        variation=Limits(
-            w_quantile(2, alpha / 2.0) * sigma_hat,
-            mrbar,
-            w_quantile(2, 1.0 - alpha / 2.0) * sigma_hat,
-        ),
+        variation=Limits(*_ends(range_limits(2, mrbar, sigma_hat, alpha, method), mrbar)),
         location_values=x,
         variation_values=mr,
     )

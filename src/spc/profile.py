@@ -28,7 +28,7 @@ from spc.core.rules import RuleSet
 
 STAGES = ("machine", "preliminary", "production")
 ANALYSIS_KEYS = ("alpha", "estimate_confidence", "target_confidence", "edition", "stability_mode",
-                 "stability_confidence", "rules", "targets")
+                 "stability_confidence", "rules", "targets", "limit_method")
 REQUIRABLE = ("process", "machine", "site", "process_ref", "machine_ref", "persons", "period_text", "part_name",
               "part_number", "characteristic", "unit", "target", "technical_conditions", "deviations",
               "sampling_frequency", "recommendations", "uncertainty")
@@ -187,6 +187,10 @@ def validate_analysis(data: Mapping[str, Any] | None) -> dict:
         if data["stability_mode"] not in ("strict", "random_range"):
             raise ValueError("analysis.stability_mode must be 'strict' or 'random_range'")
         out["stability_mode"] = data["stability_mode"]
+    if data.get("limit_method") is not None:
+        if data["limit_method"] not in ("draft", "iso7870"):
+            raise ValueError("analysis.limit_method must be 'draft' or 'iso7870'")
+        out["limit_method"] = data["limit_method"]
     if data.get("rules") is not None:
         try:
             RuleSet(**data["rules"])

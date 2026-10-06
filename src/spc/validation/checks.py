@@ -33,6 +33,7 @@ class Check:
     tol: float | None = None  # relative tolerance for numbers; None = must be equal
     note: str = ""
     abs_tol: float = 0.0  # absolute tolerance too (a published value is rounded to its printed digits)
+    level: str = "must"  # "must": a difference fails the run. "known": the reference itself is inconsistent, shown with the evidence in `note`. "info": shown, not judged
 
     def with_abs(self, value: float) -> "Check":
         self.abs_tol = value
@@ -46,9 +47,17 @@ class Check:
             return a == e
         return math.isfinite(a) and abs(a - e) <= max(self.tol * abs(e), self.abs_tol, 1e-12)
 
+    @property
+    def status(self) -> str:
+        """pass | fail | known | info. A check that matches passes whatever its level."""
+        if self.ok:
+            return "pass"
+        return {"known": "known", "info": "info"}.get(self.level, "fail")
+
     def to_dict(self) -> dict:
         return {"id": self.id, "area": self.area, "requirement": self.requirement, "reference": self.reference, "expected": _plain(self.expected),
-                "actual": _plain(self.actual), "tol": self.tol, "abs_tol": self.abs_tol, "note": self.note, "ok": bool(self.ok)}
+                "actual": _plain(self.actual), "tol": self.tol, "abs_tol": self.abs_tol, "note": self.note, "ok": bool(self.ok),
+                "status": self.status}
 
 
 def _plain(x):

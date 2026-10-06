@@ -86,3 +86,19 @@ def state_tests(states: Mapping[str, Sequence[float]], alpha: float = 0.05) -> d
     out["location_differs"] = out["fisher"]["p"] < alpha
     out["outliers"] = sorted(k for k, s in per_state.items() if s["grubbs"]["outlier"])
     return out
+
+
+def type1_capability(states: Mapping[str, Sequence[float]], lsl: float, usl: float) -> dict:
+    """Machine performance of a multi-state process of Type 1 (equal dispersion in the states, ISO 22514-8): sigma is the pooled standard deviation
+    of the states; the lower index uses the lowest state mean, the upper index the highest. Pm = (Pmk,l + Pmk,u) / 2 = (U - L - range of the
+    state means) / (6 sigma). The three Pmk values reproduce the example of ISO/TR 11462-3 (data set 11); the text of ISO 22514-8 is not at hand,
+    so the formula is the one that reproduces them, not a quotation.
+    """
+    groups = [np.asarray(v, dtype=float) for v in states.values()]
+    if len(groups) < 2 or any(g.size < 2 for g in groups):
+        raise ValueError("at least 2 states with 2 values each are needed")
+    sigma = float(np.sqrt(np.mean([g.var(ddof=1) for g in groups])))
+    means = [float(g.mean()) for g in groups]
+    low = (min(means) - lsl) / (3 * sigma)
+    up = (usl - max(means)) / (3 * sigma)
+    return {"sigma": sigma, "pmk_l": low, "pmk_u": up, "pmk": min(low, up), "pm": (low + up) / 2}

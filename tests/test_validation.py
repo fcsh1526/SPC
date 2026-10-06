@@ -11,10 +11,11 @@ from tests.test_api import err
 def test_every_builtin_check_passes_and_each_has_a_text():
     results = C.run_builtin()
     assert len(results) >= 50
-    failed = [(c.id, c.expected, c.actual) for c in results if not c.ok]
+    failed = [(c.id, c.expected, c.actual) for c in results if c.status == "fail"]
     assert failed == [], failed
     for c in results:
-        assert c.requirement in EN and ("area." + c.area) in EN and c.reference
+        area = "area.iso11462_example" if c.area.startswith("iso11462.") else "area." + c.area
+        assert c.requirement in EN and area in EN and c.reference
 
 
 def test_a_check_fails_when_the_program_is_wrong(monkeypatch):
@@ -23,7 +24,7 @@ def test_a_check_fails_when_the_program_is_wrong(monkeypatch):
 
     real = constants.d2
     monkeypatch.setattr(constants, "d2", lambda n: real(n) * 1.01)
-    bad = [c.id for c in C.run_builtin() if not c.ok]
+    bad = [c.id for c in C.run_builtin() if c.status == "fail"]
     assert any(i.startswith("V01-d2") for i in bad) and not any(i.startswith("V01-c4") for i in bad)
 
 
@@ -122,25 +123,69 @@ def test_the_case_that_cannot_be_analysed_fails_instead_of_stopping_the_run(env)
     assert run["verdict"] == "fail" and all(not x["ok"] for x in run["validation"]["cases"][0]["checks"])
 
 
-def test_the_iso_11462_3_scenarios_are_built_in_and_say_that_they_are_not_the_standards_data():
+def test_the_eleven_iso_examples_are_run_against_the_program_and_nothing_is_hidden():
+    from collections import Counter
+
     from spc.validation import iso11462 as ISO
 
-    checks = [c for c in C.run_builtin() if c.area == "iso11462"]
-    assert len(checks) >= 10 and all(c.ok for c in checks), [(c.id, c.expected, c.actual) for c in checks if not c.ok]
-    assert {c.id.split("-")[0] for c in checks} >= {"S01", "S02", "S03", "S04", "S07", "S08", "S11"}
-    assert "constructed" in " ".join(c.reference for c in checks) and EN["area.iso11462"] and ZH["area.iso11462"]
-    assert [e["number"] for e in ISO.CATALOGUE] == list(range(1, 12)) and {e["number"] for e in ISO.CATALOGUE if not e["known"]} == {5, 6, 9, 10}
+    checks = [c for c in C.run_builtin() if c.area.startswith("iso11462.")]
+    assert len(checks) > 400 and {c.area for c in checks} == {f"iso11462.{n}" for n in range(1, 12)}
+    count = Counter(c.status for c in checks)
+    assert count["fail"] == 0 and count["pass"] > 380 and 0 < count["known"] < 40 and count["info"] >= 1, count
+    # a known difference always carries its evidence, and a pass never carries a level that excuses it
+    for c in checks:
+        if c.status == "known":
+            assert len(c.note) > 30, c.id
+    assert [e["number"] for e in ISO.catalogue()] == list(range(1, 12))
+    # the data are the printed ones: sizes, and the first and last value of data set 1 and 10 as printed in Annex A
+    d = ISO.data()["sets"]
+    assert [len(d[str(k)]["values"]) for k in range(1, 11)] == [125, 600, 1000, 1000, 1000, 600, 500, 500, 500, 200]
 
 
-def test_the_catalogue_shows_which_examples_the_user_entered_and_how_they_did(env):
+def test_known_differences_are_the_standards_own_inconsistencies_and_say_so():
+    from spc.validation import iso11462 as ISO
+
+    known = {c.id: c for c in ISO.scenarios() if c.status == "known"}
+    assert "printed point 29 has the value 3.36, inside the printed limits" in known["I03-R-limit-points"].note  # an off-by-one in the printed table
+    assert "sign is missing" in known["I05-median-lcl"].note
+    assert "exchanged" in known["I06-cap-pl"].note and "upper limit 5" in known["I05-cap-p"].note
+    assert "contradicts its own numbers" in known["I11-fisher-conclusion"].note
+    # the program itself passes on the points where it matters: limits of the six charts of data set 1 and the capability of 1 to 4 and 7 to 10
+    ok = {c.id for c in ISO.scenarios() if c.status == "pass"}
+    assert {"I01-xbar-ucl", "I01-individuals-lcl", "I01-s-ucl", "I01-R-ucl", "I01-mr-ucl", "I01-cap-pk", "I04-cap-p", "I10-cap-pk", "I11-bartlett", "I11-pmk-l"} <= ok
+
+
+def test_a_wrong_program_fails_the_standards_examples(monkeypatch):
+    """The comparison can fail: with another limit method the control limits of the standard are no longer met."""
+    from spc.service import analysis as A
+    from spc.validation import iso11462 as ISO
+
+    real = A.analyze_detailed
+
+    def draft_limits(dataset, req):
+        from dataclasses import replace
+
+        return real(dataset, replace(req, limit_method="draft"))
+
+    monkeypatch.setattr(A, "analyze_detailed", draft_limits)
+    import spc.service as S
+
+    monkeypatch.setattr(S, "analyze", lambda ds, req: A.analyze(ds, req))
+    monkeypatch.setattr(ISO, "analyze", lambda ds, req: A.analyze(ds, req))
+    bad = [c.id for c in ISO.example(1) if c.status == "fail"]
+    assert "I01-s-ucl" in bad and "I01-R-ucl" in bad and "I01-mr-ucl" in bad  # the exact limits of the draft differ from those of ISO 7870-2
+
+
+def test_the_catalogue_shows_what_the_last_run_found_for_each_example(env):
     app, c = env
     ex = {e["number"]: e for e in c["view"].get("/api/validation/iso11462").json()["examples"]}
-    assert len(ex) == 11 and all(e["case_id"] is None and e["last"] is None for e in ex.values()) and ex[1]["name"] == "ISO/TR 11462-3 example 1"
-    assert ex[1]["request"]["distribution"] == "normal" and ex[7]["request"]["model"] == "C4" and ex[5]["known"] is False
-    rec = {**case_record("ISO/TR 11462-3 example 1"), "source": ex[1]["source"]}
-    assert c["eng"].post("/api/validation/cases", json={"record": rec}).status_code == 200
+    assert len(ex) == 11 and all(e["last"] is None for e in ex.values())
+    assert ex[5]["model"] == "C2" and ex[3]["model"] == "B" and ex[11]["subgroup_size"] is None and ex[1]["n"] == 125
+    run = c["eng"].post("/api/validation/runs").json()
+    assert run["verdict"] == "verified" and run["verification"]["failed"] == 0 and run["verification"]["known"] > 0
     ex = {e["number"]: e for e in c["view"].get("/api/validation/iso11462").json()["examples"]}
-    assert ex[1]["case_id"] and ex[1]["last"] is None and ex[2]["case_id"] is None
-    c["eng"].post("/api/validation/runs")
-    ex = {e["number"]: e for e in c["view"].get("/api/validation/iso11462").json()["examples"]}
-    assert ex[1]["last"] == "pass"
+    assert ex[1]["last"]["pass"] > 30 and ex[5]["last"].get("known", 0) >= 1 and ex[11]["last"]["pass"] >= 15
+    html = c["view"].get(f"/api/validation/runs/{run['id']}/report").text
+    assert "ISO/TR 11462-3 example 6" in html and "known difference" in html and "exchanged" in html
+    zh = c["view"].get(f"/api/validation/runs/{run['id']}/report?lang=zh-TW").text
+    assert "ISO/TR 11462-3 範例 6" in zh and "已知差異" in zh

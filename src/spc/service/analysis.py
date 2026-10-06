@@ -76,6 +76,7 @@ class AnalysisRequest:
     seed: int = 20260701
     target_table: dict | None = None  # complete table stage -> class -> [p, pk] of a customer profile; None = draft values
     moving_n: int = 1  # I-MR only: size of the moving sample (1 = plain individuals chart). Restarts come from the data
+    limit_method: str = "draft"  # "draft": exact limits of the draft (chi-square, w distribution); "iso7870": factors A3, B3, B4, D3, D4 of ISO 7870-2
 
 
 def rules_from_dict(data: dict[str, Any]) -> RuleSet:
@@ -292,6 +293,7 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
         stability_mode=req.stability_mode,
         stability_confidence=req.stability_confidence,
         customer=req.customer,
+        limit_method=req.limit_method,
     )
     rules = params.rules
     warnings: list[dict] = []
@@ -338,8 +340,10 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
         phase_cuts = sorted({int(i) for pos, i in zip(restart_pos, idx) if pos in phase_pos and 0 < i < len(p_all)})
         if len(cuts) != len(restarts):  # a restart before the first or after the last used value restarts nothing
             _warn(warnings, "restart_without_effect", n=len(restarts) - len(cuts))
+        if req.limit_method == "iso7870" and (req.moving_n != 1 or cuts):
+            raise ValueError("limit_method iso7870 is defined for the plain I-MR chart: no moving sample size above 1 and no restarts")
         if req.moving_n == 1 and not cuts:
-            chart = imr(v_all, req.alpha)
+            chart = imr(v_all, req.alpha, req.limit_method)
             loc_pos = [[int(p)] for p in p_all]
             var_labels, var_pos = loc_labels[1:], [[int(p_all[i]), int(p_all[i + 1])] for i in range(len(p_all) - 1)]
             sigma_loc = chart.sigma_hat
@@ -352,7 +356,7 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
             sigma_loc = chart.location_sigma
 
     else:
-        chart = {"xbar-s": xbar_s, "xbar-r": xbar_r, "median-r": median_r}[kind](matrix, req.alpha)
+        chart = {"xbar-s": xbar_s, "xbar-r": xbar_r, "median-r": median_r}[kind](matrix, req.alpha, req.limit_method)
         loc_labels = var_labels = labels
         loc_pos = var_pos = [[int(p) for p in row] for row in pos_rows]
         sigma_loc = chart.sigma_hat * (cn(chart.n) if kind == "median-r" else 1.0) / math.sqrt(chart.n)  # sd of the plotted statistic

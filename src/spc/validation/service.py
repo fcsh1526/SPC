@@ -100,12 +100,13 @@ class ValidationService:
             case_results.append({"id": case["id"], "name": case["name"], "description": case["description"], "source": case["source"],
                                  "definition": {k: case[k] for k in ("values", "subgroup_size", "request", "expected")}, "checks": [c.to_dict() for c in checks]})
         v_checks = [c for cr in case_results for c in cr["checks"]]
-        failed_v = sum(not c.ok for c in builtin)
-        failed_c = sum(not c["ok"] for c in v_checks)
+        failed_v = sum(c.status == "fail" for c in builtin)
+        known_v, info_v = sum(c.status == "known" for c in builtin), sum(c.status == "info" for c in builtin)
+        failed_c = sum(c["status"] != "pass" for c in v_checks)
         record = {
             "engine_version": __version__, "python": platform.python_version(), "numpy": numpy.__version__, "scipy": scipy.__version__,
             "parameters": {k: v for k, v in AnalysisParams().to_dict().items() if k not in ("engine_version",)},
-            "verification": {"checks": [c.to_dict() for c in builtin], "failed": failed_v, "status": "pass" if not failed_v else "fail"},
+            "verification": {"checks": [c.to_dict() for c in builtin], "failed": failed_v, "known": known_v, "info": info_v, "status": "pass" if not failed_v else "fail"},
             "validation": {"cases": case_results, "failed": failed_c, "status": "none" if not case_results else "pass" if not failed_c else "fail"},
             "created_by": _label(user), "created_at": now_iso(),
         }
@@ -135,15 +136,17 @@ class ValidationService:
 
     # ------------------------------------------------------------------ ISO/TR 11462-3
     def iso_examples(self) -> list[dict]:
-        """The eleven examples: what is known of each, whether the user entered it as a reference case, and what the last run found."""
-        cases = {c["name"]: c["id"] for c in self.list_cases()}
-        last = self.db.one("SELECT data FROM validation_runs ORDER BY id DESC LIMIT 1")
-        results: dict[str, str] = {}
+        """The eleven examples of the standard with what the last run found for each: how many checks passed, are known differences of the
+        standard itself, are information, or failed."""
+        last = self.db.one("SELECT id, data FROM validation_runs ORDER BY id DESC LIMIT 1")
+        counts: dict[str, dict[str, int]] = {}
         if last:
-            for c in json.loads(last["data"])["validation"]["cases"]:
-                results[c["name"]] = "pass" if all(x["ok"] for x in c["checks"]) else "fail"
+            for c in json.loads(last["data"])["verification"]["checks"]:
+                if c["area"].startswith("iso11462."):
+                    st = c.get("status") or ("pass" if c["ok"] else "fail")
+                    counts.setdefault(c["area"], {}).setdefault(st, 0)
+                    counts[c["area"]][st] += 1
         out = []
-        for e in ISO.CATALOGUE:
-            name = ISO.case_name(e["number"])
-            out.append({**e, "name": name, "source": ISO.SOURCE.format(n=e["number"]), "case_id": cases.get(name), "last": results.get(name)})
+        for e in ISO.catalogue():
+            out.append({**e, "source": ISO.SOURCE.format(n=e["number"]), "last": counts.get(f"iso11462.{e['number']}")})
         return out

@@ -27,9 +27,12 @@ class AnalysisParams:
     stability_mode: str = "random_range"
     stability_confidence: float = 0.99
     customer: str | None = None
+    limit_method: str = "draft"  # "iso7870": the factors of ISO 7870-2 instead of the exact limits of the draft
 
     def to_dict(self) -> dict:
         data = asdict(self)
+        if self.limit_method == "draft":  # the default is not written: results and archives made before the setting existed stay reproducible
+            del data["limit_method"]
         data["schema_version"] = SCHEMA_VERSION
         data["engine_version"] = __version__
         return data
