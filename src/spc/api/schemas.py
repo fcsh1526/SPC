@@ -109,6 +109,33 @@ class MultistageBody(Strict):
     minimum_total: int = Field(default=50, ge=1, le=100_000)
 
 
+class MultivariateBody(Strict):
+    """Pm and Pmk of a multidimensional characteristic (draft 8.5.2): one row per part, one column per characteristic."""
+
+    data: list[list[float]] = Field(min_length=10, max_length=100_000)
+    lower: list[float] = Field(min_length=2, max_length=20)
+    upper: list[float] = Field(min_length=2, max_length=20)
+    names: list[str] | None = Field(default=None, max_length=20)
+
+
+class NestedBody(Strict):
+    """Nested variance components of a stored data set: tag names or "subgroup", outermost level first."""
+
+    levels: list[str] = Field(min_length=1, max_length=5)
+    alpha: float = Field(default=0.05, gt=0, lt=0.5)
+
+
+class TrendBody(Strict):
+    """Regression control chart of a stored data set. `cycle` counts samples between dressings or tool changes."""
+
+    cycle: int | None = Field(default=None, ge=3, le=100_000)
+    subgroup_size: int | None = Field(default=None, ge=2, le=25)
+    lsl: float | None = None
+    usl: float | None = None
+    distribution: str = Field(default="auto", max_length=30)
+    method: Literal["G", "Z"] = "G"
+
+
 class GdtBody(Strict):
     """Assembly clearance of a size feature with a position tolerance under MMR/LMR, draft 8.5.3. Give xp, or dx and dy."""
 
@@ -244,12 +271,24 @@ class ReportMetaBody(Strict):
         return ReportMeta(**self.model_dump())
 
 
+class ReportSpecialBody(Strict):
+    """Special-case results for annex E of a report; each is the request of its own route. The result is made again on the data of the report."""
+
+    scope: MultistageScopeBody | None = None
+    multistage: MultistageBody | None = None
+    nested: NestedBody | None = None
+    trend: TrendBody | None = None
+    gdt: GdtBody | None = None
+    multivariate: MultivariateBody | None = None
+
+
 class ReportBody(Strict):
     analysis: AnalyzeBody
     meta: ReportMetaBody = Field(default_factory=ReportMetaBody)
     language: Literal["zh-TW", "en"] = "en"  # not set: the profile's language, else English
     profile_id: int | None = Field(default=None, ge=1)  # also applies to the analysis unless that names its own
     multistate: ReportMultistateBody | None = None  # the machine performance of the states (ISO 22514-8) goes into the report and the archive
+    special: ReportSpecialBody | None = None  # annex E: multi-stage, nested, trend, GD&T, multivariate results
     control_plan_id: int | None = Field(default=None, ge=1)  # a released plan: its snapshot goes into the report and the archive
     measurement_system_id: int | None = Field(default=None, ge=1)  # the MSA gate applies, and U and the guard band come from its studies
 

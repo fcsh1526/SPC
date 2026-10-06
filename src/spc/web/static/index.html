@@ -426,6 +426,7 @@
         <label><span data-i18n="msa.link"></span><select id="rp-msa"></select></label>
         <label><span data-i18n="report.plan"></span><select id="rp-plan"></select></label>
         <label class="check wide"><input id="rp-ms" type="checkbox"><span data-i18n="report.multistate"></span></label>
+        <fieldset class="wide" id="rp-special-wrap" hidden><legend data-i18n="report.special"></legend><div id="rp-special" class="row"></div></fieldset>
         <label><span data-i18n="report.process"></span><input id="rp-process" type="text" maxlength="2000"></label>
         <label><span data-i18n="report.machine"></span><input id="rp-machine" type="text" maxlength="2000"></label>
         <label><span data-i18n="report.site"></span><input id="rp-site" type="text" maxlength="2000"></label>
@@ -1151,6 +1152,43 @@
     </div>
     <p><button id="gd-run" class="primary" data-i18n="sp.gdt_run"></button></p>
     <div id="gd-out" role="status"></div>
+  </div>
+  <div class="card">
+    <h3 data-i18n="sp.mv_title"></h3>
+    <p class="note" data-i18n="sp.mv_note"></p>
+    <div class="form-grid">
+      <label class="wide"><span data-i18n="sp.mv_limits"></span><textarea id="mv-limits" rows="3" spellcheck="false" placeholder="9 11 x&#10;4 6 y"></textarea></label>
+      <label class="wide"><span data-i18n="sp.mv_data"></span><textarea id="mv-data" rows="8" spellcheck="false" placeholder="10.01 5.02"></textarea></label>
+    </div>
+    <p><button id="mv-run" class="primary" data-i18n="sp.mv_run"></button></p>
+    <div id="mv-out" role="status"></div>
+  </div>
+  <div class="card">
+    <h3 data-i18n="sp.nest_title"></h3>
+    <p class="note" data-i18n="sp.nest_note"></p>
+    <p id="sp-nest-none" class="muted" data-i18n="sp.comb_no_data"></p>
+    <div id="sp-nest-form" hidden>
+      <div class="form-grid">
+        <label class="wide"><span data-i18n="sp.nest_levels"></span><input id="nest-levels" type="text" maxlength="300"></label>
+      </div>
+      <p><button id="nest-run" class="primary" data-i18n="sp.nest_run"></button></p>
+    </div>
+    <div id="nest-out" role="status"></div>
+  </div>
+  <div class="card">
+    <h3 data-i18n="sp.trend_title"></h3>
+    <p class="note" data-i18n="sp.trend_note"></p>
+    <p id="sp-trend-none" class="muted" data-i18n="sp.comb_no_data"></p>
+    <div id="sp-trend-form" hidden>
+      <div class="form-grid">
+        <label><span data-i18n="sp.trend_cycle"></span><input id="tr-cycle" type="number" min="3" step="1"></label>
+        <label><span data-i18n="sp.trend_size"></span><input id="tr-size" type="number" min="2" max="25" step="1"></label>
+        <label><span data-i18n="sp.lsl"></span><input id="tr-lsl" type="number" step="any"></label>
+        <label><span data-i18n="sp.usl"></span><input id="tr-usl" type="number" step="any"></label>
+      </div>
+      <p><button id="tr-run" class="primary" data-i18n="sp.trend_run"></button></p>
+    </div>
+    <div id="tr-out" role="status"></div>
   </div>
 </section>
 

@@ -30,8 +30,8 @@ from spc.api.equipment import add_equipment_routes
 from spc.api.signing import add_signing_routes
 from spc.signing.core import SigningError
 from spc.signing.service import SigningService
-from spc.core import gdt, multistage as mstage
-from spc.service.special import multistage_for_dataset
+from spc.core import gdt, multistage as mstage, multivariate_perf as mvperf
+from spc.service.special import multistage_for_dataset, nested_for_dataset, special_snapshot, trend_for_dataset
 from spc.service.state_tests import multistate_for_dataset, state_tests_for_dataset
 from spc.equipment.model import EquipmentError
 from spc.equipment.service import EquipmentService
@@ -46,6 +46,9 @@ from spc.api.schemas import (
     MultistageBody,
     MultistageScopeBody,
     GdtBody,
+    MultivariateBody,
+    NestedBody,
+    TrendBody,
     StateTestsBody,
     TimeModelBody,
     AnalyzeBody,
@@ -580,12 +583,21 @@ def create_app(
             except ValueError as exc:
                 raise ApiError(400, "invalid_input", str(exc)) from None
             ms_snap = {"lsl": lsl, "usl": usl, "by": res["by"], "options": options, "result": res}
-        g = generate(store.get(key), request, meta, language, created_by=user.label, profile=snap, control_plan=plan_snap, multistate=ms_snap)
+        special_snap = None
+        if body.special is not None:
+            asked = {k: v.model_dump() for k, v in body.special if v is not None}
+            if asked:
+                try:
+                    special_snap = special_snapshot(asked, store.get(key))
+                except ValueError as exc:
+                    raise ApiError(400, "invalid_input", str(exc)) from None
+        g = generate(store.get(key), request, meta, language, created_by=user.label, profile=snap, control_plan=plan_snap, multistate=ms_snap, special=special_snap)
         with db.tx():
             reports.add(g, key, user.id)
             audit.append("report_created", user_id=user.id, username=user.username, target=g.report_id,
                          detail={"dataset": key, "digest": g.archive["integrity"]["digest"],
                                  **({"multistate": {"type": ms_snap["result"]["type"], "pm": ms_snap["result"]["pm"], "pmk": ms_snap["result"]["pmk"]}} if ms_snap else {}),
+                                 **({"special": sorted(special_snap)} if special_snap else {}),
                                  **({"control_plan": plan_snap["name"], "control_plan_revision": plan_snap["revision"]} if plan_snap else {}),
                                  **({"profile": profile["name"], "profile_revision": profile["revision"],
                                      "deviations": sorted(deviations)} if profile else {})})
@@ -723,6 +735,30 @@ def create_app(
         try:
             return multistage_for_dataset(store.get(key), body.factors, body.lsl, body.usl, alpha=body.alpha,
                                           per_combination=body.per_combination, minimum_total=body.minimum_total)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/multivariate/performance")
+    def multivariate_performance(body: MultivariateBody):
+        """Pm and Pmk of a multidimensional characteristic from hyper-ellipsoids (draft 8.5.2)."""
+        try:
+            return mvperf.performance(body.data, body.lower, body.upper, body.names)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/datasets/{key}/nested")
+    def nested(key: str, body: NestedBody):
+        """Variance components of nested data (sources of variation study, draft 10.3.1)."""
+        try:
+            return nested_for_dataset(store.get(key), body.levels, body.alpha)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/datasets/{key}/trend-chart")
+    def trend(key: str, body: TrendBody):
+        """Regression control chart for a process with a trend that cannot be removed (draft time model C3)."""
+        try:
+            return trend_for_dataset(store.get(key), body.cycle, body.subgroup_size, body.lsl, body.usl, body.distribution, body.method)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 

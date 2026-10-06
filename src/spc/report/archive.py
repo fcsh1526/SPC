@@ -44,6 +44,7 @@ def build_archive(
     profile: dict | None = None,
     control_plan: dict | None = None,
     multistate: dict | None = None,
+    special: dict | None = None,
 ) -> dict:
     body = {
         "format": FORMAT,
@@ -65,6 +66,8 @@ def build_archive(
         body["control_plan"] = control_plan
     if multistate:  # the machine performance of the states (ISO 22514-8): the settings and the result, inside the digest
         body["multistate"] = multistate
+    if special:  # multi-stage, nested, trend, GD&T, multivariate (draft 8.5, 10.3.1): the requests and the results, inside the digest
+        body["special"] = special
     digest = hashlib.sha256(canonical(body)).hexdigest()
     return {
         **body,
@@ -136,4 +139,12 @@ def reproduce(archive: dict) -> Reproduction:
             _compare(ms["result"], json.loads(json.dumps(redo)), "multistate", diffs)
         except ValueError as exc:
             diffs.append(f"multistate: {exc}")
+    for name, item in (archive.get("special") or {}).items():  # each stored request, run again on the stored data, must give the stored result
+        from spc.service.special import run_special
+
+        try:
+            redo = run_special(name, item["request"], dataset)
+            _compare(item["result"], json.loads(json.dumps(redo)), f"special.{name}", diffs)
+        except (ValueError, KeyError) as exc:
+            diffs.append(f"special.{name}: {exc}")
     return Reproduction(ok, not diffs, archive.get("engine_version") == __version__, tuple(diffs[:20]))

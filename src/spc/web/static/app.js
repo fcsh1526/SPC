@@ -807,6 +807,7 @@
         measurement_system_id: $("#rp-msa").value ? Number($("#rp-msa").value) : null,
         control_plan_id: $("#rp-plan").value ? Number($("#rp-plan").value) : null,
         multistate: $("#rp-ms").checked ? multistateOptions() : null,
+        special: specialForReport(),
       });
       state.reportOut = out;
       renderReportOut();
@@ -2663,13 +2664,35 @@
   }
 
   // ---------------------------------------------------------------- special cases (draft 8.5): multi-stage machining and GD&T
-  const SP = { scope: null, comb: null, gdt: null };
+  const SP = { scope: null, comb: null, gdt: null, req: {} };
+  const SP_ITEMS = ["scope", "multistage", "nested", "trend", "gdt", "multivariate"];
+  function renderReportSpecial() {  // the results that were run in the tab Special cases can go into the report (annex E)
+    const box = $("#rp-special"); if (!box) return;
+    const chosen = new Set($$("#rp-special input").filter((i) => i.checked).map((i) => i.value));
+    box.replaceChildren();
+    const have = SP_ITEMS.filter((k) => SP.req[k]);
+    $("#rp-special-wrap").hidden = !have.length;
+    have.forEach((k) => {
+      const lab = el("label", "check"); const cb = el("input"); cb.type = "checkbox"; cb.value = k; cb.checked = chosen.has(k);
+      lab.appendChild(cb); lab.appendChild(el("span", "", t("report.sp_" + k))); box.appendChild(lab);
+    });
+  }
+  function specialForReport() {
+    const picked = $$("#rp-special input").filter((i) => i.checked).map((i) => i.value);
+    if (!picked.length) return null;
+    const out = {}; picked.forEach((k) => { out[k] = SP.req[k]; });
+    return out;
+  }
   function loadSpecial() {
     const has = !!state.dataset;
     $("#sp-comb-none").hidden = has; $("#sp-comb-form").hidden = !has;
+    $("#sp-nest-none").hidden = has; $("#sp-nest-form").hidden = !has; $("#sp-trend-none").hidden = has; $("#sp-trend-form").hidden = !has;
     const box = $("#sp-factors"); box.replaceChildren();
     if (!has) return;
     const names = [...state.dataset.tags, ...(state.dataset.has_subgroup ? ["subgroup"] : [])];
+    $("#sp-nest-none").hidden = true; $("#sp-nest-form").hidden = false; $("#sp-trend-none").hidden = true; $("#sp-trend-form").hidden = false;
+    if (!$("#nest-levels").value) $("#nest-levels").value = names.join(", ");
+    $("#tr-size").disabled = !!state.dataset.has_subgroup;
     names.forEach((n) => {
       const lab = el("label", "check"); const cb = el("input"); cb.type = "checkbox"; cb.value = n;
       lab.appendChild(cb); lab.appendChild(el("span", "", n === "subgroup" ? t("sp.factor_subgroup") : n)); box.appendChild(lab);
@@ -2689,7 +2712,7 @@
       geometrically_identical: num("#sp-ident") || 0, measured_carriers: num("#sp-meas") };
     let r = null;
     await guarded(async () => { r = await post("/api/multistage/scope", body); });
-    SP.scope = r;
+    SP.scope = r; if (r) { SP.req.scope = body; renderReportSpecial(); }
     const box = $("#sp-scope-out"); box.replaceChildren();
     if (!r) return;
     box.appendChild(el("p", "strong", t("sp.scope_result", { combos: r.combinations, inspected: r.inspected_combinations, per: r.parts_per_combination, total: r.total_parts })));
@@ -2704,7 +2727,7 @@
     const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
     let r = null;
     await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/multistage`, { factors, lsl: num("#sp-lsl"), usl: num("#sp-usl") }); });
-    SP.comb = r;
+    SP.comb = r; if (r) { SP.req.multistage = { factors, lsl: num("#sp-lsl"), usl: num("#sp-usl") }; renderReportSpecial(); }
     renderCombinations();
   }
   function renderCombinations() {
@@ -2748,7 +2771,7 @@
       distribution: $("#gd-dist").value, method: $("#gd-method").value, bootstrap_n: Math.max(0, Math.min(2000, Math.round(num("#gd-boot") || 0))) };
     let r = null;
     await guarded(async () => { r = await post("/api/gdt/clearance", body); });
-    SP.gdt = r;
+    SP.gdt = r; if (r) { SP.req.gdt = body; renderReportSpecial(); }
     const box = $("#gd-out"); box.replaceChildren();
     if (!r) return;
     const ix = r.indices, q = r.quantiles;
@@ -2764,6 +2787,76 @@
   $("#sp-scope-btn").addEventListener("click", runScope);
   $("#sp-comb-btn").addEventListener("click", runCombinations);
   $("#gd-run").addEventListener("click", runGdt);
+  function numRows(text) {
+    const rows = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#")).map((l) => {
+      let parts = l.split(/[\s;]+/).filter(Boolean);
+      if (parts.length === 1 && l.includes(",")) parts = l.split(",").map((x) => x.trim());
+      return parts;
+    });
+    return rows;
+  }
+  async function runMultivariate() {
+    const lim = numRows($("#mv-limits").value);
+    const rows = numRows($("#mv-data").value).map((r) => r.map(Number));
+    const bad = !lim.length || lim.some((r) => r.length < 2 || !Number.isFinite(Number(r[0])) || !Number.isFinite(Number(r[1]))) || !rows.length
+      || rows.some((r) => r.length !== lim.length || r.some((v) => !Number.isFinite(v)));
+    if (bad) { showError({ code: "invalid_input", message: t("sp.mv_bad"), params: { message: t("sp.mv_bad") } }); return; }
+    const body = { data: rows, lower: lim.map((r) => Number(r[0])), upper: lim.map((r) => Number(r[1])), names: lim.map((r, i) => r[2] || `x${i + 1}`) };
+    let r = null;
+    await guarded(async () => { r = await post("/api/multivariate/performance", body); });
+    const box = $("#mv-out"); box.replaceChildren();
+    if (!r) return;
+    SP.req.multivariate = body; renderReportSpecial();
+    box.appendChild(el("p", "strong", t("sp.mv_result", { pm: sig(r.pm, 3), pmk: sig(r.pmk, 3), n: r.n, d: r.d })));
+    box.appendChild(el("p", r.centre_inside ? "" : "status-warning", t(r.centre_inside ? "sp.mv_case1" : "sp.mv_case2", { c: sig(r.c_pmk, 4), p: sig(100 * r.p_pmk, 5) })));
+    box.appendChild(el("p", "muted", t("sp.mv_pm_detail", { c: sig(r.c_pm, 4), p: sig(100 * r.p_pm, 5) })));
+    if (r.expected_outside !== null) box.appendChild(el("p", "", t("sp.mv_outside", { share: sig(100 * r.expected_outside, 3) })));
+    const rows2 = r.univariate.map((u) => ({ cells: [u.name, sig(u.mean, 5), sig(u.sd, 4), sig(u.pm, 3), sig(u.pmk, 3)] }));
+    const w = el("div", "scroll"); w.appendChild(spTable(["sp.col_name", "st.col_mean", "st.col_sd", "sp.col_pm_single", "sp.col_pmk_single"], rows2)); box.appendChild(w);
+    const nm = r.normality;
+    box.appendChild(el("p", nm.skewness_p < 0.01 || nm.kurtosis_p < 0.01 ? "status-warning" : "muted", t("sp.mv_normality", { sp: pv(nm.skewness_p), kp: pv(nm.kurtosis_p) })));
+    box.appendChild(el("p", "muted", t("sp.mv_reading")));
+  }
+  async function runNested() {
+    const levels = $("#nest-levels").value.split(",").map((x) => x.trim()).filter(Boolean);
+    if (!levels.length) { showError({ code: "invalid_input", message: t("sp.nest_none"), params: { message: t("sp.nest_none") } }); return; }
+    let r = null;
+    await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/nested`, { levels }); });
+    const box = $("#nest-out"); box.replaceChildren();
+    if (!r) return;
+    SP.req.nested = { levels }; renderReportSpecial();
+    box.appendChild(el("p", "strong", t("sp.nest_result", { n: r.n, sd: sig(r.total_sd, 4), largest: r.largest === "subgroup" ? t("sp.factor_subgroup") : r.largest })));
+    const rows = r.table.map((x) => ({ cells: [x.level, x.groups, x.df, sig(x.ms, 4), x.f === null ? "–" : sig(x.f, 4), pv(x.p_value), sig(x.variance, 4), sig(x.sd, 4), x.share === null ? "–" : sig(100 * x.share, 3) + " %", x.truncated ? t("sp.nest_truncated") : ""] }));
+    rows.push({ cells: [t("sp.nest_error"), r.error.groups, r.error.df, sig(r.error.ms, 4), "–", "–", sig(r.error.variance, 4), sig(r.error.sd, 4), r.error.share === null ? "–" : sig(100 * r.error.share, 3) + " %", ""] });
+    const w = el("div", "scroll"); w.appendChild(spTable(["sp.nest_col_level", "sp.nest_col_groups", "sp.nest_col_df", "sp.nest_col_ms", "sp.nest_col_f", "sp.col_p", "sp.nest_col_var", "sp.nest_col_sd", "sp.nest_col_share", "sp.col_flag"], rows)); box.appendChild(w);
+    if (!r.balanced) box.appendChild(el("p", "status-warning", t("sp.nest_unbalanced")));
+    if (r.any_truncated) box.appendChild(el("p", "status-warning", t("sp.nest_truncated_note")));
+    box.appendChild(el("p", "muted", t("sp.nest_advice")));
+  }
+  async function runTrend() {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const body = { cycle: num("#tr-cycle"), subgroup_size: $("#tr-size").disabled ? null : num("#tr-size"), lsl: num("#tr-lsl"), usl: num("#tr-usl") };
+    let r = null;
+    await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/trend-chart`, body); });
+    const box = $("#tr-out"); box.replaceChildren();
+    if (!r) return;
+    SP.req.trend = body; renderReportSpecial();
+    const holder = el("div", "chart"); box.appendChild(holder);
+    drawChart(holder, { values: r.values, labels: r.labels || r.values.map((_, i) => String(i + 1)), center: r.center, lcl: r.lcl, ucl: r.ucl, alarms: r.alarms }, t("sp.trend_title"));
+    box.appendChild(el("p", "strong", t("sp.trend_line", { slope: sig(r.slope, 4), lo: sig(r.slope_ci[0], 3), hi: sig(r.slope_ci[1], 3), p: pv(r.slope_p), r2: sig(r.r2, 3) })));
+    box.appendChild(el("p", r.trend_significant ? "status-warning" : "status-ok", t(r.trend_significant ? "sp.trend_significant" : "sp.trend_none", { drift: sig(r.drift_per_cycle, 4) })));
+    box.appendChild(el("p", "", t("sp.trend_sigma", { res: sig(r.sigma, 4), n: r.n_points })));
+    if (r.residual_ratio !== undefined) box.appendChild(el("p", r.residual_ratio > 1.5 ? "status-warning" : "muted", t("sp.trend_ratio", { ratio: sig(r.residual_ratio, 3), sd: sig(r.sigma_in, 4) })));
+    const ul = el("ul");
+    if (r.alarms.length) { r.alarms.slice(0, 15).forEach((a) => ul.appendChild(el("li", "", t("result.alarm_rule", { rule: t("alarmrule." + a.rule), label: (r.labels && r.labels[a.index]) || a.index + 1 })))); box.appendChild(ul); }
+    else box.appendChild(el("p", "status-ok", t("result.no_alarms")));
+    if (r.indices) box.appendChild(el("p", "", t("sp.trend_indices", { pk: sig(r.indices.pk, 3), dist: r.indices.distribution, method: r.indices.method, ppm: sig(r.indices.ppm, 3), n: r.indices.n })));
+    r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("warn." + w.code, w))));
+    box.appendChild(el("p", "muted", t("sp.trend_stability")));
+  }
+  $("#mv-run").addEventListener("click", runMultivariate);
+  $("#nest-run").addEventListener("click", runNested);
+  $("#tr-run").addEventListener("click", runTrend);
 
   // ---------------------------------------------------------------- external signatures
   const SG = { rid: null };

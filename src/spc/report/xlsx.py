@@ -497,6 +497,24 @@ def _annex_sheet(wb: Workbook, rep: Report, L) -> None:
             r += 1
         for line in v["tail"]:
             _text(ws, r, 1, line, bold=True); r += 1
+    if rep.special:
+        from spc.report.special import special_view
+
+        r += 1
+        _text(ws, r, 1, L("doc.annex_e"), bold=True); r += 1
+        for sec in special_view(rep.special, L):
+            _text(ws, r, 1, sec["title"], bold=True); r += 1
+            for line in sec["lines"]:
+                _text(ws, r, 1, line); r += 1
+            if sec["rows"]:
+                _header(ws, r, sec["heads"]); r += 1
+                for row in sec["rows"]:
+                    for c, x in enumerate(row, start=1):
+                        _text(ws, r, c, x)
+                    r += 1
+            for line in sec["tail"]:
+                _text(ws, r, 1, line); r += 1
+            r += 1
     _widths(ws, [34, 40, 40, 24, 22, 24, 24, 20, 20])
 
 

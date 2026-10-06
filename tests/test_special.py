@@ -248,3 +248,350 @@ def test_gdt_api(client):
     assert out["virtual_size"] == pytest.approx(19.8) and out["n"] == 120 and out["indices"]["pk"] > 0
     assert client.post("/api/gdt/clearance", json={**body, "dx": None, "dy": None}).json()["error"]["code"] == "invalid_input"
     assert client.post("/api/gdt/clearance", json={**body, "kind": "plug"}).status_code == 422
+
+
+# ------------------------------------------------------------------ 8.5.2 multivariate Pm and Pmk
+from spc.core import multivariate_perf as mp  # noqa: E402
+from spc.core import nested as nest  # noqa: E402
+from spc.core.charts import trend as trend_mod  # noqa: E402
+
+
+def brute_distance(mean, cov, lower, upper, n=400_000, seed=0):
+    """Smallest Mahalanobis distance from the mean to points of the tolerance ellipsoid's border, found by sampling the border."""
+    d = len(mean)
+    m, a = (np.array(lower) + upper) / 2, (np.array(upper) - lower) / 2
+    y = np.random.default_rng(seed).normal(size=(n, d))
+    y /= np.linalg.norm(y, axis=1)[:, None]
+    dx = m + a * y - mean
+    return float(np.sqrt(np.min(np.einsum("ij,jk,ik->i", dx, np.linalg.inv(cov), dx))))
+
+
+def test_the_one_dimensional_case_gives_the_univariate_indices():
+    # d = 1 is the check of the reading u_p = Phi^-1((1 + p) / 2): Pmk = min(U - mu, mu - L) / (3 sigma), Pm = (U - L) / (6 sigma)
+    for mu in (10.0, 10.2, 9.7, 12.0):
+        c, inside = mp.distance_to_tolerance([mu], [[0.0225]], [9.0], [11.0])
+        assert c == pytest.approx(min(11 - mu, mu - 9) / 0.15 if 9 <= mu <= 11 else (mu - 11) / 0.15) and inside == (9 <= mu <= 11)
+        p, u = mp._u_of(c, 1)
+        assert u == pytest.approx(c, rel=1e-9)
+    c, _ = mp.distance_to_tolerance([10.0], [[0.0225]], [9.0], [11.0])
+    assert mp._u_of(c, 1)[0] == pytest.approx(2 * stats.norm.cdf(c) - 1)
+
+
+def test_distance_to_the_tolerance_border_matches_a_brute_force_search():
+    rng = np.random.default_rng(2)
+    for d in (2, 3):
+        for _ in range(4):
+            M = rng.normal(size=(d, d))
+            cov = M @ M.T + 0.3 * np.eye(d)
+            lo, up = -rng.uniform(1, 3, d), rng.uniform(1, 3, d)
+            for mean in ((lo + up) / 2, (lo + up) / 2 + rng.normal(0, 0.5, d), (lo + up) / 2 + rng.normal(0, 4, d)):
+                c, inside = mp.distance_to_tolerance(mean, cov, lo, up)
+                b = brute_distance(mean, cov, lo, up)
+                assert c <= b + 1e-9 and c == pytest.approx(b, abs=3e-3)
+                assert inside == bool(np.sum(((mean - (lo + up) / 2) / ((up - lo) / 2)) ** 2) <= 1)
+
+
+def test_a_circular_tolerance_and_uncorrelated_data_have_a_closed_form():
+    # identity covariance, centred, tolerance circle of radius a: c = a, p = 1 - exp(-a^2 / 2) (chi-square with 2 d.f.)
+    c, _ = mp.distance_to_tolerance([0, 0], np.eye(2), [-3, -3], [3, 3])
+    assert c == pytest.approx(3.0)
+    p, u = mp._u_of(3.0, 2)
+    assert p == pytest.approx(1 - np.exp(-4.5)) and u == pytest.approx(stats.norm.isf(np.exp(-4.5) / 2))
+
+
+def centred_sample(n=400, seed=7, scale=(0.1, 0.2), rho=0.5):
+    rng = np.random.default_rng(seed)
+    z = rng.multivariate_normal([0, 0], [[1, rho], [rho, 1]], size=n)
+    z -= z.mean(axis=0)
+    return z * np.array(scale)
+
+
+def test_pm_pmk_of_a_centred_sample_are_equal_and_a_shifted_one_has_lower_pmk():
+    x = centred_sample() + [10.0, 5.0]
+    r = mp.performance(x, [9.0, 4.0], [11.0, 6.0])
+    assert r["case"] == 1 and r["pm"] == pytest.approx(r["pmk"], rel=1e-9) and r["pm"] > 1
+    shifted = mp.performance(x + [0.3, 0.0], [9.0, 4.0], [11.0, 6.0])
+    assert shifted["pm"] == pytest.approx(r["pm"], rel=1e-9) and shifted["pmk"] < r["pmk"]  # Pm ignores the location
+    outside = mp.performance(x + [5.0, 0.0], [9.0, 4.0], [11.0, 6.0])
+    assert outside["case"] == 2 and outside["pmk"] < 0 and outside["centre_inside"] is False
+
+
+def test_performance_does_not_change_when_every_axis_is_rescaled():
+    x = centred_sample() + [10.0, 5.0] + [0.2, -0.1]
+    a = mp.performance(x, [9.0, 4.0], [11.0, 6.0])
+    f = np.array([3.0, 0.25])
+    b = mp.performance(x * f, np.array([9.0, 4.0]) * f, np.array([11.0, 6.0]) * f)
+    assert b["pm"] == pytest.approx(a["pm"], rel=1e-9) and b["pmk"] == pytest.approx(a["pmk"], rel=1e-9)
+
+
+def test_a_larger_spread_lowers_pm_and_the_sample_check_reports_the_normality_tests():
+    tight = mp.performance(centred_sample(scale=(0.1, 0.2)) + 5, [4, 4], [6, 6])
+    wide = mp.performance(centred_sample(scale=(0.3, 0.6)) + 5, [4, 4], [6, 6])
+    assert wide["pm"] < tight["pm"]
+    assert 0 <= tight["normality"]["skewness_p"] <= 1 and tight["univariate"][0]["name"] == "x1"
+    assert tight["expected_outside"] is not None and wide["expected_outside"] > tight["expected_outside"]
+
+
+def test_multivariate_input_is_checked():
+    x = centred_sample(n=30) + 5
+    with pytest.raises(ValueError):
+        mp.performance(x, [4, 4], [6])  # one limit missing
+    with pytest.raises(ValueError):
+        mp.performance(x, [6, 4], [4, 6])
+    with pytest.raises(ValueError):
+        mp.performance(x[:5], [4, 4], [6, 6])
+    with pytest.raises(ValueError):
+        mp.performance(np.column_stack([x[:, 0], x[:, 0] * 2]), [4, 4], [6, 6])  # singular covariance
+    with pytest.raises(ValueError):
+        mp.performance(x[:, :1], [4], [6])
+
+
+# ------------------------------------------------------------------ nested sources of variation
+
+
+def nested_data(a=6, b=4, c=3, s=(2.0, 1.0, 0.5), seed=1):
+    rng = np.random.default_rng(seed)
+    lot, part, x = [], [], []
+    for i in range(a):
+        ea = rng.normal(0, s[0])
+        for j in range(b):
+            eb = rng.normal(0, s[1])
+            for _ in range(c):
+                lot.append(f"L{i}")
+                part.append(f"P{j}")
+                x.append(10 + ea + eb + rng.normal(0, s[2]))
+    return np.array(x), lot, part
+
+
+def test_balanced_nested_anova_equals_the_textbook_formulas():
+    x, lot, part = nested_data()
+    r = nest.analyse(x, {"lot": lot, "part": part})
+    a, b, c = 6, 4, 3
+    cells = x.reshape(a, b, c)
+    ms_e = ((cells - cells.mean(axis=2, keepdims=True)) ** 2).sum() / (a * b * (c - 1))
+    ms_b = c * ((cells.mean(axis=2) - cells.mean(axis=(1, 2))[:, None]) ** 2).sum() / (a * (b - 1))
+    ms_a = b * c * ((cells.mean(axis=(1, 2)) - cells.mean()) ** 2).sum() / (a - 1)
+    assert r["balanced"] and r["error"]["variance"] == pytest.approx(ms_e)
+    by = {t["level"]: t for t in r["table"]}
+    assert by["part"]["variance"] == pytest.approx((ms_b - ms_e) / c) and by["lot"]["variance"] == pytest.approx((ms_a - ms_b) / (b * c))
+    assert by["lot"]["coefficients"]["lot"] == pytest.approx(b * c) and by["lot"]["coefficients"]["part"] == pytest.approx(c)
+    assert by["lot"]["df"] == a - 1 and by["part"]["df"] == a * (b - 1) and r["error"]["df"] == a * b * (c - 1)
+    assert by["lot"]["f"] == pytest.approx(ms_a / ms_b) and by["lot"]["p_value"] == pytest.approx(stats.f.sf(ms_a / ms_b, a - 1, a * (b - 1)))
+    assert sum(t["share"] for t in r["table"]) + r["error"]["share"] == pytest.approx(1.0)
+    assert r["largest"] == "lot"
+
+
+def test_unbalanced_estimators_are_unbiased_for_the_known_components():
+    # the method of moments is unbiased before truncation: the average of many unbalanced experiments hits the true variances
+    true = np.array([4.0, 1.0, 0.25])
+    rng = np.random.default_rng(10)
+    est = []
+    for _ in range(600):
+        lot, part, x = [], [], []
+        for i in range(5):
+            ea = rng.normal(0, 2.0)
+            for j in range(int(rng.integers(2, 5))):
+                eb = rng.normal(0, 1.0)
+                for _k in range(int(rng.integers(2, 5))):
+                    lot.append(f"L{i}")
+                    part.append(f"P{j}")
+                    x.append(ea + eb + rng.normal(0, 0.5))
+        r = nest.analyse(x, {"lot": lot, "part": part})
+        est.append([r["table"][0]["variance_raw"], r["table"][1]["variance_raw"], r["error"]["variance"]])
+        assert not r["balanced"] and r["f_exact"] is False
+    assert np.mean(est, axis=0) == pytest.approx(true, rel=0.12)
+
+
+def test_nested_groups_are_built_from_the_path_and_reused_labels_are_separate():
+    x, lot, part = nested_data(a=3, b=2, c=4)
+    same = nest.analyse(x, {"lot": lot, "part": part})
+    assert same["table"][1]["groups"] == 6  # P0 and P1 inside each of the 3 lots
+    one = nest.analyse(x, {"part": part, "lot": lot})  # the other order is a different model: P is outer, lot inside
+    assert one["table"][0]["groups"] == 2 and one["table"][1]["groups"] == 6
+
+
+def test_negative_estimates_are_truncated_and_marked_and_bad_designs_are_refused():
+    rng = np.random.default_rng(3)
+    x = rng.normal(0, 1, 24)
+    r = nest.analyse(x, {"g": list("ab" * 12), "h": [str(i % 6) for i in range(24)]})
+    assert any(t["truncated"] for t in r["table"]) or r["table"][0]["variance"] >= 0
+    for t in r["table"]:
+        assert t["variance"] >= 0
+    with pytest.raises(ValueError):
+        nest.analyse(x[:3], {"g": list("abc")})
+    with pytest.raises(ValueError):
+        nest.analyse(x, {"g": list("a" * 24)})  # one outer group
+    with pytest.raises(ValueError):
+        nest.analyse(x, {"g": list("ab" * 12), "h": [str(i) for i in range(24)]})  # every value its own group
+    with pytest.raises(ValueError):
+        nest.analyse(x, {})
+
+
+# ------------------------------------------------------------------ the regression control chart for trends
+
+
+def wear(k=60, cycle=20, slope=0.02, sd=0.05, seed=9):
+    rng = np.random.default_rng(seed)
+    t = np.arange(k) % cycle
+    return 10 + slope * t + rng.normal(0, sd, k)
+
+
+def test_trend_chart_matches_an_independent_regression():
+    y = wear()
+    t = np.arange(60) % 20
+    ch = trend_mod.fit(y, cycle=20)
+    ref = stats.linregress(t, y)
+    assert ch.slope == pytest.approx(ref.slope) and ch.intercept == pytest.approx(ref.intercept) and ch.slope_p == pytest.approx(ref.pvalue)
+    assert ch.r2 == pytest.approx(ref.rvalue ** 2)
+    res = y - (ref.intercept + ref.slope * t)
+    assert ch.sigma == pytest.approx(np.sqrt(np.sum(res ** 2) / 58)) and ch.df == 58
+    u = stats.norm.isf(0.00135)
+    assert ch.ucl == pytest.approx(ch.center + u * ch.sigma) and ch.lcl == pytest.approx(ch.center - u * ch.sigma)
+    lo, hi = ref.slope - stats.t.isf(0.025, 58) * ref.stderr, ref.slope + stats.t.isf(0.025, 58) * ref.stderr
+    assert ch.slope_ci == pytest.approx((lo, hi)) and not ch.violations
+
+
+def test_a_process_with_a_trend_is_not_alarmed_by_its_trend_but_by_a_jump_from_the_line():
+    y = wear()
+    flat = trend_mod.fit(np.arange(60) * 0.0 + y)  # without a cycle the saw tooth is a poor fit
+    assert flat.r2 < 0.3
+    y2 = y.copy()
+    y2[45] += 0.6  # a jump away from the line
+    ch = trend_mod.fit(y2, cycle=20)
+    assert [v.index for v in ch.violations if v.rule == "beyond_limits"] == [45]
+    shift = y.copy()
+    shift[30:] += 0.12  # a sustained shift above the line: a run on one side
+    runs = trend_mod.fit(shift, cycle=20).violations
+    assert any(v.rule == "run" for v in runs)
+
+
+def test_trend_chart_input_is_checked():
+    with pytest.raises(ValueError):
+        trend_mod.fit([1, 2, 3])
+    with pytest.raises(ValueError):
+        trend_mod.fit(wear(), cycle=2)
+    with pytest.raises(ValueError):
+        trend_mod.fit(wear(k=10), cycle=20)
+    with pytest.raises(ValueError):
+        trend_mod.fit(np.arange(20.0))  # exactly on a line
+
+
+# ------------------------------------------------------------------ API of the three
+
+
+def test_multivariate_api(client):
+    x = centred_sample(n=60) + [10.0, 5.0]
+    body = {"data": x.tolist(), "lower": [9, 4], "upper": [11, 6], "names": ["x", "y"]}
+    r = client.post("/api/multivariate/performance", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["names"] == ["x", "y"] and out["pm"] == pytest.approx(out["pmk"], rel=1e-6) and out["case"] == 1
+    assert client.post("/api/multivariate/performance", json={**body, "upper": [11]}).status_code in (400, 422)
+    assert client.post("/api/multivariate/performance", json={**body, "lower": [11, 4]}).json()["error"]["code"] == "invalid_input"
+
+
+def lots_csv():
+    x, lot, part = nested_data(a=5, b=3, c=4, seed=4)
+    lines = ["lot,part,value"] + [f"{lo},{pa},{v:.4f}" for lo, pa, v in zip(lot, part, x)]
+    return "\n".join(lines).encode()
+
+
+def test_nested_api(client):
+    ds = upload(client, lots_csv(), value="value", subgroup="", tags=["lot", "part"]).json()
+    r = client.post(f"/api/datasets/{ds['id']}/nested", json={"levels": ["lot", "part"]})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["n"] == 60 and out["balanced"] and [t["level"] for t in out["table"]] == ["lot", "part"]
+    assert client.post(f"/api/datasets/{ds['id']}/nested", json={"levels": ["nope"]}).status_code == 400
+
+
+def test_trend_api(client):
+    y = wear(k=60)
+    lines = ["lot,value"] + [f"S{i // 4}, {v:.4f}" for i, v in enumerate(y)]
+    # 15 subgroups of 4, and a cycle of 5 subgroups
+    ds = upload(client, "\n".join(lines).encode(), value="value", subgroup="lot", tags=[]).json()
+    r = client.post(f"/api/datasets/{ds['id']}/trend-chart", json={"cycle": 5, "lsl": 9.5, "usl": 11.0})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["n_points"] == 15 and out["subgroup_size"] == 4 and out["cycle"] == 5 and len(out["center"]) == 15
+    assert out["indices"]["pk"] > 0 and out["indices"]["distribution"]
+    bad = client.post(f"/api/datasets/{ds['id']}/trend-chart", json={"cycle": 99})
+    assert bad.status_code == 400
+
+
+# ------------------------------------------------------------------ annex E: the results in a report and its archive
+import json  # noqa: E402
+
+from spc.report.archive import reproduce  # noqa: E402
+from tests.test_api import REPORT_BODY  # noqa: E402
+
+
+def special_request(seed=1):
+    rng = np.random.default_rng(seed)
+    return {
+        "scope": {"carriers": 7, "machines": 3},
+        "multistage": {"factors": ["machine"], "lsl": 9.5, "usl": 10.5},
+        "nested": {"levels": ["machine", "subgroup"]},
+        "trend": {"cycle": 5, "lsl": 9.5, "usl": 10.5},
+        "gdt": {"xd": rng.normal(20.1, 0.03, 60).tolist(), "dx": rng.normal(0, 0.03, 60).tolist(), "dy": rng.normal(0, 0.03, 60).tolist(),
+                "lower": 20.0, "upper": 20.2, "position_tolerance": 0.2, "bootstrap_n": 20},
+        "multivariate": {"data": rng.multivariate_normal([10, 5], [[0.01, 0.004], [0.004, 0.02]], 60).tolist(), "lower": [9, 4], "upper": [11, 6]},
+    }
+
+
+def make_report(client, special, language="en"):
+    ds = upload(client, csv_text(k=20, n=5)).json()
+    r = client.post(f"/api/datasets/{ds['id']}/reports", json={**REPORT_BODY, "language": language, "special": special})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_special_results_in_the_report_the_archive_and_the_excel_file(client):
+    out = make_report(client, special_request())
+    html = client.get(out["urls"]["html"]).text
+    for text in ("Annex E", "Multi-stage machining: scope of inspection", "nested variance components", "regression control chart", "assembly clearance", "Pm and Pmk"):
+        assert text in html
+    assert "21 combinations" in html and "1050" in html
+    archive = client.get(out["urls"]["archive"]).json()
+    assert set(archive["special"]) == {"scope", "multistage", "nested", "trend", "gdt", "multivariate"}
+    assert "clearance" not in archive["special"]["gdt"]["result"]  # the per-part arrays are made again from the request
+    check = client.post("/api/archive/check", content=client.get(out["urls"]["archive"]).content).json()
+    assert check == {"integrity_ok": True, "reproduced": True, "same_engine_version": True, "differences": []}
+    xlsx = client.get(f"/api/reports/{out['id']}/report.xlsx")
+    assert xlsx.status_code == 200
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(xlsx.content))
+    cells = " ".join(str(c.value) for ws in wb for row in ws.iter_rows() for c in row if c.value is not None)
+    assert "Annex E" in cells and "assembly clearance" in cells.lower()
+
+
+def test_report_in_chinese_has_the_annex(client):
+    out = make_report(client, {"scope": {"carriers": 7, "machines": 3}}, "zh-TW")
+    assert "附錄 E" in client.get(out["urls"]["html"]).text and "多段加工：檢驗範圍" in client.get(out["urls"]["html"]).text
+
+
+def test_a_changed_special_result_is_found_by_the_digest_and_by_a_new_calculation(client):
+    out = make_report(client, special_request())
+    archive = client.get(out["urls"]["archive"]).json()
+    forged = json.loads(json.dumps(archive))
+    forged["special"]["gdt"]["result"]["indices"]["pk"] += 1.0
+    assert client.post("/api/archive/check", json=forged).json()["integrity_ok"] is False
+    # a forger who also repairs the digest is still caught: the stored request gives another result
+    from spc.report.archive import canonical
+    import hashlib
+
+    body = {k: v for k, v in forged.items() if k != "integrity"}
+    forged["integrity"] = {"algorithm": "sha256", "digest": hashlib.sha256(canonical(body)).hexdigest()}
+    res = client.post("/api/archive/check", json=forged).json()
+    assert res["integrity_ok"] is True and res["reproduced"] is False and any("special.gdt" in d for d in res["differences"])
+    assert reproduce(archive).reproduced
+
+
+def test_special_report_input_is_checked(client):
+    ds = upload(client).json()
+    bad = client.post(f"/api/datasets/{ds['id']}/reports", json={**REPORT_BODY, "special": {"multistage": {"factors": ["nope"]}}})
+    assert bad.status_code == 400 and bad.json()["error"]["code"] == "invalid_input"
+    assert client.post(f"/api/datasets/{ds['id']}/reports", json={**REPORT_BODY, "special": {"gdt": {"xd": [1, 2]}}}).status_code == 422

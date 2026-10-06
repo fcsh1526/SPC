@@ -36,6 +36,7 @@ def generate(
     profile: dict | None = None,
     control_plan: dict | None = None,
     multistate: dict | None = None,
+    special: dict | None = None,
 ) -> GeneratedReport:
     """Run the analysis once, archive it, and lay the report out from the same result."""
     if language not in LANGUAGES:
@@ -46,10 +47,10 @@ def generate(
         raise ReportError("spec_missing", "a report needs at least one specification limit")
     created = now or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     rid = report_id or uuid.uuid4().hex[:12]
-    archive = build_archive(dataset, request, meta, outcome.result, created_at=created, report_id=rid, language=language, created_by=created_by, profile=profile, control_plan=control_plan, multistate=multistate)
+    archive = build_archive(dataset, request, meta, outcome.result, created_at=created, report_id=rid, language=language, created_by=created_by, profile=profile, control_plan=control_plan, multistate=multistate, special=special)
     report = build_report(
         dataset, request, meta, language, generated_at=created, report_id=rid,
-        archive_digest=archive["integrity"]["digest"], outcome=outcome, profile=profile, control_plan=control_plan, multistate=multistate,
+        archive_digest=archive["integrity"]["digest"], outcome=outcome, profile=profile, control_plan=control_plan, multistate=multistate, special=special,
     )
     return GeneratedReport(rid, language, render_html(report), archive)
 
@@ -64,7 +65,7 @@ def report_xlsx(archive: dict) -> bytes:
     rep = build_report(
         dataset, AnalysisRequest(**archive["request"]), ReportMeta(**archive["report_meta"]), archive["language"],
         generated_at=archive["created_at"], report_id=archive["report_id"], archive_digest=archive["integrity"]["digest"],
-        profile=archive.get("profile"), control_plan=archive.get("control_plan"), multistate=archive.get("multistate"),
+        profile=archive.get("profile"), control_plan=archive.get("control_plan"), multistate=archive.get("multistate"), special=archive.get("special"),
     )
     return render_xlsx(rep, dataset)
 

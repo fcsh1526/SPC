@@ -1664,3 +1664,80 @@ def test_special_cases_multistage_and_gdt_in_the_browser(server, browser, tmp_pa
     expect(page.locator("#errors")).to_contain_text("2 numbers", timeout=20000)
     assert problems == []
     ctx.close()
+
+
+def test_multivariate_nested_and_trend_in_the_browser(server, browser, tmp_path):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+
+    # lots > parts > measurements, with the lot as the large source; the same file has a wear trend inside the lots
+    rng = np.random.default_rng(12)
+    lines = ["lot,part,value"]
+    k = 0
+    for a in range(5):
+        ea = rng.normal(0, 1.0)
+        for b in range(3):
+            for c in range(4):
+                lines.append(f"L{a + 1},P{b + 1},{10 + ea + 0.02 * (k % 20) + rng.normal(0, 0.1):.4f}")
+                k += 1
+    csv = tmp_path / "nested.csv"
+    csv.write_text("\n".join(lines), encoding="utf-8")
+    page.click("nav.tabs button[data-tab=import]")
+    page.set_input_files("#file", str(csv))
+    page.select_option("#col-value", "value")
+    page.select_option("#col-subgroup", "")  # the lot is a tag here, not the subgroup label
+    page.locator("#col-tags input[value=lot]").check()
+    page.locator("#col-tags input[value=part]").check()
+    page.click("#import-btn")
+    expect(page.locator("#data-counts")).to_contain_text("60 values", timeout=20000)
+    page.click("nav.tabs button[data-tab=special]")
+
+    # multivariate
+    page.fill("#mv-limits", "9 11 x\n4 6 y")
+    pts = rng.multivariate_normal([10.0, 5.0], [[0.01, 0.004], [0.004, 0.02]], size=80)
+    page.fill("#mv-data", "\n".join(f"{a:.4f} {b:.4f}" for a, b in pts))
+    page.click("#mv-run")
+    expect(page.locator("#mv-out")).to_contain_text("Pm =", timeout=20000)
+    expect(page.locator("#mv-out")).to_contain_text("Case 1")
+    page.fill("#mv-data", "1 2 3\n4 5 6")
+    page.click("#mv-run")
+    expect(page.locator("#errors")).to_contain_text("one number per limit line", timeout=20000)
+
+    # nested: the levels are filled in from the tags
+    expect(page.locator("#nest-levels")).to_have_value("lot, part")
+    page.click("#nest-run")
+    expect(page.locator("#nest-out")).to_contain_text("The largest source: lot", timeout=20000)
+    expect(page.locator("#nest-out")).to_contain_text("within the last level")
+
+    # trend
+    page.fill("#tr-cycle", "20")
+    page.fill("#tr-lsl", "8")
+    page.fill("#tr-usl", "13")
+    page.click("#tr-run")
+    expect(page.locator("#tr-out")).to_contain_text("Slope per sample", timeout=20000)
+    expect(page.locator("#tr-out svg")).to_be_visible()
+    expect(page.locator("#tr-out")).to_contain_text("never capability indices")
+
+    # the results go into the report as annex E
+    page.click("#to-analysis") if page.locator("#to-analysis").is_visible() else page.click("nav.tabs button[data-tab=analysis]")
+    page.fill("#a-lsl", "8")
+    page.fill("#a-usl", "13")
+    page.select_option("#a-model", "A1")
+    page.select_option("#a-class", "major")
+    page.click("#run-btn")
+    expect(page.locator("#rp-special-wrap")).to_be_visible(timeout=40000)
+    page.locator("#rp-special input[value=trend]").check()
+    page.locator("#rp-special input[value=nested]").check()
+    page.locator("#rp-special input[value=multivariate]").check()
+    page.click("#rp-create")
+    expect(page.locator("#rp-created")).to_contain_text("created", timeout=40000)
+    href = page.locator("#rp-open").get_attribute("href")
+    html = page.request.get(server.rstrip("/") + href).text()
+    assert "Annex E" in html and "regression control chart" in html and "nested variance components" in html and "Multi-stage machining: scope" not in html
+    assert problems == []
+    ctx.close()

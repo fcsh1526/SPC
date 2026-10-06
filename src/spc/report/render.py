@@ -123,6 +123,20 @@ def _multistate_html(ms: dict, L) -> str:
     return ("".join(f"<p>{esc(x)}</p>" for x in v["lines"]) + f"<table><tr>{head}</tr>{body}</table>" + "".join(f"<p><strong>{esc(x)}</strong></p>" for x in v["tail"]))
 
 
+def _special_html(special: dict, L) -> str:
+    from spc.report.special import special_view
+
+    parts = []
+    for sec in special_view(special, L):
+        body = "".join(f"<p>{esc(x)}</p>" for x in sec["lines"])
+        if sec["rows"]:
+            head = "".join(f"<th>{esc(h)}</th>" for h in sec["heads"])
+            body += f"<table><tr>{head}</tr>" + "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in row) + "</tr>" for row in sec["rows"]) + "</table>"
+        body += "".join(f'<p class="note">{esc(x)}</p>' for x in sec["tail"])
+        parts.append(f"<h3>{esc(sec['title'])}</h3>{body}")
+    return "".join(parts)
+
+
 def render_html(rep: Report) -> str:
     lang, m, f, r = rep.lang, rep.meta, rep.facts, rep.result
     L = lambda key, **p: T(lang, key, **p)
@@ -367,6 +381,7 @@ def render_html(rep: Report) -> str:
     annex_b = kv(rows_b)
     annex_c = _plan_html(rep.control_plan, L) if rep.control_plan else ""
     annex_d = _multistate_html(rep.multistate, L) if rep.multistate else ""
+    annex_e = _special_html(rep.special, L) if rep.special else ""
 
     note = L("doc.draft_note") if tr["edition"] == "draft" else L("doc.final_note")
     stage_line = L("doc.stage_" + f["stage"])
@@ -399,6 +414,7 @@ def render_html(rep: Report) -> str:
         + f'<section class="el"><h2>{esc(L("doc.annex_b"))}</h2>{annex_b}</section>'
         + (f'<section class="el"><h2>{esc(L("doc.annex_c"))}</h2>{annex_c}</section>' if annex_c else "")
         + (f'<section class="el"><h2>{esc(L("doc.annex_d"))}</h2>{annex_d}</section>' if annex_d else "")
+        + (f'<section class="el"><h2>{esc(L("doc.annex_e"))}</h2>{annex_e}</section>' if annex_e else "")
         + f"<footer>{footer}</footer>"
         + "</main></body></html>"
     )
