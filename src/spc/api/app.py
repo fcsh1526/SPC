@@ -27,6 +27,7 @@ from spc.api.msa import add_msa_routes
 from spc.api.plans import add_plan_routes
 from spc.api.validation import add_validation_routes
 from spc.api.equipment import add_equipment_routes
+from spc.service.state_tests import state_tests_for_dataset
 from spc.equipment.model import EquipmentError
 from spc.equipment.service import EquipmentService
 from spc.validation.service import ValidationError, ValidationService
@@ -36,6 +37,7 @@ from spc.msa.service import MsaProblem, MsaService, SystemNameTaken, SystemNotFo
 from spc.api.errors import ApiError, error_response as _error
 from spc.service.model_suggestion import suggest_for_dataset
 from spc.api.schemas import (
+    StateTestsBody,
     TimeModelBody,
     AnalyzeBody,
     ArlBody,
@@ -654,6 +656,14 @@ def create_app(
         """A suggestion for the time-dependent distribution model (draft 9.4) with its evidence. The person decides."""
         try:
             return suggest_for_dataset(store.get(key), body.subgroup_size, body.hints)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/datasets/{key}/state-tests")
+    def state_tests(key: str, body: StateTestsBody):
+        """Grubbs, Bartlett and Fisher for the states of a process (ISO 22514-8). They inform; the person decides how to analyse."""
+        try:
+            return state_tests_for_dataset(store.get(key), body.alpha, body.by)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 

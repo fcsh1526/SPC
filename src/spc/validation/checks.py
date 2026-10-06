@@ -192,9 +192,15 @@ def archive() -> list[Check]:
             Check("V09-reproduce", "archive", "req.reproduce", "the analysis run again from the stored data gives the stored result", True, bool(reproduce(arc).reproduced))]
 
 
+def _iso() -> list[Check]:
+    from spc.validation.iso11462 import scenarios
+
+    return scenarios()
+
+
 GROUPS: tuple[tuple[str, Callable[[], list[Check]]], ...] = (
     ("constants", constants), ("indices", indices), ("precision", precision), ("charts", charts), ("signals", signals),
-    ("sequential", sequential), ("msa", msa), ("transparency", transparency), ("archive", archive),
+    ("sequential", sequential), ("msa", msa), ("transparency", transparency), ("archive", archive), ("iso11462", lambda: _iso()),
 )
 
 

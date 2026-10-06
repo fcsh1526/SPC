@@ -22,12 +22,12 @@ EN = {
     "tol_rel": "{tol} relative", "tol_abs": "{tol} absolute", "tol_equal": "equal",
     "limits": "Limits: the built-in checks cover the calculations listed here, not every function of the program. A passed run shows the state of this program version on this system on the day of the run; run it again after every update or change of parameters and keep the records.",
     "area.constants": "Constants", "area.indices": "Indices", "area.precision": "Large and small numbers", "area.charts": "Control limits", "area.signals": "Signals",
-    "area.sequential": "CUSUM", "area.msa": "Measurement system analysis", "area.transparency": "Parameters", "area.archive": "Archive",
+    "area.sequential": "CUSUM", "area.msa": "Measurement system analysis", "area.transparency": "Parameters", "area.archive": "Archive", "area.iso11462": "ISO/TR 11462-3 scenarios (constructed)",
     "req.constant": "published factor reproduced", "req.mean": "mean", "req.sd": "standard deviation", "req.pp": "Pp", "req.ppk": "Ppk", "req.ci": "confidence interval of the index",
     "req.ppm": "nonconforming parts per million", "req.scale": "no dependence on unit", "req.offset": "no loss of digits at a large offset", "req.limits": "control limits",
     "req.signal": "out-of-control value found", "req.no_signal": "no false signal in stable data", "req.arl": "average run length", "req.grr": "gauge R&R", "req.params": "all parameters are in the result",
     "req.repeat": "repeatable result", "req.fingerprint": "parameter fingerprint follows the settings", "req.archive": "archive integrity", "req.archive_tamper": "tampering is detected",
-    "req.reproduce": "result reproducible from the archive", "req.runs": "the check runs", "req.custom": "expected result of the reference case",
+    "req.reproduce": "result reproducible from the archive", "req.scenario_normal": "index of a normal process", "req.scenario_skew": "capability of a skewed process (quantile method)", "req.scenario_drift": "time-dependent model found", "req.scenario_changing": "changing location recognised", "req.scenario_states": "tests for several states", "req.runs": "the check runs", "req.custom": "expected result of the reference case",
 }
 
 ZH = {
@@ -52,10 +52,10 @@ ZH = {
     "tol_rel": "相對 {tol}", "tol_abs": "絕對 {tol}", "tol_equal": "須相等",
     "limits": "限制：內建檢查涵蓋此處列出的計算，不是程式的每項功能。通過只代表此程式版本在此系統、執行當日的狀態；每次更新或變更參數後都應重跑，並保存紀錄。",
     "area.constants": "常數", "area.indices": "指標", "area.precision": "大數與小數", "area.charts": "管制界限", "area.signals": "訊號",
-    "area.sequential": "CUSUM", "area.msa": "量測系統分析", "area.transparency": "參數", "area.archive": "封存",
+    "area.sequential": "CUSUM", "area.msa": "量測系統分析", "area.transparency": "參數", "area.archive": "封存", "area.iso11462": "ISO/TR 11462-3 情境（自行構造）",
     "req.constant": "重現公開的係數", "req.mean": "平均值", "req.sd": "標準差", "req.pp": "Pp", "req.ppk": "Ppk", "req.ci": "指標的信賴區間",
     "req.ppm": "每百萬不良數", "req.scale": "不受單位影響", "req.offset": "大偏移量下不損失位數", "req.limits": "管制界限",
     "req.signal": "找出失控的值", "req.no_signal": "穩定資料不誤報", "req.arl": "平均連串長度", "req.grr": "量具 R&R", "req.params": "所有參數都在結果中",
     "req.repeat": "結果可重複", "req.fingerprint": "參數指紋隨設定改變", "req.archive": "封存完整性", "req.archive_tamper": "竄改會被發現",
-    "req.reproduce": "可由封存重現結果", "req.runs": "檢查可執行", "req.custom": "參考案例的預期結果",
+    "req.reproduce": "可由封存重現結果", "req.scenario_normal": "常態製程的指標", "req.scenario_skew": "偏態製程的能力（分位數法）", "req.scenario_drift": "找出時間相依模型", "req.scenario_changing": "辨識出位置在變動", "req.scenario_states": "多狀態檢定", "req.runs": "檢查可執行", "req.custom": "參考案例的預期結果",
 }

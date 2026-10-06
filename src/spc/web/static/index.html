@@ -248,6 +248,12 @@
           </details>
           <div id="a-model-suggestion" role="status"></div>
         </div>
+        <div class="wide" id="a-states-assist">
+          <p class="row"><button type="button" id="a-states-run" data-i18n="st.run"></button>
+            <label class="inline"><span data-i18n="st.by"></span> <input id="a-states-by" type="text" maxlength="100" placeholder="(subgroup)"></label></p>
+          <p class="note" data-i18n="st.note"></p>
+          <div id="a-states-result" role="status"></div>
+        </div>
         <label class="check wide"><input id="a-controlled" type="checkbox"><span data-i18n="analysis.controlled_stable"></span></label>
       </div>
     </fieldset>
@@ -824,6 +830,9 @@
   <p data-needs="engineer"><button id="va-run" class="primary" data-i18n="val.run"></button></p>
   <h3 data-i18n="val.runs"></h3>
   <div class="scroll"><table id="va-runs" class="grid"></table></div>
+  <h3 data-i18n="val.iso"></h3>
+  <p class="note" data-i18n="val.iso_note"></p>
+  <div class="scroll"><table id="va-iso" class="grid"></table></div>
   <h3 data-i18n="val.cases"></h3>
   <p class="note" data-i18n="val.cases_note"></p>
   <div class="scroll"><table id="va-cases" class="grid"></table></div>

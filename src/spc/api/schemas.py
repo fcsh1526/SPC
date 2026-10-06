@@ -61,6 +61,13 @@ class ResetPasswordBody(Strict):
     must_change: bool = True
 
 
+class StateTestsBody(Strict):
+    """Tests for a process with several states (ISO 22514-8)."""
+
+    alpha: float = Field(default=0.05, gt=0, lt=0.5)
+    by: str | None = Field(default=None, max_length=100)  # a tag column; without it the subgroup labels are the states
+
+
 class TimeModelBody(Strict):
     """Optional help for the suggestion of the time-dependent model."""
 

@@ -17,6 +17,7 @@ from spc.db.stores import now_iso
 from spc.params import AnalysisParams
 from spc.validation import checks as C
 from spc.validation import custom as U
+from spc.validation import iso11462 as ISO
 
 
 class ValidationError(ValueError):
@@ -130,4 +131,19 @@ class ValidationService:
             d = json.loads(r["data"])
             out.append({"id": r["id"], "created_at": r["created_at"], "created_by": d["created_by"], "engine_version": d["engine_version"], "verdict": d["verdict"],
                         "failed": d["verification"]["failed"] + d["validation"]["failed"], "cases": len(d["validation"]["cases"]), "digest": r["digest"]})
+        return out
+
+    # ------------------------------------------------------------------ ISO/TR 11462-3
+    def iso_examples(self) -> list[dict]:
+        """The eleven examples: what is known of each, whether the user entered it as a reference case, and what the last run found."""
+        cases = {c["name"]: c["id"] for c in self.list_cases()}
+        last = self.db.one("SELECT data FROM validation_runs ORDER BY id DESC LIMIT 1")
+        results: dict[str, str] = {}
+        if last:
+            for c in json.loads(last["data"])["validation"]["cases"]:
+                results[c["name"]] = "pass" if all(x["ok"] for x in c["checks"]) else "fail"
+        out = []
+        for e in ISO.CATALOGUE:
+            name = ISO.case_name(e["number"])
+            out.append({**e, "name": name, "source": ISO.SOURCE.format(n=e["number"]), "case_id": cases.get(name), "last": results.get(name)})
         return out

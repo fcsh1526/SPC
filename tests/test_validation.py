@@ -120,3 +120,27 @@ def test_the_case_that_cannot_be_analysed_fails_instead_of_stopping_the_run(env)
     assert c["eng"].post("/api/validation/cases", json={"record": rec}).status_code == 200
     run = c["eng"].post("/api/validation/runs").json()
     assert run["verdict"] == "fail" and all(not x["ok"] for x in run["validation"]["cases"][0]["checks"])
+
+
+def test_the_iso_11462_3_scenarios_are_built_in_and_say_that_they_are_not_the_standards_data():
+    from spc.validation import iso11462 as ISO
+
+    checks = [c for c in C.run_builtin() if c.area == "iso11462"]
+    assert len(checks) >= 10 and all(c.ok for c in checks), [(c.id, c.expected, c.actual) for c in checks if not c.ok]
+    assert {c.id.split("-")[0] for c in checks} >= {"S01", "S02", "S03", "S04", "S07", "S08", "S11"}
+    assert "constructed" in " ".join(c.reference for c in checks) and EN["area.iso11462"] and ZH["area.iso11462"]
+    assert [e["number"] for e in ISO.CATALOGUE] == list(range(1, 12)) and {e["number"] for e in ISO.CATALOGUE if not e["known"]} == {5, 6, 9, 10}
+
+
+def test_the_catalogue_shows_which_examples_the_user_entered_and_how_they_did(env):
+    app, c = env
+    ex = {e["number"]: e for e in c["view"].get("/api/validation/iso11462").json()["examples"]}
+    assert len(ex) == 11 and all(e["case_id"] is None and e["last"] is None for e in ex.values()) and ex[1]["name"] == "ISO/TR 11462-3 example 1"
+    assert ex[1]["request"]["distribution"] == "normal" and ex[7]["request"]["model"] == "C4" and ex[5]["known"] is False
+    rec = {**case_record("ISO/TR 11462-3 example 1"), "source": ex[1]["source"]}
+    assert c["eng"].post("/api/validation/cases", json={"record": rec}).status_code == 200
+    ex = {e["number"]: e for e in c["view"].get("/api/validation/iso11462").json()["examples"]}
+    assert ex[1]["case_id"] and ex[1]["last"] is None and ex[2]["case_id"] is None
+    c["eng"].post("/api/validation/runs")
+    ex = {e["number"]: e for e in c["view"].get("/api/validation/iso11462").json()["examples"]}
+    assert ex[1]["last"] == "pass"

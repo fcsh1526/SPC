@@ -34,6 +34,10 @@ def add_validation_routes(app: FastAPI, svc: ValidationService, reader, engineer
         svc.delete_case(case_id, user)
         return {"ok": True}
 
+    @app.get("/api/validation/iso11462")
+    def iso_examples(_: User = Depends(reader)):
+        return {"examples": svc.iso_examples()}
+
     @app.post("/api/validation/runs")
     def run(user: User = Depends(engineer)):
         return svc.run(user)

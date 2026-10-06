@@ -1415,6 +1415,11 @@ def test_validation_run_and_reference_case_in_the_browser(server, browser):
     row = page.locator("#va-runs tr", has_text="Verified, not validated")
     expect(row).to_be_visible()
     # a reference case: five values with a mean the user knows
+    expect(page.locator("#va-iso tr")).to_have_count(12)
+    expect(page.locator("#va-iso tr", has_text="Weibull")).to_contain_text("not entered")
+    page.locator("#va-iso tr", has_text="Weibull").locator("button").click()
+    assert page.input_value("#vae-name") == "ISO/TR 11462-3 example 2" and "11462-3:2020" in page.input_value("#vae-source")
+    page.click("#vae-cancel")
     page.click("#va-new")
     page.fill("#vae-name", "Textbook example")
     page.fill("#vae-source", "hand calculation 2026-02")
@@ -1471,5 +1476,35 @@ def test_equipment_link_in_the_browser(server, browser, app):
     expect(page.locator("#eq-state")).to_contain_text("用戶端未執行")
     page.click("#eq-back")
     expect(page.locator("#eq-list")).to_contain_text("Grinder 4")
+    assert problems == [], problems
+    ctx.close()
+
+
+def test_state_tests_in_the_browser(server, browser, tmp_path):
+    expect = playwright_sync.expect
+    rng = np.random.default_rng(12)
+    rows = ["machine,v"]
+    for m, mu, sd in (("M1", 10.0, 0.2), ("M2", 10.6, 0.2), ("M3", 10.0, 0.7)):
+        rows += [f"{m},{rng.normal(mu, sd):.4f}" for _ in range(30)]
+    path = tmp_path / "states.csv"
+    path.write_text("\n".join(rows) + "\n")
+    ctx = browser.new_context(viewport={"width": 1200, "height": 1100}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.set_input_files("#file", str(path))
+    page.select_option("#col-value", "v")
+    page.select_option("#col-subgroup", "machine")
+    page.click("#import-btn")
+    page.click("#to-analysis")
+    page.click("#a-states-run")
+    box = page.locator("#a-states-result")
+    expect(box).to_contain_text("Bartlett, equal variances")
+    expect(box).to_contain_text("the states differ")
+    expect(box.locator("tr", has_text="M2")).to_be_visible()
+    page.select_option("#lang", "zh-TW")
+    expect(box).to_contain_text("各狀態有差異")
     assert problems == [], problems
     ctx.close()

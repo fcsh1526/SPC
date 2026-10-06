@@ -264,7 +264,7 @@
   }
   async function openDataset(ds) {
     state.dataset = ds;
-    state.offset = 0; state.selected.clear(); state.suspects.clear(); state.result = null; state.reportOut = null; state.modelSuggestion = null; renderModelSuggestion();
+    state.offset = 0; state.selected.clear(); state.suspects.clear(); state.result = null; state.reportOut = null; state.modelSuggestion = null; state.stateTests = null; renderModelSuggestion(); renderStateTests();
     renderReportOut();
     $("#result").hidden = true;
     $("#a-size-wrap").hidden = ds.has_subgroup;
@@ -461,6 +461,30 @@
     await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/time-model`, body); });
     state.modelSuggestion = r;
     renderModelSuggestion();
+  }
+  async function runStateTests() {
+    const body = { by: $("#a-states-by").value.trim() || null };
+    let r = null;
+    await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/state-tests`, body); });
+    state.stateTests = r;
+    renderStateTests();
+  }
+  function renderStateTests() {
+    const box = $("#a-states-result"); box.replaceChildren();
+    const r = state.stateTests;
+    if (!r) return;
+    const table = el("table", "grid");
+    const head = el("tr"); ["st.col_state", "st.col_n", "st.col_mean", "st.col_sd", "st.col_grubbs"].forEach((k) => cell(head, t(k), "th")); table.appendChild(head);
+    Object.entries(r.states).forEach(([name, s]) => {
+      const tr = el("tr"); cell(tr, name); cell(tr, String(s.n)); cell(tr, sig(s.mean, 5)); cell(tr, sig(s.sd, 4));
+      const g = s.grubbs;
+      cell(tr, g.g === null ? "–" : t(g.outlier ? "st.outlier" : "st.no_outlier", { g: sig(g.g, 4), crit: sig(g.g_crit, 4), value: sig(g.value, 5) })).className = g.outlier ? "status-alarm" : "";
+      table.appendChild(tr);
+    });
+    box.appendChild(table);
+    box.appendChild(el("p", r.variance_differs ? "status-warning" : "status-ok", t("st.bartlett", { stat: sig(r.bartlett.statistic, 4), df: r.bartlett.df, p: sig(r.bartlett.p, 3), result: t(r.variance_differs ? "st.differs" : "st.same") })));
+    box.appendChild(el("p", r.location_differs ? "status-warning" : "status-ok", t("st.fisher", { stat: sig(r.fisher.statistic, 4), df1: r.fisher.df1, df2: r.fisher.df2, p: sig(r.fisher.p, 3), result: t(r.location_differs ? "st.differs" : "st.same") })));
+    if (r.skipped.length) box.appendChild(el("p", "muted", t("st.skipped", { states: r.skipped.join(", ") })));
   }
   function renderModelSuggestion() {
     const box = $("#a-model-suggestion"); box.replaceChildren();
@@ -2044,7 +2068,7 @@
   // ---------------------------------------------------------------- verification and validation of the software (draft 11.2)
   const VA = { cases: [], editing: null };
   async function loadValidation() {
-    await guarded(async () => { VA.cases = (await api("/api/validation/cases")).cases; VA.runs = (await api("/api/validation/runs")).runs; });
+    await guarded(async () => { VA.cases = (await api("/api/validation/cases")).cases; VA.runs = (await api("/api/validation/runs")).runs; VA.iso = (await api("/api/validation/iso11462")).examples; });
     renderValidation();
   }
   function renderValidation() {
@@ -2059,6 +2083,16 @@
       runs.appendChild(tr);
     });
     if (!(VA.runs || []).length) runs.appendChild(el("tr")).appendChild(el("td", "muted", t("val.no_runs")));
+    const iso = $("#va-iso"); iso.replaceChildren();
+    const ih = el("tr"); ["val.iso_no", "val.iso_what", "val.iso_state", ""].forEach((k) => cell(ih, k ? t(k) : "", "th")); iso.appendChild(ih);
+    (VA.iso || []).forEach((e) => {
+      const tr = el("tr"); cell(tr, String(e.number));
+      cell(tr, t(e.known ? "iso.ex" + e.number : "iso.unknown") + (e.n ? ` (n = ${e.n})` : ""));
+      const st = e.case_id ? (e.last ? t("val.iso_" + e.last) : t("val.iso_entered")) : t("val.iso_missing");
+      cell(tr, st).className = e.last === "pass" ? "status-ok" : e.last === "fail" ? "status-alarm" : "status-warning";
+      const b = el("button", "", t(e.case_id ? "plan.edit" : "val.iso_create")); b.addEventListener("click", () => (e.case_id ? openCaseEditor(e.case_id) : openCaseEditor(null, e))); cell(tr, "").appendChild(b);
+      iso.appendChild(tr);
+    });
     const cases = $("#va-cases"); cases.replaceChildren();
     const ch = el("tr"); ["val.f_name", "val.f_source", "val.col_values", "val.col_expected", ""].forEach((k) => cell(ch, k ? t(k) : "", "th")); cases.appendChild(ch);
     VA.cases.forEach((c) => {
@@ -2069,9 +2103,10 @@
     });
     if (!VA.cases.length) cases.appendChild(el("tr")).appendChild(el("td", "muted", t("val.no_cases")));
   }
-  async function openCaseEditor(id) {
+  async function openCaseEditor(id, example) {
     let c = { name: "", description: "", source: "", values: [], subgroup_size: null, request: {}, expected: [] };
     if (id) await guarded(async () => { c = await api(`/api/validation/cases/${id}`); });
+    if (example) c = { ...c, name: example.name, source: example.source, description: t(example.known ? "iso.ex" + example.number : "iso.unknown"), request: example.request };
     VA.editing = id || "new";
     $("#va-editor-title").textContent = id ? t("val.edit_title", { name: c.name }) : t("val.new");
     $("#vae-name").value = c.name; $("#vae-description").value = c.description; $("#vae-source").value = c.source;
@@ -2104,11 +2139,12 @@
       if (VA.editing === "new") await post("/api/validation/cases", { record }); else await put(`/api/validation/cases/${VA.editing}`, { record });
       $("#va-editor").hidden = true;
       VA.cases = (await api("/api/validation/cases")).cases;
+      VA.iso = (await api("/api/validation/iso11462")).examples;
     });
     renderValidation();
   }
   async function runValidation() {
-    await guarded(async () => { await post("/api/validation/runs", {}); VA.runs = (await api("/api/validation/runs")).runs; });
+    await guarded(async () => { await post("/api/validation/runs", {}); VA.runs = (await api("/api/validation/runs")).runs; VA.iso = (await api("/api/validation/iso11462")).examples; });
     renderValidation();
   }
   function wireValidation() {
@@ -2671,7 +2707,7 @@
     if (state.dataset) renderData();
     if (state.result) renderResult();
     if (state.user) { fillMsaSelect($("#rp-msa"), $("#rp-msa").value); fillReportPlanSelect(); }
-    renderModelSuggestion();
+    renderModelSuggestion(); renderStateTests();
     renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
     if (state.user && M.view && !$("#mon-detail").hidden) renderMonitor();
     if (state.user && ST.view && !$("#st-detail").hidden) renderStudy();
@@ -2716,6 +2752,7 @@
     syncDistributionControls();
     $("#analysis-form").addEventListener("submit", runAnalysis);
     $("#a-model-suggest").addEventListener("click", suggestModel);
+    $("#a-states-run").addEventListener("click", runStateTests);
     $("#t-btn").addEventListener("click", calcTargets);
     $("#l-btn").addEventListener("click", calcArl);
     $("#login-form").addEventListener("submit", (e) => { e.preventDefault(); doLogin(); });
