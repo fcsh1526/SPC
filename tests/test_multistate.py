@@ -160,3 +160,28 @@ def test_the_worked_example_a3_of_the_standard_is_reproduced():
     assert a["type"] == 1 and a["dof"] == 23 and a["sigma_pooled"] == pytest.approx(0.0123, abs=5e-5) and a["delta_m"] == pytest.approx(0.096, abs=5e-4)
     assert (round(a["pm"], 2), round(a["pmk_u"], 2), round(a["pmk_l"], 2)) == (1.25, 2.17, 1.08)
     assert a["widths"]["statistic"] == pytest.approx(3.4297, abs=1e-3) and a["locations"]["statistic"] == pytest.approx(46.85, abs=5e-3) and a["locations"]["critical"] == pytest.approx(2.62, abs=5e-3)
+
+
+def test_the_api_runs_the_procedure_and_refuses_what_cannot_be_analysed():
+    from spc.validation.iso22514 import ADAPTERS
+
+    app = make_app()
+    c = logged_in_client(app, "eng")
+    labels = [k for k, v in ADAPTERS.items() for _ in v]
+    key = app.state.store.add(Dataset.from_values([x for v in ADAPTERS.values() for x in v], subgroup=labels), 1, "adapters")
+    body = {"lsl": 19.8, "usl": 20.2, "outlier_physical": True, "outlier_direction": "negative"}
+    r = c.post(f"/api/datasets/{key}/multistate", json=body)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["type"] == 1 and round(j["pm"], 2) == 1.25 and round(j["pmk"], 2) == 1.08 and j["outliers"][0]["value"] == 19.95 and j["by"] == "subgroup"
+    assert j["widths"]["name"] == "bartlett" and j["locations"]["name"] == "fisher" and j["locations"]["equal"] is False
+    # the analyst decides where the tests are not enough
+    d = c.post(f"/api/datasets/{key}/multistate", json={**body, "locations_equal": True}).json()
+    assert d["type"] == 0
+    assert c.post(f"/api/datasets/{key}/multistate", json={"lsl": 20.2, "usl": 19.8}).status_code == 400
+    assert c.post(f"/api/datasets/{key}/multistate", json={"lsl": 1}).status_code == 422
+    plain = app.state.store.add(Dataset.from_values([1.0, 2, 3, 4, 5, 6]), 1, "no states")
+    assert err(c.post(f"/api/datasets/{plain}/multistate", json=body))["code"] == "invalid_input"
+    two = app.state.store.add(Dataset.from_values([10.0, 10.1, 9.9, 10.2, 11.0, 11.1, 10.9, 11.2], subgroup=["a"] * 4 + ["b"] * 4), 1, "two")
+    t = c.post(f"/api/datasets/{two}/multistate", json={"lsl": 8, "usl": 13}).json()
+    assert t["widths"]["name"] == "fisher" and t["locations"]["name"] == "t"

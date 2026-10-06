@@ -68,6 +68,23 @@ class StateTestsBody(Strict):
     by: str | None = Field(default=None, max_length=100)  # a tag column; without it the subgroup labels are the states
 
 
+class MultistateBody(Strict):
+    """Machine performance of a multi-state process, ISO 22514-8 clause 7. None for widths_equal and locations_equal: the tests decide."""
+
+    lsl: float
+    usl: float
+    by: str | None = Field(default=None, max_length=100)
+    alpha: float = Field(default=0.05, gt=0, lt=0.5)
+    resolution: float | None = Field(default=None, gt=0)
+    location: Literal["mean", "median"] = "mean"
+    widths_equal: bool | None = None
+    locations_equal: bool | None = None
+    delta_m_variable: bool = False
+    delta_m_star: float | None = Field(default=None, gt=0)
+    outlier_physical: bool = False
+    outlier_direction: Literal["negative", "positive", "both"] = "both"
+
+
 class TimeModelBody(Strict):
     """Optional help for the suggestion of the time-dependent model."""
 

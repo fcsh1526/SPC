@@ -8,7 +8,8 @@ from spc.core import multistate as ms
 from spc.data import Dataset
 
 
-def state_tests_for_dataset(ds: Dataset, alpha: float = 0.05, by: str | None = None) -> dict:
+def states_of(ds: Dataset, by: str | None = None) -> dict[str, list[float]]:
+    """The valid values of each state, in the order of the data."""
     if by:
         if by not in ds.tags:
             raise ValueError(f"the data has no tag {by!r}; the tags are {sorted(ds.tags)}")
@@ -22,6 +23,17 @@ def state_tests_for_dataset(ds: Dataset, alpha: float = 0.05, by: str | None = N
     for label, v, ok in zip(labels.tolist(), ds.values.tolist(), mask.tolist()):
         if ok:
             states.setdefault(str(label), []).append(v)
-    out = ms.state_tests(states, alpha)
+    return states
+
+
+def state_tests_for_dataset(ds: Dataset, alpha: float = 0.05, by: str | None = None) -> dict:
+    out = ms.state_tests(states_of(ds, by), alpha)
+    out["by"] = by or "subgroup"
+    return out
+
+
+def multistate_for_dataset(ds: Dataset, lsl: float, usl: float, by: str | None = None, **options) -> dict:
+    """The procedure of ISO 22514-8 (spc.core.multistate.analyse) on the states of a stored data set."""
+    out = ms.analyse(states_of(ds, by), lsl, usl, **options)
     out["by"] = by or "subgroup"
     return out

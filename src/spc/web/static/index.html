@@ -253,6 +253,26 @@
             <label class="inline"><span data-i18n="st.by"></span> <input id="a-states-by" type="text" maxlength="100" placeholder="(subgroup)"></label></p>
           <p class="note" data-i18n="st.note"></p>
           <div id="a-states-result" role="status"></div>
+          <details id="a-ms">
+            <summary data-i18n="ms.title"></summary>
+            <p class="note" data-i18n="ms.note"></p>
+            <div class="form-grid">
+              <label><span data-i18n="ms.location"></span>
+                <select id="ams-location"><option value="mean" data-i18n="ms.loc_mean"></option><option value="median" data-i18n="ms.loc_median"></option></select></label>
+              <label><span data-i18n="ms.resolution"></span><input id="ams-resolution" type="number" min="0" step="any"></label>
+              <label><span data-i18n="ms.widths"></span>
+                <select id="ams-widths"><option value="" data-i18n="ms.decide_test"></option><option value="true" data-i18n="ms.decide_equal"></option><option value="false" data-i18n="ms.decide_different"></option></select></label>
+              <label><span data-i18n="ms.locations"></span>
+                <select id="ams-locations"><option value="" data-i18n="ms.decide_test"></option><option value="true" data-i18n="ms.decide_equal"></option><option value="false" data-i18n="ms.decide_different"></option></select></label>
+              <label class="check"><input id="ams-variable" type="checkbox"><span data-i18n="ms.variable"></span></label>
+              <label><span data-i18n="ms.star"></span><input id="ams-star" type="number" min="0" step="any"></label>
+              <label class="check"><input id="ams-physical" type="checkbox"><span data-i18n="ms.physical"></span></label>
+              <label><span data-i18n="ms.direction"></span>
+                <select id="ams-direction"><option value="both" data-i18n="ms.dir_both"></option><option value="negative" data-i18n="ms.dir_negative"></option><option value="positive" data-i18n="ms.dir_positive"></option></select></label>
+            </div>
+            <p class="row"><button type="button" id="ams-run" class="primary" data-i18n="ms.run"></button></p>
+            <div id="ams-result" role="status"></div>
+          </details>
         </div>
         <label class="check wide"><input id="a-controlled" type="checkbox"><span data-i18n="analysis.controlled_stable"></span></label>
       </div>

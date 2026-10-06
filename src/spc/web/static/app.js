@@ -264,7 +264,7 @@
   }
   async function openDataset(ds) {
     state.dataset = ds;
-    state.offset = 0; state.selected.clear(); state.suspects.clear(); state.result = null; state.reportOut = null; state.modelSuggestion = null; state.stateTests = null; renderModelSuggestion(); renderStateTests();
+    state.offset = 0; state.selected.clear(); state.suspects.clear(); state.result = null; state.reportOut = null; state.modelSuggestion = null; state.stateTests = null; state.multistate = null; renderModelSuggestion(); renderStateTests(); renderMultistate();
     renderReportOut();
     $("#result").hidden = true;
     $("#a-size-wrap").hidden = ds.has_subgroup;
@@ -469,6 +469,41 @@
     await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/state-tests`, body); });
     state.stateTests = r;
     renderStateTests();
+  }
+  async function runMultistate() {
+    const num = (sel) => { const v = $(sel).value.trim(); return v === "" ? null : Number(v); };
+    const lsl = num("#a-lsl"), usl = num("#a-usl");
+    if (lsl === null || usl === null) { showError({ code: "invalid_input", message: t("ms.need_limits"), params: { message: t("ms.need_limits") } }); return; }
+    const tri = (sel) => { const v = $(sel).value; return v === "" ? null : v === "true"; };
+    const body = { lsl, usl, by: $("#a-states-by").value.trim() || null, location: $("#ams-location").value, resolution: num("#ams-resolution"),
+      widths_equal: tri("#ams-widths"), locations_equal: tri("#ams-locations"), delta_m_variable: $("#ams-variable").checked, delta_m_star: num("#ams-star"),
+      outlier_physical: $("#ams-physical").checked, outlier_direction: $("#ams-direction").value };
+    let r = null;
+    await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/multistate`, body); });
+    state.multistate = r;
+    renderMultistate();
+  }
+  function renderMultistate() {
+    const box = $("#ams-result"); box.replaceChildren();
+    const r = state.multistate;
+    if (!r) return;
+    box.appendChild(el("p", "strong", t("ms.type", { type: r.type }) + ": " + t("ms.type_" + r.type)));
+    if (r.outliers.length) {
+      const ul = el("ul");
+      r.outliers.forEach((o) => ul.appendChild(el("li", "status-warning", t("ms.outlier", { state: o.state, value: sig(o.value, 6), g: sig(o.g, 4), crit: sig(o.critical, 4), da: sig(o.delta_a, 4) }))));
+      box.appendChild(ul);
+    } else box.appendChild(el("p", "status-ok", t("ms.no_outlier")));
+    const w = r.widths, l = r.locations;
+    box.appendChild(el("p", w.equal ? "status-ok" : "status-warning", t("ms.test_widths_" + w.name, { stat: sig(w.statistic, 4), p: sig(w.p, 3), result: t(w.equal ? "ms.equal" : "ms.different") })));
+    box.appendChild(el("p", l.equal ? "status-ok" : "status-warning", t("ms.test_locations_" + l.name, { stat: sig(l.statistic, 4), p: sig(l.p, 3), result: t(l.equal ? "ms.equal" : "ms.different") })));
+    const table = el("table", "grid");
+    const head = el("tr"); ["st.col_state", "st.col_n", "st.col_mean", "ms.col_median", "st.col_sd", "ms.col_x0135", "ms.col_x99865", "ms.col_dl", "ms.col_du"].forEach((k) => cell(head, t(k), "th")); table.appendChild(head);
+    Object.entries(r.states).forEach(([name, s]) => {
+      const tr = el("tr"); [name, s.n, sig(s.mean, 5), sig(s.median, 5), sig(s.s, 4), sig(s.x0135, 5), sig(s.x99865, 5), sig(s.d_l, 4), sig(s.d_u, 4)].forEach((v) => cell(tr, String(v))); table.appendChild(tr);
+    });
+    box.appendChild(table);
+    box.appendChild(el("p", "", t("ms.summary", { dm: sig(r.delta_m, 4), sigma: sig(r.sigma_pooled, 4), dof: r.dof })));
+    box.appendChild(el("p", "strong", t("ms.result", { pm: sig(r.pm, 3), pmk: sig(r.pmk, 3), pmkl: sig(r.pmk_l, 3), pmku: sig(r.pmk_u, 3) })));
   }
   function renderStateTests() {
     const box = $("#a-states-result"); box.replaceChildren();
@@ -2707,7 +2742,7 @@
     if (state.dataset) renderData();
     if (state.result) renderResult();
     if (state.user) { fillMsaSelect($("#rp-msa"), $("#rp-msa").value); fillReportPlanSelect(); }
-    renderModelSuggestion(); renderStateTests();
+    renderModelSuggestion(); renderStateTests(); renderMultistate();
     renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
     if (state.user && M.view && !$("#mon-detail").hidden) renderMonitor();
     if (state.user && ST.view && !$("#st-detail").hidden) renderStudy();
@@ -2753,6 +2788,7 @@
     $("#analysis-form").addEventListener("submit", runAnalysis);
     $("#a-model-suggest").addEventListener("click", suggestModel);
     $("#a-states-run").addEventListener("click", runStateTests);
+    $("#ams-run").addEventListener("click", runMultistate);
     $("#t-btn").addEventListener("click", calcTargets);
     $("#l-btn").addEventListener("click", calcArl);
     $("#login-form").addEventListener("submit", (e) => { e.preventDefault(); doLogin(); });
