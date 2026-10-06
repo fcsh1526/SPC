@@ -48,7 +48,9 @@ def render_run(run: dict, lang: str = "en") -> str:
         areas.setdefault(c["area"], []).append(c)
     ver_html = ""
     for area, cs in areas.items():
-        if area.startswith("iso11462."):
+        if area.startswith("iso22514."):
+            name = L("area." + area)
+        elif area.startswith("iso11462."):
             name = L("area.iso11462_example", n=area.split(".")[1])
         else:
             name = L("area." + area) if ("area." + area) in T else area
@@ -76,5 +78,5 @@ def render_run(run: dict, lang: str = "en") -> str:
             f'<p class="verdict {"ok" if run["verdict"] != "fail" else "bad"}">{esc(L("verdict"))}: {esc(verdict)}</p><p>{esc(L("terms"))}</p>'
             f'<h2>{esc(L("params"))}</h2><p>{esc(L("params_note"))}</p><table class="kv">{params}</table>'
             f'<h2>{esc(L("verification"))}</h2><p>{esc(L("summary_full", passed=sum((c.get("status") or ("pass" if c["ok"] else "fail")) == "pass" for c in v["checks"]), total=len(v["checks"]), known=v.get("known", 0), info=v.get("info", 0), failed=v["failed"]))}</p>'
-            f'{"<p>" + esc(L("iso_note")) + "</p>" if any(c["area"].startswith("iso11462.") for c in v["checks"]) else ""}{ver_html}'
+            f'{"<p>" + esc(L("iso_note")) + "</p>" if any(c["area"].startswith(("iso11462.", "iso22514.")) for c in v["checks"]) else ""}{ver_html}'
             f'<h2>{esc(L("validation"))}</h2>{val_html}<p class=muted>{esc(L("limits"))}</p></body></html>')

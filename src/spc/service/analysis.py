@@ -38,7 +38,7 @@ from spc.core.charts.variable import MAX_MOVING_N, MovingChart, SubgroupChart, i
 from spc.core.constants import cn
 from spc.core.constants import ALPHA_3SIGMA
 from spc.core.distributions import (
-    FAMILIES, FitError, GaussianMixture, bootstrap_interval, choose_automatically, fit, fit_candidates, quantiles,
+    EXPLICIT_ONLY, FAMILIES, FitError, GaussianMixture, bootstrap_interval, choose_automatically, fit, fit_candidates, quantiles,
 )
 from spc.core.rules import RuleResult, RuleSet, Violation, evaluate
 from spc.core.stability import Stability, assess_analysis_chart, classify_stability
@@ -229,8 +229,8 @@ def _json_params(d: dict) -> dict:
 
 
 def _check_distribution_request(req: AnalysisRequest) -> None:
-    if req.distribution not in ("normal", "auto", *FAMILIES):
-        raise ValueError(f"distribution must be 'normal', 'auto' or one of {FAMILIES}")
+    if req.distribution not in ("normal", "auto", *FAMILIES, *EXPLICIT_ONLY):
+        raise ValueError(f"distribution must be 'normal', 'auto' or one of {FAMILIES + EXPLICIT_ONLY}")
     if req.method not in ("G", "Z"):
         raise ValueError("method must be 'G' or 'Z'")
     if not 1 <= req.moving_n <= MAX_MOVING_N:

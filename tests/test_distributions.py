@@ -298,3 +298,30 @@ def test_archive_of_a_non_normal_report_reproduces():
     res = reproduce(g.archive)
     assert res.integrity_ok and res.reproduced, res.differences
     assert g.archive["request"]["distribution"] == "lognormal" and g.archive["request"]["seed"] == 20260701
+
+
+def test_weibull2_and_rayleigh_have_the_lower_limit_at_zero_and_are_never_chosen_automatically():
+    import numpy as np
+    from scipy import stats
+
+    from spc.core import distributions as D
+    from spc.data import Dataset
+    from spc.service import AnalysisRequest, analyze
+
+    x = stats.weibull_min.rvs(1.9, scale=0.01, size=600, random_state=3)
+    w = D.fit(x, "weibull2")
+    assert w.family == "weibull2" and w.params[1] == 0.0 and w.params[0] == pytest.approx(stats.weibull_min.fit(x, floc=0)[0]) and w.k == 2
+    q = D.quantiles(w)
+    assert q[0] == pytest.approx(stats.weibull_min.ppf(0.00135, w.params[0], scale=w.params[2]))
+    r = D.fit(np.abs(np.random.default_rng(1).rayleigh(0.02, 500)), "rayleigh")
+    assert r.family == "rayleigh" and r.params[1] == pytest.approx(0.02, rel=0.1) and r.k == 1 and r.describe().keys() == {"location", "scale"}
+    with pytest.raises(D.FitError):
+        D.fit(np.array([-1.0, 1.0, 2.0, 3.0, 4.0]), "weibull2")
+    with pytest.raises(D.FitError):
+        D.fit(np.array([-1.0, 1.0, 2.0]), "rayleigh")
+    assert "weibull2" not in D.FAMILIES and set(D.EXPLICIT_ONLY) <= set(D.SELECTABLE)
+    ds = Dataset.from_values(x, subgroup=[str(i // 5) for i in range(600)])
+    res = analyze(ds, AnalysisRequest(usl=0.04, distribution="weibull2", bootstrap_n=0))
+    assert res["distribution"]["name"] == "weibull2" and res["indices"]["p"] is None and res["indices"]["pk"] > 0
+    auto = analyze(ds, AnalysisRequest(lsl=0.0, usl=0.04, distribution="auto", bootstrap_n=0))
+    assert all(c["family"] not in ("weibull2", "rayleigh") for c in auto["distribution"]["candidates"])

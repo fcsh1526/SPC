@@ -1402,7 +1402,7 @@
   "st.same": "未顯示差異",
   "st.skipped": "未納入（少於 3 個值）：{states}",
   "val.iso": "ISO/TR 11462-3：11 組參考資料集",
-  "val.iso_note": "標準的資料集與結果已內建（讀自隨本程式附上的標準；標準允許把資料集原樣用於確效）。每次執行都比對資料集 1 到 10（估計量、六種管制圖的界限、失控情況、能力）與資料集 11（Grubbs、Bartlett、Fisher、Type 1）。標準與自己的資料互相矛盾之處，列為已知差異並在報告中附證據，不算失敗。",
+  "val.iso_note": "標準的資料集與結果已內建（讀自隨本程式附上的標準；標準允許把資料集原樣用於確效）。每次執行都比對資料集 1 到 10（估計量、六種管制圖的界限、失控情況、能力）與資料集 11（Grubbs、Bartlett、Fisher、Type 1）。標準與自己的資料互相矛盾之處，列為已知差異並在報告中附證據，不算失敗。 ISO 22514-8 的完整範例同樣每次執行（報告中的 ISO 22514-8 各節）。",
   "val.iso_no": "編號",
   "val.iso_what": "模型、分布、資料",
   "val.iso_state": "上次執行",
@@ -1411,5 +1411,7 @@
   "val.iso_not_run": "尚未執行",
   "analysis.limit_method": "管制界限",
   "analysis.limit_draft": "草案的精確界限（卡方、w 分布）",
-  "analysis.limit_iso7870": "ISO 7870-2 的係數（A3、B3、B4、D3、D4）"
+  "analysis.limit_iso7870": "ISO 7870-2 的係數（A3、B3、B4、D3、D4）",
+  "dist.weibull2": "韋伯，兩參數（下限 0）",
+  "dist.rayleigh": "瑞利（下限 0）"
 }

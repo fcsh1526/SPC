@@ -1402,7 +1402,7 @@
   "st.same": "no difference shown",
   "st.skipped": "Left out (fewer than 3 values): {states}",
   "val.iso": "ISO/TR 11462-3: the eleven reference data sets",
-  "val.iso_note": "The data sets and results of the standard are built in (read from the copy of the standard that came with this program; the standard allows the data sets to be used unchanged for validation). Every run compares data set 1 to 10 (estimators, limits of six charts, out of control situations, capability) and data set 11 (Grubbs, Bartlett, Fisher, Type 1). Where the standard contradicts its own data, the check is a known difference with the evidence in the report, not a failure.",
+  "val.iso_note": "The data sets and results of the standard are built in (read from the copy of the standard that came with this program; the standard allows the data sets to be used unchanged for validation). Every run compares data set 1 to 10 (estimators, limits of six charts, out of control situations, capability) and data set 11 (Grubbs, Bartlett, Fisher, Type 1). Where the standard contradicts its own data, the check is a known difference with the evidence in the report, not a failure. The worked examples of ISO 22514-8 are run in the same way (report sections ISO 22514-8).",
   "val.iso_no": "No.",
   "val.iso_what": "Model, distribution, data",
   "val.iso_state": "Last run",
@@ -1411,5 +1411,7 @@
   "val.iso_not_run": "not run yet",
   "analysis.limit_method": "Control limits",
   "analysis.limit_draft": "Exact limits of the draft (chi-square, w distribution)",
-  "analysis.limit_iso7870": "Factors of ISO 7870-2 (A3, B3, B4, D3, D4)"
+  "analysis.limit_iso7870": "Factors of ISO 7870-2 (A3, B3, B4, D3, D4)",
+  "dist.weibull2": "Weibull, two parameters (lower limit 0)",
+  "dist.rayleigh": "Rayleigh (lower limit 0)"
 }

@@ -22,6 +22,9 @@ from scipy.optimize import brentq
 from scipy.special import logsumexp
 
 FAMILIES = ("normal", "lognormal", "weibull", "gamma", "johnson_su", "box_cox", "mixture", "empirical")
+# chosen on purpose only, never by the automatic choice: ISO/TR 11462-3 fixes the lower limit at 0 for characteristics with a natural boundary
+EXPLICIT_ONLY = ("weibull2", "rayleigh")
+SELECTABLE = FAMILIES + EXPLICIT_ONLY
 EMPIRICAL_MIN_N = 2000
 MAX_COMPONENTS = 5
 P_QUANTILES = (0.00135, 0.5, 0.99865)
@@ -55,6 +58,7 @@ class ScipyDistribution:
     def describe(self) -> dict:
         names = {"normal": ("mean", "sd"), "lognormal": ("shape", "location", "scale"),
                  "weibull": ("shape", "location", "scale"), "gamma": ("shape", "location", "scale"),
+                 "weibull2": ("shape", "location", "scale"), "rayleigh": ("location", "scale"),
                  "johnson_su": ("a", "b", "location", "scale")}[self.family]
         return dict(zip(names, self.params))
 
@@ -260,9 +264,19 @@ def fit(x, family: str, *, start=None, components: int | None = None):
         if x.size < EMPIRICAL_MIN_N:
             raise FitError(f"the empirical method needs at least {EMPIRICAL_MIN_N} values")
         return Empirical(x)
+    if family == "weibull2":  # two parameters, the location fixed at 0, by maximum likelihood (ISO/TR 11462-3, data sets 2 and 10)
+        if float(x.min()) <= 0:
+            raise FitError("weibull2 needs positive values")
+        c, _, scale = stats.weibull_min.fit(x, floc=0.0)
+        return ScipyDistribution("weibull2", stats.weibull_min(c, 0.0, scale), (c, 0.0, scale), 2)
+    if family == "rayleigh":  # one parameter: sigma^2 = sum(x^2) / (2 n), the location fixed at 0 (ISO/TR 11462-3, data set 9)
+        if float(x.min()) < 0:
+            raise FitError("rayleigh needs values of 0 and above")
+        sigma = float(np.sqrt(np.sum(x ** 2) / (2.0 * x.size)))
+        return ScipyDistribution("rayleigh", stats.rayleigh(0.0, sigma), (0.0, sigma), 1)
     if family in ("normal", "lognormal", "weibull", "gamma", "johnson_su"):
         return _fit_scipy(family, x, start)
-    raise ValueError(f"unknown distribution {family!r}; choose from {FAMILIES}")
+    raise ValueError(f"unknown distribution {family!r}; choose from {SELECTABLE}")
 
 
 def quantiles(dist) -> tuple[float, float, float]:

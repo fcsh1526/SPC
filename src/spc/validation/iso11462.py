@@ -239,21 +239,40 @@ def _capability(n: int, st: dict) -> list[Check]:
 
 
 def _information(n: int, st: dict) -> list[Check]:
-    """The method M(3,1) of the standard for the distributions that this program has under that name. Not judged."""
+    """The method M(3,1) of the standard (ISO 22514-2, 6.1.4 a: fit a distribution, take X0,135 %, X50 % and X99,865 % from it)."""
     out: list[Check] = []
     block = next((c for c in st["capability"] if c["method"] == "M3,1" and c["indices"]), None)
-    if not block:
-        return out
-    exp = block["indices"][0]
-    fit = {"2": "weibull", "9": "weibull", "10": "weibull"}.get(str(n))
-    if not fit or exp["pk"] is None:
-        return out
-    # the standard treats the lower limit 0 of these sets as a natural limit: one-sided capability with the upper limit only
-    one_sided = str(n) in ("2", "9")
     d = Dataset.from_values([float(v) for v in st["values"]], subgroup=[str(i // st["subgroup_size"] + 1) for i in range(st["n"])])
-    res = analyze(d, AnalysisRequest(stage="production", lsl=None if one_sided else float(st["lsl"]), usl=float(st["usl"]), distribution=fit, method="G", bootstrap_n=0))["indices"]
-    out.append(_check(n, "cap31-pk", "req.iso_info", "process capability, method M(3,1), Weibull", exp["pk"], res["pk"], exp["pk"], level="info",
-                      note="Weibull quantile method of this program; the standard's location and quantile conventions are not stated in the sources at hand"))
+
+    def run(dist, lsl, usl, method="G"):
+        return analyze(d, AnalysisRequest(stage="production", lsl=lsl, usl=usl, distribution=dist, method=method, bootstrap_n=0))["indices"]
+
+    if n == 2 and block:
+        # the lower limit 0 is the natural limit of the characteristic: with it the index Cp is the theoretical one, without it only the upper index exists
+        exp = block["indices"][0]
+        two = run("weibull2", float(st["lsl"]), float(st["usl"]))
+        one = run("weibull2", None, float(st["usl"]))
+        ref = "process capability, method M(3,1), Weibull with two parameters"
+        out.append(_check(n, "cap31-p", "req.iso_capability", ref, exp["p"], two["p"], exp["p"], note="Cp with the lower limit 0, a two-parameter Weibull by maximum likelihood (a = 0,00939, b = 1,89782)"))
+        out.append(_check(n, "cap31-pk", "req.iso_capability", ref, exp["pk"], one["pk"], exp["pk"], note="CpkU = (U - X50 %) / (X99,865 % - X50 %) with the median of the fitted distribution"))
+    if n == 10:
+        two = run("weibull2", float(st["lsl"]), float(st["usl"]))
+        printed = st["capability"][0]["indices"][0]
+        out.append(_check(n, "cap31-pk", "req.iso_capability", "5.10.2.8, remark on method M(3,1)", printed["pk"], two["pk"], printed["pk"], level="known",
+                          note=f"the standard says that the Weibull method gives the same result as M(3,5) (Cpk 1,10). The formulas of ISO 22514-2 with the Weibull parameters of the standard (a = 744,5966, b = 14,83085) give Ppk {two['pk']:.2f} "
+                               f"(lower index (X50 % - L) / (X50 % - X0,135 %) = {two['pl']:.2f}) and Pp {two['p']:.2f} (420 / 368,77); the two methods do not give the same result"))
+    if n == 9 and block:
+        exp = block["indices"][0]
+        r = run("rayleigh", float(st["lsl"]), float(st["usl"]))
+        out.append(_check(n, "cap31-p", "req.iso_info", "process capability, method M(3,1), Rayleigh", exp["p"], r["p"], exp["p"], level="info",
+                          note="Rayleigh distribution with the maximum-likelihood scale of this program; how the standard estimated the parameter is not stated"))
+        out.append(_check(n, "cap31-pk", "req.iso_info", "process capability, method M(3,1), Rayleigh", exp["pk"], r["pk"], exp["pk"], level="info",
+                          note="the same formula with the median of the fitted Rayleigh distribution; the standard does not say how it estimated the parameter (1,05 against the printed 1,01)"))
+    if n == 3 and block:
+        exp = block["indices"][1]
+        r = run("johnson_su", float(st["lsl"]), float(st["usl"]), "Z")
+        out.append(_check(n, "cap31-johnson-pk", "req.iso_info", "process capability, method M(3,1), Johnson transformation", exp["pk"], r["pk"], exp["pk"], level="info",
+                          note="Johnson SU transformation of this program (method Z); the fit may differ from the one of the standard"))
     return out
 
 

@@ -189,3 +189,19 @@ def test_the_catalogue_shows_what_the_last_run_found_for_each_example(env):
     assert "ISO/TR 11462-3 example 6" in html and "known difference" in html and "exchanged" in html
     zh = c["view"].get(f"/api/validation/runs/{run['id']}/report?lang=zh-TW").text
     assert "ISO/TR 11462-3 範例 6" in zh and "已知差異" in zh
+
+
+def test_the_worked_examples_of_iso_22514_8_are_run_and_the_standards_slips_are_named():
+    from collections import Counter
+
+    from spc.validation import iso22514 as J
+
+    checks = [c for c in C.run_builtin() if c.area.startswith("iso22514.")]
+    count = Counter(c.status for c in checks)
+    assert len(checks) > 130 and count["fail"] == 0 and count["pass"] > 120 and 0 < count["known"] < 15, count
+    known = {c.id: c for c in J.scenarios() if c.status == "known"}
+    assert "1,01 is not the pooled" in known["1-pm"].note or "1,708" in known["1-pm"].note or "1.708" in known["1-pm"].note
+    assert "without delta_m*" in known["2-a8-pm"].note and "standard deviation of sample 5" in known["2-p2-sigma"].note
+    ok = {c.id for c in J.scenarios() if c.status == "pass"}
+    assert {"3-pm", "3-pmk-l", "3-fisher", "3-bartlett", "1-bartlett", "2-a8-pmk", "2-a7-fisher", "4-forced-1"} <= ok  # the examples that reproduce
+    assert all(("area.iso22514." + c.area.split(".")[1]) in EN for c in checks)

@@ -93,7 +93,7 @@ class AnalyzeBody(Strict):
     target_confidence: float = Field(default=0.9999, gt=0, lt=1)
     incomplete: Literal["error", "drop"] = "drop"
     customer: str | None = Field(default=None, max_length=200)
-    distribution: Literal["normal", "auto", "lognormal", "weibull", "gamma", "johnson_su", "box_cox", "mixture", "empirical"] = "normal"
+    distribution: Literal["normal", "auto", "lognormal", "weibull", "gamma", "johnson_su", "box_cox", "mixture", "empirical", "weibull2", "rayleigh"] = "normal"
     method: Literal["G", "Z"] = "G"
     bootstrap_n: int = Field(default=200, ge=0, le=2000)
     seed: int = Field(default=20260701, ge=0, le=2**32 - 1)
