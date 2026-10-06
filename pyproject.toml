@@ -22,6 +22,9 @@ web = [
 opcua = [
     "asyncua>=1.1",
 ]
+sign = [
+    "cryptography>=42",
+]
 excel = [
     "openpyxl>=3.1",
 ]
@@ -33,11 +36,13 @@ dev = [
     "openpyxl>=3.1",
     "formulas>=1.2",
     "asyncua>=1.1",
+    "cryptography>=42",
 ]
 
 [project.scripts]
 spc-serve = "spc.api.__main__:main"
 spc-admin = "spc.admin:main"
+spc-sign = "spc.signing.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

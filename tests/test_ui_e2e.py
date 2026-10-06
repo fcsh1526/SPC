@@ -1562,3 +1562,49 @@ def test_multistate_result_in_the_report_in_the_browser(server, browser, tmp_pat
     assert "Decided by the analyst: the locations of the local dispersions are different" in content and "Pm =" in content and "M2" in content
     assert problems == [], problems
     ctx.close()
+
+
+def test_external_signature_and_trusted_signer_in_the_browser(server, browser, app):
+    pytest.importorskip("cryptography")
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    from spc.signing import core
+    from tests.test_api import REPORT_BODY, upload
+    from tests.conftest import logged_in_client
+
+    expect = playwright_sync.expect
+    api_client = logged_in_client(app, "eng")
+    out = api_client.post(f"/api/datasets/{upload(api_client).json()['id']}/reports", json=REPORT_BODY).json()
+    private = ed25519.Ed25519PrivateKey.generate()
+    pem = private.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    raw, _ = core.sign(private, out["digest"])
+
+    ctx = browser.new_context(viewport={"width": 1300, "height": 900}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page, "admin")
+    page.click("nav.tabs button[data-tab=admin]")
+    page.fill("#sn-name", "QA lead")
+    page.fill("#sn-key", pem)
+    page.click("#sn-add")
+    expect(page.locator("#signer-list")).to_contain_text("QA lead", timeout=20000)
+    page.click("nav.tabs button[data-tab=saved]")
+    page.locator(f"#saved-reports button[data-report='{out['id'] if 'id' in out else out['report_id']}']").click()
+    expect(page.locator("#sig-message")).to_contain_text("spc-archive-v1", timeout=20000)
+    page.fill("#sig-value", "AAAA")
+    page.fill("#sig-key", pem)
+    page.click("#sig-submit")
+    expect(page.locator("#errors")).to_contain_text("The signature is neither", timeout=20000)
+    page.fill("#sig-value", base64.b64encode(raw).decode())
+    page.fill("#sig-note", "released")
+    page.click("#sig-submit")
+    expect(page.locator("#sig-list")).to_contain_text("Valid, trusted", timeout=20000)
+    expect(page.locator("#sig-list")).to_contain_text("QA lead")
+    expect(page.locator("#saved-reports")).to_contain_text("1")
+    assert problems == []
+    ctx.close()

@@ -1107,6 +1107,23 @@
   <div class="scroll"><table id="saved-datasets" class="grid"></table></div>
   <h3 data-i18n="saved.reports"></h3>
   <div class="scroll"><table id="saved-reports" class="grid"></table></div>
+  <div id="sig-panel" class="card" hidden>
+    <h3 id="sig-title"></h3>
+    <p class="note" data-i18n="sig.intro"></p>
+    <p class="muted"><span data-i18n="sig.message"></span> <code id="sig-message"></code></p>
+    <p id="sig-broken" class="strong bad" hidden data-i18n="sig.archive_broken"></p>
+    <div class="scroll"><table id="sig-list" class="grid"></table></div>
+    <div id="sig-add" hidden>
+      <h4 data-i18n="sig.add"></h4>
+      <div class="form-grid">
+        <label class="wide"><span data-i18n="sig.signature"></span><textarea id="sig-value" rows="3" maxlength="4096" spellcheck="false"></textarea></label>
+        <label class="wide"><span data-i18n="sig.key"></span><textarea id="sig-key" rows="6" maxlength="20000" spellcheck="false"></textarea></label>
+        <label class="wide"><span data-i18n="sig.note"></span><input id="sig-note" type="text" maxlength="300"></label>
+      </div>
+      <p class="row"><button id="sig-submit" class="primary" data-i18n="sig.submit"></button></p>
+    </div>
+    <p id="sig-msg" class="strong ok"></p>
+  </div>
 </section>
 
 <!-- password -->
@@ -1149,6 +1166,17 @@
       <label><span data-i18n="admin.initial_password"></span><input id="nu-pass" type="password" maxlength="1024" autocomplete="new-password"></label>
     </div>
     <p class="row"><button id="nu-create" class="primary" data-i18n="admin.create"></button></p>
+  </div>
+  <h3 data-i18n="sig.signers"></h3>
+  <p class="note" data-i18n="sig.signers_note"></p>
+  <div class="scroll"><table id="signer-list" class="grid"></table></div>
+  <div class="card">
+    <div class="form-grid">
+      <label><span data-i18n="sig.signer_name"></span><input id="sn-name" type="text" maxlength="80" autocomplete="off"></label>
+      <label class="wide"><span data-i18n="sig.key"></span><textarea id="sn-key" rows="6" maxlength="20000" spellcheck="false"></textarea></label>
+    </div>
+    <p class="row"><button id="sn-add" class="primary" data-i18n="sig.signer_add"></button></p>
+    <p id="sn-msg" class="strong ok"></p>
   </div>
   <h3 data-i18n="admin.profiles"></h3>
   <p class="note" data-i18n="admin.profiles_note"></p>

@@ -2641,14 +2641,17 @@
       });
       const rt = $("#saved-reports"); rt.replaceChildren();
       const rh = el("tr");
-      ["saved.col_id", "saved.col_created", "saved.col_language", "saved.col_owner", ""].forEach((k) => cell(rh, k ? t(k) : "", "th"));
+      ["saved.col_id", "saved.col_created", "saved.col_language", "saved.col_owner", "sig.col_count", ""].forEach((k) => cell(rh, k ? t(k) : "", "th"));
       rt.appendChild(rh);
-      if (!rp.reports.length) { const tr = el("tr"); const c = cell(tr, t("saved.empty")); c.colSpan = 5; rt.appendChild(tr); }
+      if (!rp.reports.length) { const tr = el("tr"); const c = cell(tr, t("saved.empty")); c.colSpan = 6; rt.appendChild(tr); }
       rp.reports.forEach((r) => {
         const tr = el("tr");
-        cell(tr, r.id); cell(tr, when(r.created_at)); cell(tr, r.language); cell(tr, r.owner);
+        cell(tr, r.id); cell(tr, when(r.created_at)); cell(tr, r.language); cell(tr, r.owner); cell(tr, String(r.signatures));
         const actions = cell(tr, "");
         const base = `/api/reports/${r.id}`;
+        const sg = el("button", "", t("sig.open")); sg.dataset.report = r.id;
+        sg.addEventListener("click", () => openSignatures(r.id));
+        actions.appendChild(sg);
         actions.appendChild(linkButton(t("saved.report_open"), base, true));
         actions.appendChild(linkButton(t("saved.report_download"), `${base}?download=1`));
         actions.appendChild(linkButton(t("saved.report_archive"), `${base}/archive.json`));
@@ -2658,11 +2661,93 @@
     });
   }
 
+  // ---------------------------------------------------------------- external signatures
+  const SG = { rid: null };
+  async function openSignatures(rid) {
+    SG.rid = rid;
+    await guarded(async () => {
+      const [pl, sg] = await Promise.all([api(`/api/reports/${rid}/signing-payload`).catch(() => null), api(`/api/reports/${rid}/signatures`)]);
+      $("#sig-panel").hidden = false;
+      $("#sig-title").textContent = t("sig.title", { id: rid });
+      $("#sig-message").textContent = pl ? pl.message : "";
+      $("#sig-broken").hidden = sg.archive_intact;
+      $("#sig-add").hidden = state.user.role === "viewer" || state.user.role === "operator" || !sg.archive_intact;
+      $("#sig-msg").textContent = "";
+      const tb = $("#sig-list"); tb.replaceChildren();
+      const head = el("tr");
+      ["sig.col_status", "sig.col_signer", "sig.col_key", "sig.col_scheme", "sig.col_fingerprint", "sig.col_when", "sig.col_note", ""].forEach((k) => cell(head, k ? t(k) : "", "th"));
+      tb.appendChild(head);
+      if (!sg.signatures.length) { const tr = el("tr"); const c = cell(tr, t("sig.none")); c.colSpan = 8; tb.appendChild(tr); }
+      sg.signatures.forEach((x) => {
+        const tr = el("tr");
+        const st = cell(tr, t(x.trusted ? "sig.trusted" : x.valid ? "sig.valid_untrusted" : "sig.invalid"));
+        st.className = x.trusted ? "ok" : x.valid ? "" : "bad";
+        cell(tr, x.signer || (x.certificate ? x.certificate.subject : "—"));
+        cell(tr, x.key); cell(tr, x.scheme); cell(tr, x.fingerprint.slice(0, 16));
+        cell(tr, when(x.created_at)); cell(tr, x.note || "");
+        const a = cell(tr, "");
+        if (state.user.role === "admin") {
+          const del = el("button", "", t("sig.remove"));
+          del.addEventListener("click", async () => {
+            if (!window.confirm(t("sig.confirm_remove"))) return;
+            await guarded(async () => { await api(`/api/reports/${rid}/signatures/${x.id}`, { method: "DELETE" }); });
+            openSignatures(rid); loadSaved();
+          });
+          a.appendChild(del);
+        }
+        tb.appendChild(tr);
+      });
+    });
+  }
+  async function submitSignature() {
+    const ok = await guarded(async () => {
+      await post(`/api/reports/${SG.rid}/signatures`, { signature: $("#sig-value").value, key: $("#sig-key").value, note: $("#sig-note").value });
+      $("#sig-value").value = ""; $("#sig-key").value = ""; $("#sig-note").value = "";
+      return true;
+    });
+    if (!ok) return;
+    await openSignatures(SG.rid); $("#sig-msg").textContent = t("sig.added"); loadSaved();
+  }
+  async function loadSigners() {
+    const r = await api("/api/signers");
+    const tb = $("#signer-list"); tb.replaceChildren();
+    const head = el("tr");
+    ["sig.signer_name", "sig.col_key", "sig.col_fingerprint", "sig.col_active", ""].forEach((k) => cell(head, t(k), "th"));
+    tb.appendChild(head);
+    if (!r.signers.length) { const tr = el("tr"); const c = cell(tr, t("sig.no_signers")); c.colSpan = 5; tb.appendChild(tr); }
+    r.signers.forEach((sg) => {
+      const tr = el("tr");
+      cell(tr, sg.name); cell(tr, sg.key); cell(tr, sg.fingerprint.slice(0, 16)); cell(tr, t(sg.active ? "sig.yes" : "sig.no"));
+      const a = cell(tr, "");
+      const tog = el("button", "", t(sg.active ? "sig.disable" : "sig.enable"));
+      tog.addEventListener("click", async () => { await guarded(async () => { await post(`/api/signers/${sg.id}/${sg.active ? "disable" : "enable"}`, {}); }); loadSigners(); });
+      const del = el("button", "", t("sig.remove"));
+      del.addEventListener("click", async () => {
+        if (!window.confirm(t("sig.confirm_remove_signer", { name: sg.name }))) return;
+        await guarded(async () => { await api(`/api/signers/${sg.id}`, { method: "DELETE" }); });
+        loadSigners();
+      });
+      a.appendChild(tog); a.appendChild(del);
+      tb.appendChild(tr);
+    });
+  }
+  async function addSigner() {
+    await guarded(async () => {
+      await post("/api/signers", { name: $("#sn-name").value, key: $("#sn-key").value });
+      $("#sn-name").value = ""; $("#sn-key").value = "";
+      $("#sn-msg").textContent = t("sig.signer_added");
+    });
+    loadSigners();
+  }
+  $("#sig-submit").addEventListener("click", submitSignature);
+  $("#sn-add").addEventListener("click", addSigner);
+
   // ---------------------------------------------------------------- administration
   async function loadAdmin() {
     await guarded(async () => {
       const [users, audit] = await Promise.all([api("/api/users"), api("/api/audit?limit=100")]);
       renderUsers(users.users);
+      await loadSigners();
       renderAudit(audit.entries);
       await loadProfiles(); renderProfileList();
     });

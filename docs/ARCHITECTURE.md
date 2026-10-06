@@ -561,6 +561,15 @@
 - **測試**：以行程內的真實 OPC UA 伺服器（`asyncua`）驗證測試讀取、訂閱、壞品質、重送、停用，以及伺服器晚於用戶端啟動時的重連。
 - **未做**：加密連線（`Basic256Sha256` 等）程式已接上但**沒有測試**，因為沒有憑證環境；ISO/TR 11462-5 的檔案介面、Part 數據模型（OPC UA for Machinery 等的伴隨規格）、輪詢模式、歷史資料補讀、多值與計數型監控、讀值的批次交易、機台狀態與零件編號節點。
 
+## 10.9 外部簽章（草案 11、12 的歸檔可驗證性，已實作 `spc.signing`）
+
+- **簽什麼**：訊息為 `spc-archive-v1\n` ＋ 封存檔的 SHA-256 摘要值（十六進位）。摘要值涵蓋整份封存內容（資料、標記、參數、結果、報告輸入，含控制計畫與多狀態附錄），故簽章涵蓋全部。
+- **在哪簽**：簽章在程式之外完成（openssl、智慧卡、簽章服務，或 `spc-sign sign`）；程式只驗證，不持有私鑰。`GET /api/reports/{id}/signing-payload` 給出訊息；`spc-sign payload|sign|verify` 可離線使用，且可離線驗證下載的 `archive.json`。
+- **演算法**：ed25519、ecdsa-sha256（P-256）、ecdsa-sha384（P-384，亦接受 sha256）、rsa-pss-sha256、rsa-pkcs1v15-sha256；RSA 至少 2048 位元，其他曲線與型別拒絕。簽章可為 base64 或十六進位（全為十六進位字元時優先視為十六進位）。
+- **有效 ≠ 受信任**：新增簽章時須同時提供憑證或公開金鑰（PEM），不符即拒（422）。每次顯示都以「現在的封存檔」重新驗證；封存檔被改動則所有簽章無效（`archive_intact=false`）。受信任＝金鑰指紋（公開金鑰 DER 的 SHA-256，憑證換新但金鑰不變時不變）在啟用中的受信任簽署者清單內（管理員維護，可停用）。同一金鑰對同一報告只能簽一次。
+- **稽核**：`report_signed`、`signature_removed`、`signer_added|enabled|disabled|deleted` 進稽核鏈。資料表 `trusted_signers`、`report_signatures`（資料庫版本 9）。
+- **界線**：不驗證憑證鏈或撤銷（信任錨就是釘住的金鑰）；不含時間戳記服務（記錄時間為本機時鐘，不具法律效力的簽署時間證明）；簽章只涵蓋封存檔摘要，不涵蓋 HTML 外觀；`cryptography` 為選用相依（`pip install 'spc[sign]'`），未安裝時相關端點回 501 `signing_unavailable`。
+
 ## 10.1 資料庫與登入（已實作第一版）
 
 **儲存**：SQLite 單檔（`--db` 或環境變數 `SPC_DB`，預設 `spc.sqlite3`，建立時權限 0600）。一條連線加一把鎖，所有存取走 `spc.db`，日後換 PostgreSQL 只改 `database.py` 與 `stores.py`。結構版本（目前 8）放在 `PRAGMA user_version`，版本不符時拒絕啟動。

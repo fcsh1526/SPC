@@ -27,6 +27,9 @@ from spc.api.msa import add_msa_routes
 from spc.api.plans import add_plan_routes
 from spc.api.validation import add_validation_routes
 from spc.api.equipment import add_equipment_routes
+from spc.api.signing import add_signing_routes
+from spc.signing.core import SigningError
+from spc.signing.service import SigningService
 from spc.service.state_tests import multistate_for_dataset, state_tests_for_dataset
 from spc.equipment.model import EquipmentError
 from spc.equipment.service import EquipmentService
@@ -174,6 +177,7 @@ def create_app(
     app.state.people, app.state.plans = people, plan_service
     validation_service = ValidationService(db, audit)
     app.state.validation = validation_service
+    signing_service = SigningService(db, audit, reports)
     equipment_service = EquipmentService(db, audit, monitors, auth)
     app.state.equipment = equipment_service
 
@@ -234,6 +238,10 @@ def create_app(
 
     @app.exception_handler(EquipmentError)
     async def _equipment_error(_: Request, exc: EquipmentError):
+        return _error(exc.status, exc.code, str(exc), exc.params)
+
+    @app.exception_handler(SigningError)
+    async def _signing_error(_: Request, exc: SigningError):
         return _error(exc.status, exc.code, str(exc), exc.params)
 
     @app.exception_handler(ValidationError)
@@ -325,6 +333,7 @@ def create_app(
     add_plan_routes(app, plan_service, people, reader, writer, admin)
     add_validation_routes(app, validation_service, reader, writer, admin)
     add_equipment_routes(app, equipment_service, reader, writer, admin)
+    add_signing_routes(app, signing_service, reader, writer, admin)
 
     # ------------------------------------------------------------------ import
 
@@ -585,7 +594,8 @@ def create_app(
 
     @app.get("/api/reports")
     def list_reports():
-        return {"reports": reports.list()}
+        counts = signing_service.counts()
+        return {"reports": [{**r, "signatures": counts.get(r["id"], 0)} for r in reports.list()]}
 
     @app.get("/api/reports/{rid}")
     def get_report(rid: str, download: int = 0):

@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA = """
 CREATE TABLE users (
@@ -214,6 +214,22 @@ CREATE TABLE equipment_links (
     updated_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
 );
+CREATE TABLE trusted_signers (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    fingerprint TEXT NOT NULL UNIQUE,
+    data        TEXT NOT NULL,
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    created_by  INTEGER REFERENCES users(id)
+);
+CREATE TABLE report_signatures (
+    id         INTEGER PRIMARY KEY,
+    report_id  TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+);
 """
 
 
@@ -230,6 +246,26 @@ CREATE TABLE validation_runs (
     id         INTEGER PRIMARY KEY,
     data       TEXT NOT NULL,
     digest     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+)
+"""
+
+
+MIGRATION_8_TO_9 = """
+CREATE TABLE trusted_signers (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    fingerprint TEXT NOT NULL UNIQUE,
+    data        TEXT NOT NULL,
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    created_by  INTEGER REFERENCES users(id)
+);
+CREATE TABLE report_signatures (
+    id         INTEGER PRIMARY KEY,
+    report_id  TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    data       TEXT NOT NULL,
     created_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
 )
@@ -332,7 +368,7 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2, 3, 4, 5, 6, 7):
+        elif version in (1, 2, 3, 4, 5, 6, 7, 8):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
@@ -364,9 +400,16 @@ class Database:
                         self._conn.execute(statement)
                 self._conn.execute("PRAGMA user_version = 7")
                 self._conn.execute("COMMIT")
-            self._conn.execute("BEGIN IMMEDIATE")  # version 8 adds the equipment interface (OPC UA links)
-            self._conn.execute(MIGRATION_7_TO_8)
-            self._conn.execute("PRAGMA user_version = 8")
+            if version <= 7:
+                self._conn.execute("BEGIN IMMEDIATE")  # version 8 adds the equipment interface (OPC UA links)
+                self._conn.execute(MIGRATION_7_TO_8)
+                self._conn.execute("PRAGMA user_version = 8")
+                self._conn.execute("COMMIT")
+            self._conn.execute("BEGIN IMMEDIATE")  # version 9 adds the external signatures of reports and the signers that are trusted
+            for statement in MIGRATION_8_TO_9.split(";"):
+                if statement.strip():
+                    self._conn.execute(statement)
+            self._conn.execute("PRAGMA user_version = 9")
             self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")

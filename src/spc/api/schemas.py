@@ -259,6 +259,20 @@ class EquipmentBody(Strict):
     record: dict
 
 
+class SignatureBody(Strict):
+    """A signature made outside, with the certificate or public key (PEM) that checks it."""
+
+    signature: str = Field(max_length=4096)
+    key: str = Field(max_length=20000)
+    scheme: str | None = None
+    note: str = Field(default="", max_length=300)
+
+
+class SignerBody(Strict):
+    name: str = Field(max_length=80)
+    key: str = Field(max_length=20000)
+
+
 class MsaBody(Strict):
     """A measurement system: name, resolution, tolerance and policy; checked in spc.msa.service.validate_record."""
 
