@@ -142,3 +142,5 @@ chart = xbar_s(data.subgroups(incomplete="drop").matrix)   # marked value is lef
 ## Source status
 
 The numbers are checked against the AIAG-VDA SPC Yellow Volume (draft, February 2026). The July 2026 release version is not used yet. Differences are listed in `docs/ARCHITECTURE.md`.
+
+**Traceability:** `docs/TRACEABILITY.md` maps every requirement of the draft (chapters 5 to 13) to the program, the test that proves it, and what is missing or our own reading. A test keeps it honest: every file and test it names must exist.
