@@ -30,6 +30,8 @@ from spc.api.equipment import add_equipment_routes
 from spc.api.signing import add_signing_routes
 from spc.signing.core import SigningError
 from spc.signing.service import SigningService
+from spc.core import gdt, multistage as mstage
+from spc.service.special import multistage_for_dataset
 from spc.service.state_tests import multistate_for_dataset, state_tests_for_dataset
 from spc.equipment.model import EquipmentError
 from spc.equipment.service import EquipmentService
@@ -41,6 +43,9 @@ from spc.api.errors import ApiError, error_response as _error
 from spc.service.model_suggestion import suggest_for_dataset
 from spc.api.schemas import (
     MultistateBody,
+    MultistageBody,
+    MultistageScopeBody,
+    GdtBody,
     StateTestsBody,
     TimeModelBody,
     AnalyzeBody,
@@ -698,6 +703,36 @@ def create_app(
         try:
             options = body.model_dump(exclude={"lsl", "usl", "by"})
             return multistate_for_dataset(store.get(key), body.lsl, body.usl, body.by, **options)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/multistage/scope")
+    def multistage_scope(body: MultistageScopeBody):
+        """Scope of inspection of a multi-stage machine (draft 8.5.1.2): combinations, parts per combination, total."""
+        try:
+            return mstage.inspection_scope(body.components_per_carrier, body.carriers, body.spindles, body.machines,
+                                           geometrically_identical=body.geometrically_identical, measured_carriers=body.measured_carriers,
+                                           per_combination=body.per_combination, minimum_total=body.minimum_total) | {
+                "spindle_form": mstage.spindle_distribution(body.minimum_total, body.spindles)}
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/datasets/{key}/multistage")
+    def multistage(key: str, body: MultistageBody):
+        """All values together, then each combination of pallet, spindle, machine ... against the rest (draft 8.5.1.2)."""
+        try:
+            return multistage_for_dataset(store.get(key), body.factors, body.lsl, body.usl, alpha=body.alpha,
+                                          per_combination=body.per_combination, minimum_total=body.minimum_total)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/gdt/clearance")
+    def gdt_clearance(body: GdtBody):
+        """Assembly clearance C of a part with MMR/LMR and its capability against L_C = 0 (draft 8.5.3)."""
+        try:
+            return gdt.analyse_clearance(body.xd, body.xp, dx=body.dx, dy=body.dy, kind=body.kind, requirement=body.requirement, lower=body.lower,
+                                         upper=body.upper, position_tolerance=body.position_tolerance, distribution=body.distribution, method=body.method,
+                                         bootstrap_n=body.bootstrap_n, confidence=body.confidence, seed=body.seed)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 

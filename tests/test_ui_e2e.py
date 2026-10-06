@@ -1608,3 +1608,59 @@ def test_external_signature_and_trusted_signer_in_the_browser(server, browser, a
     expect(page.locator("#saved-reports")).to_contain_text("1")
     assert problems == []
     ctx.close()
+
+
+def test_special_cases_multistage_and_gdt_in_the_browser(server, browser, tmp_path):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=special]")
+    expect(page.locator("#sp-comb-none")).to_be_visible()
+
+    # the scope of the draft's example 2: 3 machines, 7 pallets
+    page.click("#sp-scope-btn")
+    expect(page.locator("#sp-scope-out")).to_contain_text("21 combinations", timeout=20000)
+    expect(page.locator("#sp-scope-out")).to_contain_text("1050")
+
+    # combinations of an imported data set: the tag "machine" is the factor
+    page.click("nav.tabs button[data-tab=import]")
+    csv = tmp_path / "combo.csv"
+    rng = np.random.default_rng(8)
+    lines = ["pallet,machine,diameter"]
+    for i in range(60):
+        pallet, machine = f"P{i % 3 + 1}", f"M{i % 2 + 1}"
+        lines.append(f"{pallet},{machine},{10 + rng.normal(0, 0.05) + (0.4 if pallet == 'P3' else 0):.4f}")
+    csv.write_text("\n".join(lines), encoding="utf-8")
+    page.set_input_files("#file", str(csv))
+    page.select_option("#col-value", "diameter")
+    page.locator("#col-tags input[value=pallet]").check()
+    page.click("#import-btn")
+    expect(page.locator("#data-counts")).to_contain_text("60 values", timeout=20000)
+    page.click("nav.tabs button[data-tab=special]")
+    expect(page.locator("#sp-comb-form")).to_be_visible()
+    page.locator("#sp-factors input[value=pallet]").check()
+    page.fill("#sp-lsl", "9.5")
+    page.fill("#sp-usl", "10.8")
+    page.click("#sp-comb-btn")
+    expect(page.locator("#sp-comb-out")).to_contain_text("60 values together", timeout=20000)
+    expect(page.locator("#sp-comb-out")).to_contain_text("deviates")
+    expect(page.locator("#sp-comb-out")).to_contain_text("Complete: 3 of 3 combinations")
+
+    # GD&T: the draft's bore
+    rng = np.random.default_rng(4)
+    rows = [f"{a:.4f} {b:.4f} {c:.4f}" for a, b, c in zip(rng.normal(20.1, 0.03, 80), rng.normal(0, 0.03, 80), rng.normal(0, 0.03, 80))]
+    page.fill("#gd-data", "\n".join(rows))
+    page.fill("#gd-boot", "0")
+    page.click("#gd-run")
+    expect(page.locator("#gd-out")).to_contain_text("Virtual size 19.8", timeout=20000)
+    expect(page.locator("#gd-out")).to_contain_text("Ppk =")
+    expect(page.locator("#gd-out")).to_contain_text("draft prints")
+    page.fill("#gd-data", "20.1\n20.1 0.1")
+    page.click("#gd-run")
+    expect(page.locator("#errors")).to_contain_text("2 numbers", timeout=20000)
+    assert problems == []
+    ctx.close()

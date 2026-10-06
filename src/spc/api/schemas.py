@@ -85,6 +85,49 @@ class MultistateBody(Strict):
     outlier_direction: Literal["negative", "positive", "both"] = "both"
 
 
+class MultistageScopeBody(Strict):
+    """Scope of inspection of a multi-stage machine, draft 8.5.1.2."""
+
+    components_per_carrier: int = Field(default=1, ge=1, le=1000)
+    carriers: int = Field(default=1, ge=1, le=1000)
+    spindles: int = Field(default=1, ge=1, le=1000)
+    machines: int = Field(default=1, ge=1, le=1000)
+    geometrically_identical: int = Field(default=0, ge=0, le=100_000)
+    measured_carriers: int | None = Field(default=None, ge=1, le=1000)
+    per_combination: int = Field(default=5, ge=1, le=1000)
+    minimum_total: int = Field(default=50, ge=1, le=100_000)
+
+
+class MultistageBody(Strict):
+    """The combinations of a stored data set: the factors are tag names or "subgroup"."""
+
+    factors: list[str] = Field(min_length=1, max_length=6)
+    lsl: float | None = None
+    usl: float | None = None
+    alpha: float = Field(default=0.05, gt=0, lt=0.5)
+    per_combination: int = Field(default=5, ge=1, le=1000)
+    minimum_total: int = Field(default=50, ge=1, le=100_000)
+
+
+class GdtBody(Strict):
+    """Assembly clearance of a size feature with a position tolerance under MMR/LMR, draft 8.5.3. Give xp, or dx and dy."""
+
+    xd: list[float] = Field(min_length=5, max_length=100_000)
+    xp: list[float] | None = Field(default=None, max_length=100_000)
+    dx: list[float] | None = Field(default=None, max_length=100_000)
+    dy: list[float] | None = Field(default=None, max_length=100_000)
+    kind: Literal["bore", "pin"] = "bore"
+    requirement: Literal["mmc", "lmc"] = "mmc"
+    lower: float
+    upper: float
+    position_tolerance: float = Field(gt=0)
+    distribution: str = Field(default="auto", max_length=30)
+    method: Literal["G", "Z"] = "G"
+    bootstrap_n: int = Field(default=200, ge=0, le=2000)
+    confidence: float = Field(default=0.95, gt=0.5, lt=1)
+    seed: int = 20260701
+
+
 class ReportMultistateBody(Strict):
     """The machine performance of the states for a report. The limits default to those of the analysis."""
 

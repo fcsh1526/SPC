@@ -60,6 +60,7 @@
   <button role="tab" data-tab="msa" aria-selected="false" data-i18n="nav.msa"></button>
   <button role="tab" data-tab="equipment" aria-selected="false" data-i18n="nav.equipment"></button>
   <button role="tab" data-tab="validation" aria-selected="false" data-i18n="nav.validation"></button>
+  <button role="tab" data-tab="special" aria-selected="false" data-i18n="nav.special"></button>
   <button role="tab" data-tab="study" aria-selected="false" data-i18n="nav.study"></button>
   <button role="tab" data-tab="saved" aria-selected="false" data-i18n="nav.saved"></button>
   <button role="tab" data-tab="tools" aria-selected="false" data-i18n="nav.tools"></button>
@@ -1097,6 +1098,59 @@
       <p class="row"><button id="st-close" class="primary"></button></p>
     </div>
     <p id="st-closed-line" class="strong" hidden></p>
+  </div>
+</section>
+
+<section id="tab-special" class="panel" hidden>
+  <h2 data-i18n="sp.title"></h2>
+  <p class="note" data-i18n="sp.intro"></p>
+  <div class="card">
+    <h3 data-i18n="sp.scope_title"></h3>
+    <p class="note" data-i18n="sp.scope_note"></p>
+    <div class="form-grid">
+      <label><span data-i18n="sp.components"></span><input id="sp-comp" type="number" min="1" step="1" value="1"></label>
+      <label><span data-i18n="sp.carriers"></span><input id="sp-car" type="number" min="1" step="1" value="7"></label>
+      <label><span data-i18n="sp.spindles"></span><input id="sp-spi" type="number" min="1" step="1" value="1"></label>
+      <label><span data-i18n="sp.machines"></span><input id="sp-mac" type="number" min="1" step="1" value="3"></label>
+      <label><span data-i18n="sp.identical"></span><input id="sp-ident" type="number" min="0" step="1" value="0"></label>
+      <label><span data-i18n="sp.measured"></span><input id="sp-meas" type="number" min="1" step="1"></label>
+    </div>
+    <p><button id="sp-scope-btn" class="primary" data-i18n="sp.scope_run"></button></p>
+    <div id="sp-scope-out" role="status"></div>
+  </div>
+  <div class="card">
+    <h3 data-i18n="sp.comb_title"></h3>
+    <p class="note" data-i18n="sp.comb_note"></p>
+    <p id="sp-comb-none" class="muted" data-i18n="sp.comb_no_data"></p>
+    <div id="sp-comb-form" hidden>
+      <fieldset><legend data-i18n="sp.factors"></legend><div id="sp-factors" class="row"></div></fieldset>
+      <div class="form-grid">
+        <label><span data-i18n="sp.lsl"></span><input id="sp-lsl" type="number" step="any"></label>
+        <label><span data-i18n="sp.usl"></span><input id="sp-usl" type="number" step="any"></label>
+      </div>
+      <p><button id="sp-comb-btn" class="primary" data-i18n="sp.comb_run"></button></p>
+    </div>
+    <div id="sp-comb-out" role="status"></div>
+  </div>
+  <div class="card">
+    <h3 data-i18n="sp.gdt_title"></h3>
+    <p class="note" data-i18n="sp.gdt_note"></p>
+    <div class="form-grid">
+      <label><span data-i18n="sp.kind"></span>
+        <select id="gd-kind"><option value="bore" data-i18n="sp.kind_bore"></option><option value="pin" data-i18n="sp.kind_pin"></option></select></label>
+      <label><span data-i18n="sp.requirement"></span>
+        <select id="gd-req"><option value="mmc" data-i18n="sp.req_mmc"></option><option value="lmc" data-i18n="sp.req_lmc"></option></select></label>
+      <label><span data-i18n="sp.lower"></span><input id="gd-lower" type="number" step="any" value="20"></label>
+      <label><span data-i18n="sp.upper"></span><input id="gd-upper" type="number" step="any" value="20.2"></label>
+      <label><span data-i18n="sp.tp"></span><input id="gd-tp" type="number" step="any" min="0" value="0.2"></label>
+      <label><span data-i18n="sp.distribution"></span>
+        <select id="gd-dist"><option value="auto" data-i18n="sp.dist_auto"></option><option value="normal">normal</option><option value="lognormal">lognormal</option><option value="weibull">weibull</option><option value="gamma">gamma</option></select></label>
+      <label><span data-i18n="sp.method"></span><select id="gd-method"><option value="G">.G</option><option value="Z">.Z</option></select></label>
+      <label><span data-i18n="sp.boot"></span><input id="gd-boot" type="number" min="0" max="2000" step="1" value="200"></label>
+      <label class="wide"><span data-i18n="sp.gdt_data"></span><textarea id="gd-data" rows="8" spellcheck="false" placeholder="20.10 0.03 -0.02"></textarea></label>
+    </div>
+    <p><button id="gd-run" class="primary" data-i18n="sp.gdt_run"></button></p>
+    <div id="gd-out" role="status"></div>
   </div>
 </section>
 

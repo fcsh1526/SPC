@@ -158,6 +158,7 @@
     if (name === "plan") loadPlans();
     if (name === "validation") loadValidation();
     if (name === "equipment") loadEquipment();
+    if (name === "special") loadSpecial();
     if (name === "roles") loadRoles();
     if (name === "admin") loadAdmin();
     if (name === "password") renderPasswordPanel();
@@ -2660,6 +2661,109 @@
       });
     });
   }
+
+  // ---------------------------------------------------------------- special cases (draft 8.5): multi-stage machining and GD&T
+  const SP = { scope: null, comb: null, gdt: null };
+  function loadSpecial() {
+    const has = !!state.dataset;
+    $("#sp-comb-none").hidden = has; $("#sp-comb-form").hidden = !has;
+    const box = $("#sp-factors"); box.replaceChildren();
+    if (!has) return;
+    const names = [...state.dataset.tags, ...(state.dataset.has_subgroup ? ["subgroup"] : [])];
+    names.forEach((n) => {
+      const lab = el("label", "check"); const cb = el("input"); cb.type = "checkbox"; cb.value = n;
+      lab.appendChild(cb); lab.appendChild(el("span", "", n === "subgroup" ? t("sp.factor_subgroup") : n)); box.appendChild(lab);
+    });
+    if (!names.length) box.appendChild(el("span", "muted", t("sp.no_factors")));
+  }
+  function spTable(headKeys, rows, rowClass) {
+    const table = el("table", "grid"); const head = el("tr");
+    headKeys.forEach((k) => cell(head, k ? t(k) : "", "th")); table.appendChild(head);
+    rows.forEach((r) => { const tr = el("tr"); if (rowClass) tr.className = rowClass(r) || ""; r.cells.forEach((v) => cell(tr, String(v))); table.appendChild(tr); });
+    return table;
+  }
+  const pv = (p) => (p === null || p === undefined ? "–" : p < 0.001 ? "< 0.001" : sig(p, 2));
+  async function runScope() {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Math.round(Number(v)); };
+    const body = { components_per_carrier: num("#sp-comp") || 1, carriers: num("#sp-car") || 1, spindles: num("#sp-spi") || 1, machines: num("#sp-mac") || 1,
+      geometrically_identical: num("#sp-ident") || 0, measured_carriers: num("#sp-meas") };
+    let r = null;
+    await guarded(async () => { r = await post("/api/multistage/scope", body); });
+    SP.scope = r;
+    const box = $("#sp-scope-out"); box.replaceChildren();
+    if (!r) return;
+    box.appendChild(el("p", "strong", t("sp.scope_result", { combos: r.combinations, inspected: r.inspected_combinations, per: r.parts_per_combination, total: r.total_parts })));
+    box.appendChild(el("p", "", t("sp.scope_full", { full: r.full_acceptance_parts, saving: r.saving })));
+    if (r.minimum_total_binding) box.appendChild(el("p", "muted", t("sp.scope_min", { min: r.minimum_total })));
+    if (r.parts_other_carriers) box.appendChild(el("p", "muted", t("sp.scope_other", { n: r.parts_other_carriers, study: r.parts_in_study })));
+    box.appendChild(el("p", "muted", t("sp.scope_form", { total: r.spindle_form.total, list: r.spindle_form.per_spindle.join(" / ") })));
+  }
+  async function runCombinations() {
+    const factors = $$("#sp-factors input:checked").map((i) => i.value);
+    if (!factors.length) { showError({ code: "invalid_input", message: t("sp.no_factor_chosen"), params: { message: t("sp.no_factor_chosen") } }); return; }
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    let r = null;
+    await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/multistage`, { factors, lsl: num("#sp-lsl"), usl: num("#sp-usl") }); });
+    SP.comb = r;
+    renderCombinations();
+  }
+  function renderCombinations() {
+    const box = $("#sp-comb-out"); box.replaceChildren();
+    const r = SP.comb;
+    if (!r) return;
+    box.appendChild(el("p", "strong", t("sp.comb_overall", { n: r.n, mean: sig(r.mean, 5), sd: sig(r.sd, 4) })));
+    if (r.indices) box.appendChild(el("p", "", t("sp.comb_indices", { pp: r.indices.p === null ? "–" : sig(r.indices.p, 3), ppk: sig(r.indices.pk, 3) })));
+    const b = r.between;
+    if (b.anova) box.appendChild(el("p", b.anova.different ? "status-warning" : "status-ok", t("sp.comb_anova", { f: sig(b.anova.f, 4), df1: b.anova.df1, df2: b.anova.df2, p: pv(b.anova.p_value), result: t(b.anova.different ? "st.differs" : "st.same") })));
+    if (b.variances) box.appendChild(el("p", b.variances.different ? "status-warning" : "status-ok", t("sp.comb_var", { p: pv(b.variances.p_value), result: t(b.variances.different ? "st.differs" : "st.same") })));
+    if (b.eta_squared !== null) box.appendChild(el("p", "", t("sp.comb_eta", { eta: sig(100 * b.eta_squared, 3), pooled: sig(b.pooled_sd, 4) })));
+    const rows = r.combinations.map((c) => ({ c, cells: [r.factors.map((f) => c.labels[f]).join(" / "), c.n, sig(c.mean, 5), c.sd === null ? "–" : sig(c.sd, 4), sig(c.delta, 3), pv(c.p_value), c.ppk === null ? "–" : sig(c.ppk, 3), c.different ? t("sp.flag_different") : c.short ? t("sp.flag_short") : ""] }));
+    box.appendChild(el("h4", "", t("sp.comb_table")));
+    const wrap = el("div", "scroll"); wrap.appendChild(spTable(["sp.col_combination", "st.col_n", "st.col_mean", "st.col_sd", "sp.col_delta", "sp.col_p", "sp.col_ppk", "sp.col_flag"], rows, (x) => (x.c.different ? "status-alarm" : ""))); box.appendChild(wrap);
+    box.appendChild(el("p", "muted", t("sp.comb_bonferroni", { alpha: sig(r.bonferroni_alpha, 3) })));
+    r.by_factor.forEach((f) => {
+      box.appendChild(el("h4", "", t("sp.by_factor", { factor: f.factor === "subgroup" ? t("sp.factor_subgroup") : f.factor, p: pv(f.p_value) })));
+      if (!f.balanced) box.appendChild(el("p", "status-warning", t("sp.unbalanced")));
+      const w = el("div", "scroll"); w.appendChild(spTable(["sp.col_level", "st.col_n", "st.col_mean", "st.col_sd"], f.levels.map((l) => ({ cells: [l.level, l.n, l.mean === null ? "–" : sig(l.mean, 5), l.sd === null ? "–" : sig(l.sd, 4)] })))); box.appendChild(w);
+    });
+    const cov = r.coverage;
+    box.appendChild(el("p", cov.complete ? "status-ok" : "status-warning", t(cov.complete ? "sp.cov_ok" : "sp.cov_gaps", { combos: cov.combinations, expected: cov.expected_combinations, missing: cov.missing_count, short: cov.short_count, per: cov.per_combination, total: cov.total, min: cov.minimum_total })));
+  }
+  function parseGdt(text) {
+    const rows = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#")).map((l) => {
+      let parts = l.split(/[\s;]+/).filter(Boolean);
+      if (parts.length === 1 && l.includes(",")) parts = l.split(",").map((x) => x.trim());
+      return parts.map(Number);
+    });
+    if (!rows.length || rows.some((r) => r.length !== rows[0].length || r.some((v) => !Number.isFinite(v)))) return null;
+    if (rows[0].length === 2) return { xd: rows.map((r) => r[0]), xp: rows.map((r) => r[1]) };
+    if (rows[0].length === 3) return { xd: rows.map((r) => r[0]), dx: rows.map((r) => r[1]), dy: rows.map((r) => r[2]) };
+    return null;
+  }
+  async function runGdt() {
+    const data = parseGdt($("#gd-data").value);
+    if (!data) { showError({ code: "invalid_input", message: t("sp.gdt_bad_data"), params: { message: t("sp.gdt_bad_data") } }); return; }
+    const num = (id) => Number($(id).value);
+    const body = { ...data, kind: $("#gd-kind").value, requirement: $("#gd-req").value, lower: num("#gd-lower"), upper: num("#gd-upper"), position_tolerance: num("#gd-tp"),
+      distribution: $("#gd-dist").value, method: $("#gd-method").value, bootstrap_n: Math.max(0, Math.min(2000, Math.round(num("#gd-boot") || 0))) };
+    let r = null;
+    await guarded(async () => { r = await post("/api/gdt/clearance", body); });
+    SP.gdt = r;
+    const box = $("#gd-out"); box.replaceChildren();
+    if (!r) return;
+    const ix = r.indices, q = r.quantiles;
+    box.appendChild(el("p", "strong", t("sp.gdt_virtual", { vs: sig(r.virtual_size, 6), limit: sig(r.material_limit, 6) })));
+    if (r.sign_note) box.appendChild(el("p", "muted", t("sp.gdt_sign")));
+    box.appendChild(el("p", "", t("sp.gdt_quantiles", { c50: sig(q.c_50, 4), low: sig(q.c_0135, 4), high: sig(q.c_99865, 4), dist: r.distribution.name })));
+    box.appendChild(el("p", ix.pk >= 1 ? "status-ok" : "status-warning", t("sp.gdt_pk", { pk: sig(ix.pk, 3), method: ix.method, ppm: sig(ix.ppm, 3) })));
+    if (ix.ci_pk) box.appendChild(el("p", "", t("sp.gdt_ci", { lo: sig(ix.ci_pk[0], 3), hi: sig(ix.ci_pk[1], 3), conf: Math.round(100 * ix.ci_confidence) })));
+    const o = r.observed;
+    box.appendChild(el("p", o.negative ? "status-alarm" : "status-ok", t("sp.gdt_observed", { n: r.n, neg: o.negative, size: o.size_out, pos: o.position_out })));
+    r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("warn." + w.code, w))));
+  }
+  $("#sp-scope-btn").addEventListener("click", runScope);
+  $("#sp-comb-btn").addEventListener("click", runCombinations);
+  $("#gd-run").addEventListener("click", runGdt);
 
   // ---------------------------------------------------------------- external signatures
   const SG = { rid: null };
