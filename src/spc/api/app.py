@@ -40,12 +40,15 @@ from spc.plan.model import PlanError
 from spc.plan.service import PeopleService, PlanNameTaken, PlanNotFound, PlanService
 from spc.msa.service import MsaProblem, MsaService, SystemNameTaken, SystemNotFound
 from spc.api.errors import ApiError, error_response as _error
+from spc.core import chart_guide
+from spc.core.time_model import recommendation as tm_recommendation
 from spc.service.model_suggestion import suggest_for_dataset
 from spc.api.schemas import (
     MultistateBody,
     MultistageBody,
     MultistageScopeBody,
     GdtBody,
+    ChartGuideBody,
     MultivariateBody,
     NestedBody,
     TrendBody,
@@ -537,8 +540,15 @@ def create_app(
                            blocking=gate_result["blocking"])
         s, u = system["system"], gate_result["uncertainty"]
         pct = gate_result["checks"]["grr"].get("pct")
-        text = (f"Measurement system {s['name']}: resolution {s['resolution']}"
-                + (f", gauge R&R {pct:.1f} % of the {gate_result['checks']['grr']['basis'].replace('_', ' ')}, ndc {gate_result['checks']['grr']['ndc']:.1f}" if pct is not None else "")
+        attr = gate_result["checks"]["attribute"]
+        if s.get("kind") == "attribute":
+            w = attr.get("worst") or {}
+            head = (f"Measurement system {s['name']} (attribute)"
+                    + (f": effectiveness {w['effectiveness']:.0f} %, miss rate {w['miss']:.1f} %, false alarm rate {w['false_alarm']:.1f} %" if w else ""))
+        else:
+            head = (f"Measurement system {s['name']}: resolution {s['resolution']}"
+                    + (f", gauge R&R {pct:.1f} % of the {gate_result['checks']['grr']['basis'].replace('_', ' ')}, ndc {gate_result['checks']['grr']['ndc']:.1f}" if pct is not None else ""))
+        text = (head
                 + f". MSA gate: {gate_result['status']}"
                 + (f" (waived: {', '.join(gate_result['waived'])})" if gate_result["waived"] else "")
                 + (f" (remarks: {', '.join(gate_result['remarks'])})" if gate_result["remarks"] else "") + ".")
@@ -698,6 +708,22 @@ def create_app(
         """A suggestion for the time-dependent distribution model (draft 9.4) with its evidence. The person decides."""
         try:
             return suggest_for_dataset(store.get(key), body.subgroup_size, body.hints)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/chart-guide")
+    def chart_guide_step(body: ChartGuideBody):
+        """The control chart selection guide (draft figure 10-5): the next question for the answers so far, or the charts."""
+        try:
+            return chart_guide.next_step(body.answers)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.get("/api/time-models/{model}/recommendation")
+    def time_model_recommendation(model: str):
+        """Charts, sample size and sampling frequency for a time-dependent model (draft table 10-2, an example of the draft)."""
+        try:
+            return tm_recommendation(model)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 

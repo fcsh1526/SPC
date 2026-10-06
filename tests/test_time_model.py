@@ -141,3 +141,47 @@ def test_the_api_suggests_and_the_analysis_result_stays_unchanged(env=None):
     assert c.post("/api/datasets/nope/time-model", json={}).status_code == 404
     analysis = c.post(f"/api/datasets/{key}/analyze", json={"stage": "preliminary", "lsl": -10, "usl": 20}).json()
     assert "time_model" not in analysis and "time_model_suggestion" not in analysis  # stored reports are reproduced from the result: it must not change
+
+
+# ------------------------------------------------------------------ table 10-2 and the risk groups of 10.4
+
+def test_the_recommendation_is_table_10_2_of_the_draft():
+    expected = {  # model: analysis chart, SPC chart, sample size, frequency (draft table 10-2, one column for the whole group C)
+        "A1": ("shewhart", "shewhart", "smaller", "lower"), "A2": ("pearson", "pearson", "smaller", "lower"), "B": ("pearson", "shewhart", "bigger", "lower"),
+        "C": ("extended", "acceptance", "smaller", "higher"), "D": ("extended", "acceptance", "bigger", "higher"),
+    }
+    from spc.core.time_model import MODELS, recommendation
+
+    for model in MODELS:
+        r = recommendation(model)
+        group = "C" if model.startswith("C") else model
+        assert (r["analysis"]["chart"], r["spc"]["chart"], r["sample_size"], r["frequency"]) == expected[group], model
+        assert r["example"] is True
+    assert recommendation("C1") == {**recommendation("C4"), "model": "C1"}
+
+
+def test_the_recommendation_says_what_the_program_offers_and_when_a_model_is_not_in_control():
+    from spc.core.time_model import recommendation
+
+    a1, b, c3 = recommendation("A1"), recommendation("B"), recommendation("C3")
+    assert a1["analysis"]["analysis"] is True and a1["spc"]["monitor"] == ["xbar-s", "xbar-r", "median-r", "imr"] and "statistical_control" in a1["notes"]
+    assert b["analysis"]["monitor"] == ["pearson"] and b["analysis"]["analysis"] is False  # a Pearson chart exists as a monitor, not as the analysis chart of a study
+    assert "extended_also_fits" in b["notes"] and "b_variation_hard_to_adjust" in b["notes"]  # 10.3.5.3 names B; 10.4: variation cannot be readjusted easily
+    assert c3["spc"]["monitor"] == ["acc-xbar", "acc-median", "acc-x"] and "not_statistical_control" in c3["notes"]
+    import pytest
+
+    with pytest.raises(ValueError):
+        recommendation("E")
+
+
+def test_the_api_gives_the_recommendation_and_the_suggestion_carries_it():
+    from tests.conftest import logged_in_client, make_app
+    from tests.test_api import csv_text, upload
+
+    client = logged_in_client(make_app())
+    r = client.get("/api/time-models/C3/recommendation")
+    assert r.status_code == 200 and r.json()["sample_size"] == "smaller" and r.json()["frequency"] == "higher"
+    assert client.get("/api/time-models/Z/recommendation").status_code == 400
+    ds = upload(client, csv_text(k=30, n=5, seed=3)).json()
+    out = client.post(f"/api/datasets/{ds['id']}/time-model", json={}).json()
+    assert out["model"] is not None and out["recommendation"]["model"] == out["model"]

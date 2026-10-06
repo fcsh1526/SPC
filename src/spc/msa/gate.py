@@ -8,6 +8,9 @@ The draft assumes a capable and stable measurement process (1, 6.3) and asks for
   validity    the latest gauge R&R is not older than the validity time (12 months)
   stability   repeated measurements of a reference show no signal and are not older than the check interval (when required)
 
+A system of the kind `attribute` (go / no-go) has the checks `attribute` (the latest attribute agreement study is capable, `spc.core.msa_attribute`) and
+`validity` (that study is not older than the validity time); the checks of a variable system do not apply to it, and the other way round.
+
 Result of a check: pass, warn (conditional), fail, missing (no evidence), not_done (optional), not_needed, or waived (recorded with
 a reason by an engineer: it passes and stays flagged). The gate is `block` when a check failed or is missing without a waiver,
 `conditional` when only remarks are left, `pass` otherwise. A blocked gate refuses; a conditional one is allowed and flagged.
@@ -20,13 +23,17 @@ from datetime import date, timedelta
 from typing import Any, Mapping
 
 from spc.core import msa
+from spc.core import msa_attribute
 
 POLICY_DEFAULTS: dict[str, Any] = {
     "validity_months": 12, "stability_months": 6, "resolution_share_max": 0.05, "grr_pass": 10.0, "grr_conditional": 30.0, "ndc_min": 5.0,
     "cg_min": 1.33, "require_stability": True, "k": 2.0, "guard_band_risk": 0.05, "u_cal": 0.0,
+    **{f"attr_{k}": v for k, v in msa_attribute.POLICY_DEFAULTS.items()},
 }
-CHECKS = ("resolution", "grr", "type1", "validity", "stability")
-STUDY_KINDS = ("type1", "grr", "stability")
+CHECKS = ("resolution", "grr", "type1", "validity", "stability", "attribute")
+STUDY_KINDS = ("type1", "grr", "stability", "attribute")
+SYSTEM_KINDS = ("variable", "attribute")
+STUDY_KINDS_OF = {"variable": ("type1", "grr", "stability"), "attribute": ("attribute",)}
 
 
 def add_months(d: date, months: int) -> date:
@@ -56,7 +63,13 @@ def validate_policy(data: Mapping | None) -> dict:
     if not p["grr_pass"] < p["grr_conditional"]:
         raise ValueError("policy: the limit for capable must be below the limit for conditional")
     p["require_stability"] = bool(p["require_stability"])
+    attr = msa_attribute.validate_policy({k[5:]: v for k, v in p.items() if k.startswith("attr_")})
+    p.update({f"attr_{k}": v for k, v in attr.items()})
     return p
+
+
+def attribute_policy(policy: Mapping) -> dict:
+    return {k[5:]: v for k, v in policy.items() if k.startswith("attr_")}
 
 
 def uncertainty(system: Mapping) -> dict | None:
@@ -73,6 +86,8 @@ def evaluate(system: Mapping, today: date | None = None) -> dict[str, Any]:
     today = today or date.today()
     pol, tol, res = system["policy"], system.get("tolerance"), system.get("resolution")
     checks: dict[str, dict] = {}
+    if system.get("kind", "variable") == "attribute":
+        return _evaluate_attribute(system, today)
     # resolution
     if not tol or not res:
         checks["resolution"] = {"result": "missing", "reason": "no_tolerance_or_resolution"}
@@ -105,6 +120,27 @@ def evaluate(system: Mapping, today: date | None = None) -> dict[str, Any]:
             ok = s["verdict"] == "pass" and until >= today
             checks["stability"] = {"result": "pass" if ok else "fail", "study": s["id"], "signals": s["result"]["n_signals"], "until": until.isoformat(),
                                    "reason": None if ok else ("signals" if s["verdict"] != "pass" else "expired")}
+    checks["attribute"] = {"result": "not_needed", "reason": "other_kind"}
+    return _finish(system, checks, today)
+
+
+def _evaluate_attribute(system: Mapping, today: date) -> dict[str, Any]:
+    pol = system["policy"]
+    other = {"result": "not_needed", "reason": "other_kind"}
+    checks: dict[str, dict] = {k: dict(other) for k in ("resolution", "grr", "type1", "stability")}
+    a = latest(system, "attribute")
+    if a is None:
+        checks["attribute"] = {"result": "missing", "reason": "no_study"}
+        checks["validity"] = {"result": "missing", "reason": "no_study"}
+    else:
+        r = a["result"]
+        checks["attribute"] = {"result": {"pass": "pass", "conditional": "warn", "fail": "fail"}[a["verdict"]], "study": a["id"], "checks": r["checks"], "worst": r["worst"]}
+        until = add_months(date.fromisoformat(a["date"]), pol["validity_months"])
+        checks["validity"] = {"result": "pass" if until >= today else "fail", "until": until.isoformat(), "study": a["id"]}
+    return _finish(system, checks, today)
+
+
+def _finish(system: Mapping, checks: dict[str, dict], today: date) -> dict[str, Any]:
     waivers = system.get("waivers", {})
     for key, c in checks.items():
         c["waiver"] = waivers.get(key) if c["result"] in ("warn", "fail", "missing") else None

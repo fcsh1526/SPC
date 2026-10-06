@@ -159,6 +159,7 @@
     if (name === "validation") loadValidation();
     if (name === "equipment") loadEquipment();
     if (name === "special") loadSpecial();
+    if (name === "tools" && !$("#guide-question").children.length && !$("#guide-result").children.length) guideStep();
     if (name === "roles") loadRoles();
     if (name === "admin") loadAdmin();
     if (name === "password") renderPasswordPanel();
@@ -454,6 +455,34 @@
     return body;
   }
   // ---- suggestion of the time-dependent model (draft 9.4): evidence and a button to take it over, the person decides
+  // ---- table 10-2 of the draft: charts, sample size and frequency for a time-dependent model (an example of the draft; the person decides)
+  const REC_CACHE = {};
+  async function modelRecommendation(model) {
+    if (!REC_CACHE[model]) REC_CACHE[model] = await api(`/api/time-models/${model}/recommendation`);
+    return REC_CACHE[model];
+  }
+  function recommendationBlock(r) {
+    const box = el("div", "rec-box");
+    box.appendChild(el("p", "strong", t("tm.rec_title", { model: r.model })));
+    const chartLine = (label, c) => {
+      const where = [c.monitor.length ? t("tm.rec_as_monitor", { kinds: c.monitor.map((k) => t("analysis.chart_" + k)).join(", ") }) : "", c.analysis ? t("tm.rec_as_analysis") : t("tm.rec_not_analysis")].filter(Boolean).join("; ");
+      return el("li", "", `${label}: ${t("tm.chart_" + c.chart)} (${where})`);
+    };
+    const ul = el("ul");
+    ul.appendChild(chartLine(t("tm.rec_analysis"), r.analysis));
+    ul.appendChild(chartLine(t("tm.rec_spc"), r.spc));
+    ul.appendChild(el("li", "", t("tm.rec_sampling", { size: t("tm.size_" + r.sample_size), freq: t("tm.freq_" + r.frequency) })));
+    box.appendChild(ul);
+    r.notes.forEach((n) => box.appendChild(el("p", "muted", t("tm.recnote_" + n))));
+    box.appendChild(el("p", "muted", t("tm.rec_example")));
+    return box;
+  }
+  async function showModelRecommendation() {
+    const box = $("#a-model-rec"); box.replaceChildren();
+    const m = $("#a-model").value;
+    if (!m) return;
+    try { box.appendChild(recommendationBlock(await modelRecommendation(m))); } catch (e) { /* the hint is optional: the analysis does not depend on it */ }
+  }
   async function suggestModel() {
     const hints = {};
     $$("#a-model-assist input[data-hint]").forEach((i) => { if (i.checked) hints[i.dataset.hint] = true; });
@@ -550,9 +579,10 @@
     if (r.alternatives.length) card.appendChild(el("p", "", t("tm.alternatives", { list: r.alternatives.map((a) => `${t("analysis.model_" + a.model)} (${t("tm.when_" + a.when)})`).join("; ") })));
     r.hints.forEach((h) => card.appendChild(el("p", h.agrees ? "muted" : "status-warning", t(h.agrees ? "tm.hint_agrees" : "tm.hint_disagrees", { hint: t("tm.hint_" + h.hint), models: h.models.join(", ") }))));
     card.appendChild(el("p", "muted", t(r.in_statistical_control ? "tm.implication_control" : "tm.implication_no_control")));
+    if (r.recommendation) card.appendChild(recommendationBlock(r.recommendation));
     const use = el("button", "primary", t("tm.use", { model: r.model }));
     use.type = "button";
-    use.addEventListener("click", () => { $("#a-model").value = r.model; });
+    use.addEventListener("click", () => { $("#a-model").value = r.model; showModelRecommendation(); });
     card.appendChild(use);
     box.appendChild(card);
   }
@@ -1888,19 +1918,22 @@
     if (c.share !== undefined) { p.share = sig(c.share * 100, 3); p.limit = sig(c.limit * 100, 3); }
     if (c.pct !== undefined) p.pct = sig(c.pct, 3), p.ndc = sig(c.ndc, 3), p.basis = t("msa.basis_" + c.basis);
     if (c.cg !== undefined) p.cg = sig(c.cg, 3), p.cgk = sig(c.cgk, 3);
+    if (c.worst) { p.eff = sig(c.worst.effectiveness, 3); p.miss = sig(c.worst.miss, 3); p.fa = sig(c.worst.false_alarm, 3); p.kappa = c.worst.kappa === null ? "–" : sig(c.worst.kappa, 3); }
     const reason = c.reason ? `.${c.reason}` : "";
-    const k = `msa.res.${key}.${c.result}${reason}`;
-    return k in state.msgs || k in state.fallback ? t(k, p) : t(`msa.res.${key}.${c.result}`, p);
+    const attrSystem = MS.view && MS.view.system.kind === "attribute";
+    const k = attrSystem && key === "validity" ? `msa.res.validity_attr.${c.result}` : `msa.res.${key}.${c.result}${reason}`;
+    return k in state.msgs || k in state.fallback ? t(k, p) : t(`msa.res.${attrSystem && key === "validity" ? "validity_attr" : key}.${c.result}`, p);
   }
   function renderMsa() {
     const { system: s, gate: g } = MS.view;
     $("#ms-title").textContent = s.name;
-    $("#ms-sub").textContent = t("msa.sub", { characteristic: s.characteristic || "–", unit: s.unit || "–", resolution: s.resolution ?? "–", tolerance: s.tolerance ?? "–", rev: s.revision });
+    $("#ms-sub").textContent = s.kind === "attribute" ? t("msa.sub_attribute", { characteristic: s.characteristic || "–", rev: s.revision }) : t("msa.sub", { characteristic: s.characteristic || "–", unit: s.unit || "–", resolution: s.resolution ?? "–", tolerance: s.tolerance ?? "–", rev: s.revision });
     $("#ms-status").textContent = t("msa.status_" + g.status); $("#ms-status").className = "strong " + GATE_CLASS[g.status];
     const edit = canEditStudy();
     const table = $("#ms-checks"); table.replaceChildren();
     const head = el("tr"); ["msa.col_check", "msa.col_result", "msa.col_waiver"].forEach((k) => cell(head, t(k), "th")); table.appendChild(head);
     Object.entries(g.checks).forEach(([key, c]) => {
+      if (c.reason === "other_kind") return;  // this check belongs to the other kind of system
       const tr = el("tr");
       cell(tr, t("msa.check_" + key));
       const r = cell(tr, `${t("msa.eff_" + c.effective)}: ${checkText(key, c)}`); r.className = CHECK_CLASS[c.effective] || "";
@@ -1935,29 +1968,84 @@
     });
     $("#ms-add-card").hidden = !edit;
     $("#ms-edit").hidden = !edit;
+    renderAttributeDetail();
     syncStudyForm();
+  }
+  function pct(rate) { return rate.pct === null ? "–" : sig(rate.pct, 3); }
+  function renderAttributeDetail() {  // the newest attribute study that counts: the figures behind the verdict
+    const box = $("#ms-attr-detail"); box.replaceChildren();
+    const x = MS.view.system.studies.filter((s) => s.kind === "attribute" && !s.voided && s.result).slice(-1)[0];
+    if (!x) return;
+    const r = x.result;
+    box.appendChild(el("h4", "", t("msa.attr_detail", { id: x.id })));
+    const rows = r.appraisers.map((name) => {
+      const a = r.against_reference[name], w = r.within[name];
+      return [name, `${pct(a.effectiveness)} (${pct({ pct: a.effectiveness.ci[0] })}–${pct({ pct: a.effectiveness.ci[1] })})`, `${pct(a.miss)} (${a.miss.k}/${a.miss.n})`, `${pct(a.false_alarm)} (${a.false_alarm.k}/${a.false_alarm.n})`,
+        a.kappa === null ? "–" : sig(a.kappa, 3), pct(w.agree), w.kappa === null ? "–" : sig(w.kappa, 3)];
+    });
+    const table = el("table", "grid"), head = el("tr");
+    ["msa.attr_appraiser", "msa.attr_effectiveness", "msa.attr_miss", "msa.attr_false_alarm", "msa.attr_kappa_ref", "msa.attr_within", "msa.attr_within_kappa"].forEach((k) => cell(head, t(k), "th"));
+    table.appendChild(head);
+    rows.forEach((row) => { const tr = el("tr"); row.forEach((v) => cell(tr, String(v))); table.appendChild(tr); });
+    const w = el("div", "scroll"); w.appendChild(table); box.appendChild(w);
+    box.appendChild(el("p", "", t("msa.attr_between", { all: pct(r.between.agree), kappas: Object.entries(r.between.kappa).map(([k, v]) => `${k}: ${v === null ? "–" : sig(v, 3)}`).join(", "), system: pct(r.system.right) })));
+    r.warnings.forEach((wn) => box.appendChild(el("p", "status-warning", t("msa.warn_" + wn.code, wn))));
+    box.appendChild(el("p", "muted", t("msa.attr_note")));
   }
   function studySummary(x) {
     const r = x.result;
+    if (x.kind === "attribute") return t("msa.sum_attribute", { parts: r.parts, appraisers: r.appraisers.length, trials: r.trials, eff: sig(r.worst.effectiveness, 3), miss: sig(r.worst.miss, 3), fa: sig(r.worst.false_alarm, 3), kappa: r.worst.kappa === null ? "–" : sig(r.worst.kappa, 3) });
     if (x.kind === "grr") return t("msa.sum_grr", { pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis), ndc: sig(r.ndc, 3), ev: sig(r.sigma.ev, 3), av: sig(r.sigma.av, 3), n: `${r.parts}×${r.operators}×${r.trials}` });
     if (x.kind === "type1") return t("msa.sum_type1", { cg: sig(r.cg, 3), cgk: sig(r.cgk, 3), bias: sig(r.bias, 3), n: r.n });
     return t("msa.sum_stability", { n: r.n, signals: r.n_signals });
   }
   function syncStudyForm() {
+    const attrSystem = MS.view && MS.view.system.kind === "attribute";
+    $$("#mss-kind option").forEach((o) => { const attr = o.value === "attribute"; o.hidden = o.disabled = attr !== attrSystem; });
+    if ($("#mss-kind").selectedOptions[0].disabled) $("#mss-kind").value = attrSystem ? "attribute" : "grr";
     const kind = $("#mss-kind").value;
     $("#mss-ref-label").hidden = kind !== "type1";
     $("#mss-data-label").textContent = t("msa.data_" + kind);
     if (!$("#mss-date").value) $("#mss-date").value = new Date().toISOString().slice(0, 10);
   }
+  const ACCEPT_WORDS = new Set(["1", "ok", "good", "accept", "accepted", "pass", "go", "g", "y", "yes", "合格", "良", "通過", "接受"]);
+  const REJECT_WORDS = new Set(["0", "ng", "bad", "reject", "rejected", "fail", "nogo", "no-go", "n", "no", "不合格", "不良", "不通過", "拒絕"]);
+  function toBit(word) {
+    const w = String(word).trim().toLowerCase();
+    if (ACCEPT_WORDS.has(w)) return 1;
+    if (REJECT_WORDS.has(w)) return 0;
+    throw new Error(t("msa.attr_bad_word", { word }));
+  }
+  function readAttributeTable(text) {  // header: ref A:1 A:2 A:3 B:1 ... ; one part per line; ok/ng, 1/0, accept/reject
+    const rows = lines(text).map((l) => l.split(/[\s;,]+/).filter(Boolean));
+    if (rows.length < 2) throw new Error(t("msa.attr_bad_table"));
+    const header = rows[0];
+    if (!["ref", "reference", "標準"].includes(header[0].toLowerCase()) || header.length < 3) throw new Error(t("msa.attr_bad_table"));
+    const cols = header.slice(1).map((h) => { const m = h.match(/^(.+?)[:#.](\d+)$/); if (!m) throw new Error(t("msa.attr_bad_header", { name: h })); return { name: m[1], trial: Number(m[2]) }; });
+    const ratings = {};
+    cols.forEach((c) => { (ratings[c.name] = ratings[c.name] || {})[c.trial] = []; });
+    const reference = [];
+    rows.slice(1).forEach((row) => {
+      if (row.length !== header.length) throw new Error(t("msa.attr_bad_table"));
+      reference.push(toBit(row[0]));
+      cols.forEach((c, i) => ratings[c.name][c.trial].push(toBit(row[i + 1])));
+    });
+    const out = {};
+    Object.entries(ratings).forEach(([name, trials]) => { out[name] = Object.keys(trials).map(Number).sort((a, b) => a - b).map((k) => trials[k]); });
+    return { ratings: out, reference };
+  }
   function readStudyInput() {
     const kind = $("#mss-kind").value, text = $("#mss-data").value;
+    if (kind === "attribute") return readAttributeTable(text);
     if (kind === "grr") return { data: lines(text).map((row) => row.split(";").map(numbers)) };
     if (kind === "type1") return { reference: Number($("#mss-reference").value), values: numbers(text) };
     return { values: numbers(text) };
   }
   async function addMsaStudy() {
+    let input;
+    try { input = readStudyInput(); } catch (e) { return showError({ code: "invalid_input", message: e.message, params: { message: e.message } }); }
     await guarded(async () => {
-      MS.view = await post(`/api/msa/${MS.view.system.id}/studies`, { kind: $("#mss-kind").value, date: $("#mss-date").value, note: $("#mss-note").value, input: readStudyInput() });
+      MS.view = await post(`/api/msa/${MS.view.system.id}/studies`, { kind: $("#mss-kind").value, date: $("#mss-date").value, note: $("#mss-note").value, input });
       $("#mss-data").value = ""; $("#mss-note").value = "";
     });
     renderMsa();
@@ -1975,18 +2063,27 @@
   }
   function openMsaEditor(view) {
     MS.editing = view ? view.system.id : "new";
-    const s = view ? view.system : { name: "", description: "", characteristic: "", unit: "", resolution: null, tolerance: null, policy: DEFAULT_MSA_POLICY };
+    const s = view ? view.system : { name: "", kind: "variable", description: "", characteristic: "", unit: "", resolution: null, tolerance: null, policy: DEFAULT_MSA_POLICY };
+    $("#mse-kind").value = s.kind || "variable";
+    $("#mse-kind").disabled = !!(view && view.system.studies.length);  // the kind cannot change once there are studies
     $("#ms-editor-title").textContent = view ? t("msa.edit_title", { name: s.name }) : t("msa.new");
     ["name", "description", "characteristic", "unit"].forEach((k) => { $("#mse-" + k).value = s[k] || ""; });
     $("#mse-resolution").value = s.resolution ?? ""; $("#mse-tolerance").value = s.tolerance ?? "";
-    Object.entries(s.policy).forEach(([k, v]) => {
+    Object.entries({ ...DEFAULT_MSA_POLICY, ...s.policy }).forEach(([k, v]) => {
       const e = $("#msp-" + k);
       if (!e) return;
       if (e.type === "checkbox") e.checked = !!v; else e.value = POLICY_PCT.includes(k) ? v * 100 : v;
     });
+    syncMsaEditorKind();
     showMsaView("#ms-editor");
   }
-  const DEFAULT_MSA_POLICY = { validity_months: 12, stability_months: 6, resolution_share_max: 0.05, grr_pass: 10, grr_conditional: 30, ndc_min: 5, cg_min: 1.33, require_stability: true, k: 2, guard_band_risk: 0.05, u_cal: 0 };
+  function syncMsaEditorKind() {  // the fields of a variable system and those of an attribute system
+    const attr = $("#mse-kind").value === "attribute";
+    $$("#ms-editor .msa-var").forEach((e) => { e.hidden = attr; });
+    $$("#ms-editor .msa-attr").forEach((e) => { e.hidden = !attr; });
+  }
+  const DEFAULT_MSA_POLICY = { validity_months: 12, stability_months: 6, resolution_share_max: 0.05, grr_pass: 10, grr_conditional: 30, ndc_min: 5, cg_min: 1.33, require_stability: true, k: 2, guard_band_risk: 0.05, u_cal: 0,
+    attr_eff_pass: 90, attr_eff_conditional: 80, attr_miss_pass: 2, attr_miss_conditional: 5, attr_fa_pass: 5, attr_fa_conditional: 10, attr_kappa_pass: 0.75, attr_kappa_conditional: 0.4 };
   function readMsaEditor() {
     const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
     const policy = {};
@@ -1994,7 +2091,7 @@
       const e = $("#msp-" + k);
       policy[k] = e.type === "checkbox" ? e.checked : POLICY_PCT.includes(k) ? Number(e.value) / 100 : Number(e.value);
     });
-    return { name: $("#mse-name").value, description: $("#mse-description").value, characteristic: $("#mse-characteristic").value, unit: $("#mse-unit").value,
+    return { name: $("#mse-name").value, kind: $("#mse-kind").value, description: $("#mse-description").value, characteristic: $("#mse-characteristic").value, unit: $("#mse-unit").value,
       resolution: num("#mse-resolution"), tolerance: num("#mse-tolerance"), policy };
   }
   async function saveMsa() {
@@ -2012,6 +2109,7 @@
     $("#ms-back").addEventListener("click", () => { MS.view = null; loadMsa(); });
     $("#ms-edit").addEventListener("click", () => openMsaEditor(MS.view));
     $("#mss-kind").addEventListener("change", syncStudyForm);
+    $("#mse-kind").addEventListener("change", syncMsaEditorKind);
     $("#mss-save").addEventListener("click", addMsaStudy);
   }
 
@@ -2784,6 +2882,7 @@
     box.appendChild(el("p", o.negative ? "status-alarm" : "status-ok", t("sp.gdt_observed", { n: r.n, neg: o.negative, size: o.size_out, pos: o.position_out })));
     r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("warn." + w.code, w))));
   }
+  $("#a-model").addEventListener("change", showModelRecommendation);
   $("#sp-scope-btn").addEventListener("click", runScope);
   $("#sp-comb-btn").addEventListener("click", runCombinations);
   $("#gd-run").addEventListener("click", runGdt);
@@ -2857,6 +2956,39 @@
   $("#mv-run").addEventListener("click", runMultivariate);
   $("#nest-run").addEventListener("click", runNested);
   $("#tr-run").addEventListener("click", runTrend);
+
+  // ---------------------------------------------------------------- control chart selection guide (draft figure 10-5)
+  const GUIDE = { answers: [] };
+  async function guideStep() {
+    let r = null;
+    await guarded(async () => { r = await post("/api/chart-guide", { answers: GUIDE.answers }); });
+    if (!r) return;
+    const q = $("#guide-question"), res = $("#guide-result"), path = $("#guide-path");
+    q.replaceChildren(); res.replaceChildren();
+    const trail = [];
+    let step = "start";
+    GUIDE.answers.forEach((a) => { trail.push(`${t("guide.q_" + step)} → ${t("guide.o_" + step + "_" + a)}`); step = GUIDE_NEXT[step] ? GUIDE_NEXT[step][a] || step : step; });
+    path.textContent = trail.join(" · ");
+    $("#guide-back").disabled = !GUIDE.answers.length;
+    if (r.step) {
+      q.appendChild(el("p", "strong", t("guide.q_" + r.step)));
+      r.options.forEach((o) => {
+        const b = el("button", "", t("guide.o_" + r.step + "_" + o));
+        b.type = "button"; b.dataset.option = o;
+        b.addEventListener("click", () => { GUIDE.answers.push(o); guideStep(); });
+        q.appendChild(b);
+      });
+      return;
+    }
+    res.appendChild(el("p", "strong", t("guide.result")));
+    const rows = r.result.charts.map((c) => ({ cells: [t("guide.chart_" + c.chart), c.ref, t("guide.support_" + c.support), c.kinds.map((k) => t("analysis.chart_" + k)).join(", ") || "–", c.support === "full" ? "" : t("guide.chartnote_" + c.chart)] }));
+    const w = el("div", "scroll"); w.appendChild(spTable(["guide.col_chart", "guide.col_ref", "guide.col_support", "guide.col_monitor", "guide.col_note"], rows, null)); res.appendChild(w);
+    r.result.notes.forEach((n) => res.appendChild(el("p", "muted", t("guide.note_" + n))));
+    res.appendChild(el("p", "muted", t("guide.after")));
+  }
+  const GUIDE_NEXT = { start: { attribute: "attribute_kind", variable: "subgroup" }, attribute_kind: { defectives: "defectives_constant", defects: "defects_constant" }, subgroup: { one: "homogeneous" }, homogeneous: { no: "special" } };
+  $("#guide-back").addEventListener("click", () => { GUIDE.answers.pop(); guideStep(); });
+  $("#guide-restart").addEventListener("click", () => { GUIDE.answers = []; guideStep(); });
 
   // ---------------------------------------------------------------- external signatures
   const SG = { rid: null };

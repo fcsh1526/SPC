@@ -1727,7 +1727,12 @@ def test_multivariate_nested_and_trend_in_the_browser(server, browser, tmp_path)
     page.click("#to-analysis") if page.locator("#to-analysis").is_visible() else page.click("nav.tabs button[data-tab=analysis]")
     page.fill("#a-lsl", "8")
     page.fill("#a-usl", "13")
+    page.select_option("#a-model", "C3")
+    expect(page.locator("#a-model-rec")).to_contain_text("Table 10-2 of the draft for model C3", timeout=20000)
+    expect(page.locator("#a-model-rec")).to_contain_text("acceptance chart")
+    expect(page.locator("#a-model-rec")).to_contain_text("Sample size: smaller; sampling frequency: higher")
     page.select_option("#a-model", "A1")
+    expect(page.locator("#a-model-rec")).to_contain_text("Shewhart chart", timeout=20000)
     page.select_option("#a-class", "major")
     page.click("#run-btn")
     expect(page.locator("#rp-special-wrap")).to_be_visible(timeout=40000)
@@ -1739,5 +1744,80 @@ def test_multivariate_nested_and_trend_in_the_browser(server, browser, tmp_path)
     href = page.locator("#rp-open").get_attribute("href")
     html = page.request.get(server.rstrip("/") + href).text()
     assert "Annex E" in html and "regression control chart" in html and "nested variance components" in html and "Multi-stage machining: scope" not in html
+    assert problems == []
+    ctx.close()
+
+
+def test_chart_selection_guide_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=tools]")
+    expect(page.locator("#guide-question")).to_contain_text("What kind of data is charted?", timeout=20000)
+    page.click("#guide-question button[data-option=variable]")
+    page.click("#guide-question button[data-option=one]")
+    page.click("#guide-question button[data-option=no]")
+    expect(page.locator("#guide-question")).to_contain_text("Which situation", timeout=20000)
+    page.click("#guide-question button[data-option=rare_events]")
+    expect(page.locator("#guide-result")).to_contain_text("G chart", timeout=20000)
+    expect(page.locator("#guide-result")).to_contain_text("not available")
+    page.click("#guide-back")
+    page.click("#guide-question button[data-option=autocorrelation]")
+    expect(page.locator("#guide-result")).to_contain_text("CUSUM chart", timeout=20000)
+    expect(page.locator("#guide-result")).to_contain_text("Regression control chart")
+    page.click("#guide-restart")
+    page.click("#guide-question button[data-option=attribute]")
+    page.click("#guide-question button[data-option=defects]")
+    page.click("#guide-question button[data-option=yes]")
+    expect(page.locator("#guide-result")).to_contain_text("c chart", timeout=20000)
+    expect(page.locator("#guide-result")).to_contain_text("Laney")
+    assert problems == []
+    ctx.close()
+
+
+def test_attribute_measurement_system_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=msa]")
+    page.click("#ms-new")
+    page.fill("#mse-name", "Visual check of the thread")
+    page.select_option("#mse-kind", "attribute")
+    expect(page.locator("#mse-resolution")).to_be_hidden()  # the fields of a variable system are not shown
+    page.click("#ms-editor summary")  # the criteria of the gate are in a closed section
+    expect(page.locator("#msp-attr_eff_pass")).to_be_visible()
+    expect(page.locator("#msp-grr_pass")).to_be_hidden()
+    page.click("#mse-save")
+    expect(page.locator("#ms-title")).to_have_text("Visual check of the thread", timeout=20000)
+    expect(page.locator("#ms-status")).to_contain_text("blocked")
+    expect(page.locator("#ms-checks")).to_contain_text("Attribute agreement study")
+    expect(page.locator("#ms-checks")).not_to_contain_text("Gauge R&R")  # a check of the other kind of system
+    expect(page.locator("#mss-kind")).to_have_value("attribute")
+
+    def table(miss_parts=()):
+        rows = ["ref A:1 A:2 A:3 B:1 B:2 B:3"]
+        for i in range(40):
+            ref = "ok" if i < 20 else "ng"
+            a = "ok" if i in miss_parts else ref
+            rows.append(f"{ref} {a} {a} {a} {ref} {ref} {ref}")
+        return "\n".join(rows)
+
+    page.fill("#mss-data", table().replace("ok", "maybe", 1))
+    page.click("#mss-save")
+    expect(page.locator("#errors")).to_contain_text("is not a decision", timeout=20000)
+    page.fill("#mss-data", table())
+    page.click("#mss-save")
+    expect(page.locator("#ms-status")).to_contain_text("open", timeout=20000)
+    expect(page.locator("#ms-checks")).to_contain_text("capable")
+    expect(page.locator("#ms-attr-detail")).to_contain_text("Attribute study 1")
+    expect(page.locator("#ms-attr-detail")).to_contain_text("Only 40 parts")
     assert problems == []
     ctx.close()

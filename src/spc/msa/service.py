@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from spc.auth.audit import Audit
 from spc.core import msa
+from spc.core import msa_attribute
 from spc.db.database import Database
 from spc.db.stores import now_iso
 from spc.msa import gate
@@ -47,7 +48,7 @@ def _positive(v, name):
 
 
 def validate_record(data: dict) -> dict:
-    allowed = {"name", "description", "characteristic", "unit", "resolution", "tolerance", "policy"}
+    allowed = {"name", "kind", "description", "characteristic", "unit", "resolution", "tolerance", "policy"}
     if set(data) - allowed:
         raise ValueError(f"unknown setting(s): {sorted(set(data) - allowed)}")
     def text(key, limit, required=False):
@@ -56,7 +57,10 @@ def validate_record(data: dict) -> dict:
         if not isinstance(v, str) or len(v) > limit or (required and not v.strip()):
             raise ValueError(f"{key} must be a text of at most {limit} characters" + (" and must not be empty" if required else ""))
         return v.strip()
-    return {"name": text("name", 100, True), "description": text("description", 1000), "characteristic": text("characteristic", 200), "unit": text("unit", 40),
+    kind = data.get("kind") or "variable"
+    if kind not in gate.SYSTEM_KINDS:
+        raise ValueError(f"kind must be one of {gate.SYSTEM_KINDS}")
+    return {"name": text("name", 100, True), "kind": kind, "description": text("description", 1000), "characteristic": text("characteristic", 200), "unit": text("unit", 40),
             "resolution": _positive(data.get("resolution"), "resolution"), "tolerance": _positive(data.get("tolerance"), "tolerance"),
             "policy": gate.validate_policy(data.get("policy"))}
 
@@ -106,6 +110,8 @@ class MsaService:
             r = msa.type1(inp["values"], inp["reference"], tol, pol["cg_min"])
         elif study["kind"] == "grr":
             r = msa.grr(inp["data"], tol, pol["grr_pass"], pol["grr_conditional"], pol["ndc_min"])
+        elif study["kind"] == "attribute":
+            r = msa_attribute.evaluate(inp["ratings"], inp["reference"], gate.attribute_policy(pol))
         else:
             r = msa.stability(inp["values"])
         return {**study, "result": r, "verdict": r["verdict"]}
@@ -131,7 +137,7 @@ class MsaService:
         for r in self.db.all("SELECT * FROM msa_systems ORDER BY name COLLATE NOCASE"):
             s = self.with_results(self._row(r))
             g = gate.evaluate(s, self.today())
-            out.append({"id": s["id"], "name": s["name"], "characteristic": s["characteristic"], "unit": s["unit"], "status": g["status"],
+            out.append({"id": s["id"], "name": s["name"], "kind": s.get("kind", "variable"), "characteristic": s["characteristic"], "unit": s["unit"], "status": g["status"],
                         "blocking": g["blocking"], "remarks": g["remarks"], "waived": g["waived"], "U": (g["uncertainty"] or {}).get("U")})
         return out
 
@@ -154,9 +160,11 @@ class MsaService:
     def update(self, system_id: int, record_in: dict, user) -> dict:
         system = self.get(system_id)
         try:
-            record = validate_record(record_in)
+            record = validate_record({"kind": system.get("kind", "variable"), **record_in})
         except ValueError as exc:
             raise MsaProblem("invalid_input", str(exc)) from None
+        if record["kind"] != system.get("kind", "variable") and system["studies"]:
+            raise MsaProblem("invalid_input", "the kind of a system cannot change once it has studies")
         with self.db.tx():
             if self.db.one("SELECT id FROM msa_systems WHERE name = ? AND id != ?", (record["name"], system_id)):
                 raise SystemNameTaken(record["name"])
@@ -167,8 +175,8 @@ class MsaService:
 
     def add_study(self, system_id: int, kind: str, day: str, note: str, input_: dict, user) -> dict:
         system = self.get(system_id)
-        if kind not in gate.STUDY_KINDS:
-            raise MsaProblem("invalid_input", f"kind must be one of {gate.STUDY_KINDS}")
+        if kind not in gate.STUDY_KINDS_OF[system.get("kind", "variable")]:
+            raise MsaProblem("invalid_input", f"a system of the kind {system.get('kind', 'variable')!r} takes studies of the kinds {gate.STUDY_KINDS_OF[system.get('kind', 'variable')]}")
         try:
             day = _check_date(day)
         except ValueError as exc:
@@ -179,7 +187,7 @@ class MsaService:
             raise MsaProblem("invalid_input", "the note is longer than 2000 characters")
         if not isinstance(input_, dict):
             raise MsaProblem("invalid_input", "input must be an object")
-        need = {"type1": {"values", "reference"}, "grr": {"data"}, "stability": {"values"}}[kind]
+        need = {"type1": {"values", "reference"}, "grr": {"data"}, "stability": {"values"}, "attribute": {"ratings", "reference"}}[kind]
         if set(input_) != need:
             raise MsaProblem("invalid_input", f"the input of a {kind} study holds {sorted(need)}")
         study = {"id": system["next_study"], "kind": kind, "date": day, "by": _label(user), "at": now_iso(), "note": note.strip(), "input": input_}

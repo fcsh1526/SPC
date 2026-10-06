@@ -22,4 +22,5 @@ def suggest_for_dataset(ds: Dataset, subgroup_size: int | None = None, hints: di
                 "min_values": tm.MIN_VALUES}
     out = tm.suggest(sg.matrix, blocks=blocks, hints=hints)
     out["groups"]["dropped"] = len(sg.dropped)
+    out["recommendation"] = tm.recommendation(out["model"])  # table 10-2 for the suggested model; the person decides
     return out

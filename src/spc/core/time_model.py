@@ -223,3 +223,44 @@ def suggest(matrix, *, blocks: bool = False, hints: Mapping[str, bool] | None = 
     return {"model": model, "reasons": reasons, "confidence": confidence, "alternatives": alternatives, "borderline": border, "evidence": ev,
             "groups": {"k": k, "n": n, "blocks": blocks}, "in_statistical_control": model in ("A1", "A2"), "hints": notes,
             "alpha": alpha}
+
+
+# ---------------------------------------------------------------------------- charts and sampling by model (draft table 10-2, 10.4, 10.3.5.3)
+# Table 10-2 is an example in the draft ("also other control charts may be used"); it has one column for the whole group C.
+# Chart names: shewhart, pearson, extended (Shewhart chart with extended limits), acceptance.
+CHART_TABLE: dict[str, dict[str, Any]] = {
+    "A1": {"analysis": "shewhart", "spc": "shewhart", "size": "smaller", "frequency": "lower"},
+    "A2": {"analysis": "pearson", "spc": "pearson", "size": "smaller", "frequency": "lower"},
+    "B": {"analysis": "pearson", "spc": "shewhart", "size": "bigger", "frequency": "lower"},
+    "C": {"analysis": "extended", "spc": "acceptance", "size": "smaller", "frequency": "higher"},
+    "D": {"analysis": "extended", "spc": "acceptance", "size": "bigger", "frequency": "higher"},
+}
+# what each chart is in this program: the monitor kinds, and whether the analysis chart of a study has it
+CHART_KINDS = {
+    "shewhart": {"monitor": ["xbar-s", "xbar-r", "median-r", "imr"], "analysis": True},
+    "pearson": {"monitor": ["pearson"], "analysis": False},
+    "extended": {"monitor": ["ext-xbar"], "analysis": False},
+    "acceptance": {"monitor": ["acc-xbar", "acc-median", "acc-x"], "analysis": False},
+}
+MODEL_GROUP = {"A1": "A1", "A2": "A2", "B": "B", "C1": "C", "C2": "C", "C3": "C", "C4": "C", "D": "D"}
+# 10.3.5.3: extended limits suit C1, C2, C3, B and D (the table has them as the analysis chart of C and D; for B it names Pearson)
+EXTENDED_FOR = ("B", "C1", "C2", "C3", "D")
+
+
+def recommendation(model: str) -> dict[str, Any]:
+    """The example of table 10-2 for a model: analysis chart, SPC chart, sample size and sampling frequency, with what the program offers."""
+    if model not in MODELS:
+        raise ValueError(f"model must be one of {MODELS}")
+    row = CHART_TABLE[MODEL_GROUP[model]]
+    charts = {key: {"chart": row[key], **CHART_KINDS[row[key]]} for key in ("analysis", "spc")}
+    notes = []
+    if model in EXTENDED_FOR and row["analysis"] != "extended":
+        notes.append("extended_also_fits")
+    if model == "B":
+        notes.append("b_variation_hard_to_adjust")  # draft 10.4: variation cannot be readjusted easily, so a bigger sample is advised
+    if model in ("A1", "A2"):
+        notes.append("statistical_control")
+    else:
+        notes.append("not_statistical_control")
+    return {"model": model, "group": MODEL_GROUP[model], "analysis": charts["analysis"], "spc": charts["spc"], "sample_size": row["size"], "frequency": row["frequency"],
+            "notes": notes, "example": True}

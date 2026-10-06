@@ -136,6 +136,12 @@ class TrendBody(Strict):
     method: Literal["G", "Z"] = "G"
 
 
+class ChartGuideBody(Strict):
+    """The answers given so far in the control chart selection guide (draft figure 10-5), in order."""
+
+    answers: list[str] = Field(default_factory=list, max_length=6)
+
+
 class GdtBody(Strict):
     """Assembly clearance of a size feature with a position tolerance under MMR/LMR, draft 8.5.3. Give xp, or dx and dy."""
 
