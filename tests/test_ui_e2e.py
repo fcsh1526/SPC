@@ -1764,7 +1764,7 @@ def test_chart_selection_guide_in_the_browser(server, browser):
     expect(page.locator("#guide-question")).to_contain_text("Which situation", timeout=20000)
     page.click("#guide-question button[data-option=rare_events]")
     expect(page.locator("#guide-result")).to_contain_text("G chart", timeout=20000)
-    expect(page.locator("#guide-result")).to_contain_text("not available")
+    expect(page.locator("#guide-result")).to_contain_text("tool: Charts for special situations")
     page.click("#guide-back")
     page.click("#guide-question button[data-option=autocorrelation]")
     expect(page.locator("#guide-result")).to_contain_text("CUSUM chart", timeout=20000)
@@ -1819,5 +1819,53 @@ def test_attribute_measurement_system_in_the_browser(server, browser):
     expect(page.locator("#ms-checks")).to_contain_text("capable")
     expect(page.locator("#ms-attr-detail")).to_contain_text("Attribute study 1")
     expect(page.locator("#ms-attr-detail")).to_contain_text("Only 40 parts")
+    assert problems == []
+    ctx.close()
+
+
+def test_charts_for_special_situations_and_the_laney_option_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    rng = np.random.default_rng(31)
+    sizes = rng.integers(100, 200, 40)
+    counts = rng.binomial(sizes, np.clip(0.05 + rng.normal(0, 0.02, 40), 0.002, 0.5))
+
+    page.click("nav.tabs button[data-tab=tools]")
+    page.select_option("#sc-kind", "laney-p")
+    page.fill("#sc-data", "\n".join(f"{c} {n}" for c, n in zip(counts, sizes)))
+    page.click("#sc-run")
+    expect(page.locator("#sc-out")).to_contain_text("Sigma of the z values", timeout=20000)
+    expect(page.locator("#sc-out svg")).to_be_visible()
+    expect(page.locator("#sc-out")).to_contain_text("dashed lines")
+    page.select_option("#sc-kind", "g")
+    expect(page.locator("#sc-reference")).to_be_visible()
+    page.fill("#sc-data", "\n".join(str(int(v)) for v in rng.geometric(0.03, 50) - 1))
+    page.click("#sc-run")
+    expect(page.locator("#sc-out")).to_contain_text("p of the geometric distribution", timeout=20000)
+    page.select_option("#sc-kind", "delta-target")
+    page.fill("#sc-data", "A 10.1\nB 25.0")
+    page.fill("#sc-targets", "A 10")
+    page.click("#sc-run")
+    expect(page.locator("#errors")).to_contain_text("at least 20", timeout=20000)
+    page.select_option("#sc-kind", "uwma")
+    page.fill("#sc-data", "1\nx")
+    page.click("#sc-run")
+    expect(page.locator("#errors")).to_contain_text("is not a number", timeout=20000)
+
+    # the Laney option of a monitor: only for p and u, and then only reference counts as the source
+    page.click("nav.tabs button[data-tab=monitor]")
+    page.click("#mon-new")
+    page.select_option("#me-kind", "xbar-s")
+    expect(page.locator("#me-laney-label")).to_be_hidden()
+    page.select_option("#me-kind", "p")
+    expect(page.locator("#me-laney-label")).to_be_visible()
+    page.check("#me-laney")
+    expect(page.locator("#me-src-type option[value=rate]")).to_be_hidden()
+    assert page.locator("#me-src-type").input_value() == "counts"
     assert problems == []
     ctx.close()

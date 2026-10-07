@@ -1273,3 +1273,55 @@ def test_an_mcusum_monitor_end_to_end(env):
     for bad in ({"type": "parameters", "mu": [10, 5], "cov": cov, "k": 0.0}, {"type": "parameters", "mu": [10, 5], "cov": cov, "k": "x"}):
         assert c["eng"].post("/api/monitors", json={"config": {"name": f"m{bad['k']}", "characteristic": "x", "kind": "mcusum"}, "source": bad}).status_code == 400
     assert c["eng"].get(f"/api/monitors/{mid}/ongoing").status_code in (400, 409)
+
+
+# ------------------------------------------------------------------ Laney p' and u' limits for the count monitors (draft figure 10-5)
+
+def laney_reference(seed=21, k=60):
+    rng = np.random.default_rng(seed)
+    sizes = [int(v) for v in rng.integers(100, 200, k)]
+    p = np.clip(0.05 + rng.normal(0, 0.02, k), 0.002, 0.5)  # the rate wanders: overdispersion
+    return [int(v) for v in rng.binomial(sizes, p)], sizes
+
+
+def test_a_laney_p_monitor_has_sigma_z_limits_from_the_reference_counts(env):
+    from spc.core.charts import special as sc
+
+    app, c = env
+    counts, sizes = laney_reference()
+    mid = make_monitor(c["eng"], {"name": "Visual rejects", "characteristic": "rejects", "kind": "p", "n": 150, "laney": True}, {"type": "counts", "counts": counts, "sizes": sizes})
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    expected = sc.laney("p", counts, sizes)["parameters"]
+    assert lim["sigma_z"] == pytest.approx(expected["sigma_z"]) and lim["sigma_z"] > 1.3 and lim["center"] == pytest.approx(expected["center"])
+    # the limits of one point follow its own sample size and equal the chart of the tool for the same reference
+    ack(c["oper"], mid)
+    r = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [8, 150]})
+    assert r.status_code == 200 and r.json()["status"] in ("ok", "warning")
+    pt = c["view"].get(f"/api/monitors/{mid}").json()["points"][0]
+    sigma = (lim["center"] * (1 - lim["center"]) / 150) ** 0.5
+    assert pt["band"]["ucl"] == pytest.approx(lim["center"] + 3.0000000000000004 * lim["sigma_z"] * sigma, rel=1e-9) and pt["band"]["lcl"] >= 0
+    assert c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [60, 150]}).json()["status"] == "alarm"  # 40 %: a real jump
+    # the plain chart has narrower limits for the same reference
+    plain = make_monitor(c["eng"], {"name": "Plain rejects", "characteristic": "rejects", "kind": "p", "n": 150}, {"type": "counts", "counts": counts, "sizes": sizes})
+    plain_lim = c["eng"].get(f"/api/monitors/{plain}").json()["limits"]["location"]
+    assert plain_lim["ucl"] < c["eng"].get(f"/api/monitors/{mid}").json()["limits"]["location"]["ucl"]
+
+
+def test_a_laney_u_monitor_and_the_rules_of_the_option(env):
+    app, c = env
+    rng = np.random.default_rng(22)
+    sizes = [float(v) for v in rng.integers(5, 15, 50)]
+    counts = [int(v) for v in rng.poisson(np.array(sizes) * np.clip(1.0 + rng.normal(0, 0.4, 50), 0.1, 3))]
+    mid = make_monitor(c["eng"], {"name": "Paint flaws", "characteristic": "flaws", "kind": "u", "n": 10, "laney": True}, {"type": "counts", "counts": counts, "sizes": sizes})
+    assert c["eng"].get(f"/api/monitors/{mid}").json()["limits"]["sigma_z"] > 1.0
+    base = {"name": "x", "characteristic": "x"}
+    for bad_config, source in (({"kind": "c", "laney": True}, {"type": "counts", "counts": counts}), ({"kind": "xbar-s", "laney": True}, {"type": "parameters", "mu": 1, "sigma": 1}),
+                               ({"kind": "p", "n": 50, "laney": "yes"}, {"type": "rate", "rate": 0.05})):
+        assert c["eng"].post("/api/monitors", json={"config": {**base, **bad_config}, "source": source}).status_code == 400
+    r = c["eng"].post("/api/monitors", json={"config": {**base, "kind": "p", "n": 50, "laney": True}, "source": {"type": "rate", "rate": 0.05}})
+    assert r.status_code == 400 and "sigma_z" in r.text  # a known rate cannot give sigma_z
+    # the option belongs to the shape: it cannot be switched off later
+    view = c["eng"].get(f"/api/monitors/{mid}").json()["monitor"]
+    cfg = {k: view[k] for k in ("name", "characteristic", "kind", "n", "alpha", "warn_alpha", "rules", "specs", "ocap", "require_ack", "active", "process", "unit", "line")}
+    assert c["eng"].put(f"/api/monitors/{mid}", json={"config": {**cfg, "laney": False}}).status_code == 409
+    assert c["eng"].put(f"/api/monitors/{mid}", json={"config": {**cfg, "laney": True}}).status_code == 200

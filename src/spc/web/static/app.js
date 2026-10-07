@@ -1738,6 +1738,7 @@
       specs: {}, rules: { beyond_limits: true }, ocap: { default: {}, rules: {} }, require_ack: true, active: true };
     $("#mon-editor-title").textContent = monitor ? t("mon.edit_title", { name: m.name }) : t("mon.new");
     ["name", "process", "characteristic", "unit", "line"].forEach((k) => { $("#me-" + k).value = m[k] || ""; });
+    $("#me-laney").checked = !!m.laney; $("#me-laney").disabled = !!monitor;
     $("#me-kind").value = m.kind; $("#me-n").value = m.n; $("#me-alpha").value = m.alpha && Math.abs(m.alpha - 0.01) < 1e-12 ? "0.01" : "";
     $("#me-warn").value = m.warn_alpha ?? "";
     ["#me-kind", "#me-n", "#me-alpha", "#me-warn"].forEach((s) => { $(s).disabled = !!monitor; });  // the shape is fixed once there are limits
@@ -1769,6 +1770,9 @@
     if (!$("#me-kind").disabled) $("#me-n").disabled = kind === "imr" || kind === "c" || kind === "acc-x" || kind === "pre" || kind === "zmr" || kind === "ar";
     if (kind === "multistream") $("#me-n-label").textContent = t("mon.f_streams");
     if (isVec(kind)) $("#me-n-label").textContent = t("mon.f_m");
+    const laneyKind = kind === "p" || kind === "u";  // Laney limits: for the p and u charts, from reference counts
+    $("#me-laney-label").hidden = !laneyKind;
+    if (!laneyKind) $("#me-laney").checked = false;
     const tol = isTol(kind);
     $("#me-warn-label").hidden = tol || SEQ_KINDS.includes(kind) || isVec(kind) || SHAPE_KINDS.includes(kind) || kind === "multistream"; if (tol || SEQ_KINDS.includes(kind) || isVec(kind) || SHAPE_KINDS.includes(kind) || kind === "multistream") $("#me-warn").value = "";
     $("#me-accept-box").hidden = !ACC_KINDS.includes(kind);
@@ -1787,7 +1791,7 @@
     $$(".mon-r-normal").forEach((e) => { e.hidden = count || tol || seq || vec || shape; if (count || tol || seq || vec || shape) $("input", e).checked = false; });
     $$("#me-ocap tr[data-key]").forEach((tr) => { tr.hidden = tr.dataset.key !== "default" && !rulesOf(kind).includes(tr.dataset.key); });
     // sources that fit the kind
-    const okSources = SOURCES(kind);
+    const okSources = $("#me-laney").checked && laneyKind ? ["counts"] : SOURCES(kind);
     Array.from($("#me-src-type").options).forEach((o) => { o.hidden = o.disabled = !okSources.includes(o.value); });
     if ($("#me-src-type").selectedOptions[0] && $("#me-src-type").selectedOptions[0].disabled) $("#me-src-type").value = okSources[0];
     syncEditorSource();
@@ -1817,6 +1821,7 @@
       rules: readRules("mon-r-"), ocap: readOcap(), require_ack: $("#me-ack").checked, active: $("#me-active").checked,
     };
     if (editing) config.alpha = editing.alpha; else if ($("#me-alpha").value) config.alpha = Number($("#me-alpha").value);
+    if (editing ? editing.laney : $("#me-laney").checked && (config.kind === "p" || config.kind === "u")) config.laney = true;
     config.specs = { ...config.specs, msa_id: $("#me-msa").value ? Number($("#me-msa").value) : null };
     return config;
   }
@@ -1849,6 +1854,7 @@
     $("#me-cancel").addEventListener("click", () => showMonitorView(M.id && M.editing !== "new" ? "#mon-detail" : "#mon-list-view"));
     $("#me-save").addEventListener("click", saveMonitor);
     $("#me-kind").addEventListener("change", syncKindFields);
+    $("#me-laney").addEventListener("change", syncKindFields);
     $("#me-src-type").addEventListener("change", syncEditorSource);
     $("#mon-back").addEventListener("click", () => { M.id = null; M.view = null; loadMonitors(); });
     $("#mon-edit").addEventListener("click", () => openMonitorEditor(M.view.monitor));
@@ -2957,6 +2963,63 @@
   $("#nest-run").addEventListener("click", runNested);
   $("#tr-run").addEventListener("click", runTrend);
 
+  // ---------------------------------------------------------------- charts for special situations (draft figure 10-5)
+  const SC_KINDS = { "laney-p": "pairs", "laney-u": "pairs", "z-p": "pairs", "z-u": "pairs", g: "values", t: "values", percentile: "values", uwma: "values", "delta-target": "labelled", "levey-jennings": "labelled" };
+  function syncSpecialChartForm() {
+    const kind = $("#sc-kind").value;
+    $("#sc-data-label").textContent = t("sc.data_" + SC_KINDS[kind]);
+    $("#sc-span-label").hidden = kind !== "uwma";
+    $("#sc-targets-label").hidden = kind !== "delta-target";
+    $("#sc-reference").parentElement.hidden = kind === "z-p" || kind === "z-u" || kind === "levey-jennings";
+  }
+  function readSpecialChart() {
+    const kind = $("#sc-kind").value, mode = SC_KINDS[kind];
+    const rows = numRows($("#sc-data").value);
+    const num = (v) => { const x = Number(v); if (!Number.isFinite(x)) throw new Error(t("sc.bad_number", { value: v })); return x; };
+    const body = { kind };
+    const alpha = $("#sc-alpha").value; if (alpha) body.alpha = Number(alpha);
+    const ref = $("#sc-reference").value.trim(); if (ref && !$("#sc-reference").parentElement.hidden) body.reference_n = Number(ref);
+    if (mode === "pairs") {
+      if (rows.some((r) => r.length !== 2)) throw new Error(t("sc.bad_rows", { n: 2 }));
+      body.counts = rows.map((r) => num(r[0])); body.sizes = rows.map((r) => num(r[1]));
+    } else if (mode === "values") {
+      if (rows.some((r) => r.length !== 1)) throw new Error(t("sc.bad_rows", { n: 1 }));
+      body.values = rows.map((r) => num(r[0]));
+      if (kind === "uwma") body.span = Number($("#sc-span").value);
+    } else {
+      if (rows.some((r) => r.length !== 2)) throw new Error(t("sc.bad_rows", { n: 2 }));
+      body.labels = rows.map((r) => r[0]); body.values = rows.map((r) => num(r[1]));
+      if (kind === "delta-target") {
+        body.targets = {};
+        numRows($("#sc-targets").value).forEach((r) => { if (r.length !== 2) throw new Error(t("sc.bad_targets")); body.targets[r[0]] = num(r[1]); });
+      }
+    }
+    return body;
+  }
+  async function runSpecialChart() {
+    let body;
+    try { body = readSpecialChart(); } catch (e) { return showError({ code: "invalid_input", message: e.message, params: { message: e.message } }); }
+    let r = null;
+    await guarded(async () => { r = await post("/api/charts/special", body); });
+    const box = $("#sc-out"); box.replaceChildren();
+    if (!r) return;
+    r.charts.forEach((c) => {
+      const title = c.stream ? t("sc.chart_title_stream", { kind: t("sc.kind_" + body.kind), stream: c.stream }) : t("sc.kind_" + body.kind);
+      box.appendChild(el("h4", "", `${title} · ${c.alarms.length ? t("result.alarms", { n: c.alarms.length }) : t("result.no_alarms")}`));
+      const holder = el("div", "chart"); box.appendChild(holder);
+      drawChart(holder, { values: c.values, labels: c.labels, center: c.center, lcl: c.lcl, ucl: c.ucl, alarms: c.alarms, wlcl: c.plain_lcl ?? null, wucl: c.plain_ucl ?? null }, title);
+      if (c.plain_lcl) box.appendChild(el("p", "muted", t("sc.plain_note")));
+    });
+    const params = el("ul");
+    Object.entries(r.parameters).forEach(([k, v]) => params.appendChild(el("li", "", `${t("sc.p_" + k)}: ${typeof v === "number" ? sig(v, 5) : k === "dispersion" ? t("sc.dispersion_" + v) : String(v)}`)));
+    box.appendChild(params);
+    r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("sc.warn_" + w.code, w))));
+    box.appendChild(el("p", "muted", t("sc.note_" + body.kind)));
+  }
+  $("#sc-kind").addEventListener("change", syncSpecialChartForm);
+  $("#sc-run").addEventListener("click", runSpecialChart);
+  syncSpecialChartForm();
+
   // ---------------------------------------------------------------- control chart selection guide (draft figure 10-5)
   const GUIDE = { answers: [] };
   async function guideStep() {
@@ -2981,7 +3044,7 @@
       return;
     }
     res.appendChild(el("p", "strong", t("guide.result")));
-    const rows = r.result.charts.map((c) => ({ cells: [t("guide.chart_" + c.chart), c.ref, t("guide.support_" + c.support), c.kinds.map((k) => t("analysis.chart_" + k)).join(", ") || "–", c.support === "full" ? "" : t("guide.chartnote_" + c.chart)] }));
+    const rows = r.result.charts.map((c) => ({ cells: [t("guide.chart_" + c.chart), c.ref, t("guide.support_" + c.support), [...c.kinds.map((k) => t("analysis.chart_" + k)), ...(c.tool ? [t("guide.tool_" + c.tool)] : [])].join(", ") || "–", c.support === "full" ? "" : t("guide.chartnote_" + c.chart)] }));
     const w = el("div", "scroll"); w.appendChild(spTable(["guide.col_chart", "guide.col_ref", "guide.col_support", "guide.col_monitor", "guide.col_note"], rows, null)); res.appendChild(w);
     r.result.notes.forEach((n) => res.appendChild(el("p", "muted", t("guide.note_" + n))));
     res.appendChild(el("p", "muted", t("guide.after")));

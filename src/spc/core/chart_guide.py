@@ -5,7 +5,8 @@ The tree follows the figure: attribute data (defectives: p, np; defects: c, u), 
 The figure also names charts that this program does not have; the result says so (`support`), it never hides them:
     full     the chart is available as a monitor (`kinds`) and/or in the tools
     partial  something close is available; `note` says what
-    none     not available in this program
+    none     not available in this program (at present every chart of the figure is at least partly there)
+A chart with `tool` is also in the tools of the program (an analysis chart of one series, not a monitor); `kinds` are the monitor kinds.
 
 A step is asked with `next_step(answers)`: `answers` is the list of values chosen so far. Texts are in the web files (i18n keys guide.*).
 """
@@ -24,25 +25,25 @@ CHARTS: dict[str, dict[str, Any]] = {
     "np": {"ref": "10.3.6.3", "kinds": ["np"], "support": "full", "tool": "attribute"},
     "c": {"ref": "10.3.6.5", "kinds": ["c"], "support": "full", "tool": "attribute"},
     "u": {"ref": "10.3.6.4", "kinds": ["u"], "support": "full", "tool": "attribute"},
-    "laney": {"ref": "10.3.2 (figure 10-5)", "kinds": [], "support": "none"},  # Laney p' and u' charts for over- and underdispersion
+    "laney": {"ref": "10.3.2 (figure 10-5)", "kinds": ["p", "u"], "support": "full", "tool": "special"},  # Laney p' and u': an option of the p and u monitors, and a chart of the tools
     "pre_control": {"ref": "10.3.2.7", "kinds": ["pre"], "support": "full"},
     "preliminary_acceptance": {"ref": "10.3.2.7", "kinds": ["acc-xbar", "acc-median", "acc-x"], "support": "full"},
     "acceptance": {"ref": "10.3.4", "kinds": ["acc-xbar", "acc-median", "acc-x"], "support": "full"},
     "shewhart_transformed": {"ref": "10.3.2.6", "kinds": [], "support": "partial"},  # transformations exist for capability indices, not for the charts
     "pearson": {"ref": "10.3.5.2", "kinds": ["pearson"], "support": "full"},
     "extended": {"ref": "10.3.5.3", "kinds": ["ext-xbar"], "support": "full"},
-    "percentile": {"ref": "10.3.2.6 (figure 10-5)", "kinds": [], "support": "none"},
-    "levey_jennings": {"ref": "10.3.2.1 (figure 10-5)", "kinds": ["multistream"], "support": "partial"},  # the program charts the mean over the streams and the worst stream
+    "percentile": {"ref": "10.3.2.6 (figure 10-5)", "kinds": [], "support": "full", "tool": "special"},
+    "levey_jennings": {"ref": "10.3.2.1 (figure 10-5)", "kinds": ["multistream"], "support": "full", "tool": "special"},  # one chart per stream in the tools; the multi-stream monitor charts the level and the worst stream
     "cusum": {"ref": "10.3.5.4", "kinds": ["cusum"], "support": "full"},
     "ewma": {"ref": "10.3.5.5", "kinds": ["ewma"], "support": "full"},
-    "uwma": {"ref": "10.3.2.5 (figure 10-5)", "kinds": ["ewma"], "support": "partial"},  # the EWMA chart is there, the uniformly weighted one is not
+    "uwma": {"ref": "10.3.2.5 (figure 10-5)", "kinds": ["ewma"], "support": "full", "tool": "special"},  # the uniformly weighted one is in the tools; the EWMA is also a monitor
     "ar_residual": {"ref": "10.3.2.6", "kinds": ["ar"], "support": "full"},
     "regression": {"ref": "10.3.2 (figure 10-5)", "kinds": [], "support": "partial", "tool": "trend"},  # the regression control chart of the Special cases tab is an analysis tool
     "zmr": {"ref": "10.3.2.9", "kinds": ["zmr"], "support": "full"},
-    "delta_target": {"ref": "10.3.2.9 (figure 10-5)", "kinds": ["zmr"], "support": "partial"},  # Z-MR standardises with target and standard deviation; plain delta to target is not offered
+    "delta_target": {"ref": "10.3.2.9 (figure 10-5)", "kinds": ["zmr"], "support": "full", "tool": "special"},  # differences from the target in the tools; the Z-MR monitor also divides by sigma
     "hotelling": {"ref": "10.3.2.8", "kinds": ["t2", "mewma", "mcusum"], "support": "full"},
-    "g_chart": {"ref": "10.3.2 (figure 10-5)", "kinds": [], "support": "none"},
-    "t_chart": {"ref": "10.3.2 (figure 10-5)", "kinds": [], "support": "none"},
+    "g_chart": {"ref": "10.3.2 (figure 10-5)", "kinds": [], "support": "full", "tool": "special"},
+    "t_chart": {"ref": "10.3.2 (figure 10-5)", "kinds": [], "support": "full", "tool": "special"},
 }
 
 # step id -> question key and options {value: next step id, or a result: list of chart ids and notes}

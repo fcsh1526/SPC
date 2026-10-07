@@ -41,6 +41,7 @@ from spc.plan.service import PeopleService, PlanNameTaken, PlanNotFound, PlanSer
 from spc.msa.service import MsaProblem, MsaService, SystemNameTaken, SystemNotFound
 from spc.api.errors import ApiError, error_response as _error
 from spc.core import chart_guide
+from spc.core.charts import special as special_charts
 from spc.core.time_model import recommendation as tm_recommendation
 from spc.service.model_suggestion import suggest_for_dataset
 from spc.api.schemas import (
@@ -49,6 +50,7 @@ from spc.api.schemas import (
     MultistageScopeBody,
     GdtBody,
     ChartGuideBody,
+    SpecialChartBody,
     MultivariateBody,
     NestedBody,
     TrendBody,
@@ -708,6 +710,31 @@ def create_app(
         """A suggestion for the time-dependent distribution model (draft 9.4) with its evidence. The person decides."""
         try:
             return suggest_for_dataset(store.get(key), body.subgroup_size, body.hints)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/charts/special")
+    def special_chart(body: SpecialChartBody):
+        """Laney, standardised, G, T, percentile, UWMA, delta-to-target and Levey-Jennings charts of one series (draft figure 10-5)."""
+        sc = special_charts
+        try:
+            if body.kind in ("laney-p", "laney-u"):
+                return sc.laney(body.kind[-1], body.counts or [], body.sizes or [], body.alpha, body.reference_n)
+            if body.kind in ("z-p", "z-u"):
+                return sc.z_chart(body.kind[-1], body.counts or [], body.sizes or [], body.alpha)
+            if body.kind == "g":
+                return sc.g_chart(body.values or [], body.alpha, body.reference_n)
+            if body.kind == "t":
+                return sc.t_chart(body.values or [], body.alpha, body.reference_n)
+            if body.kind == "percentile":
+                return sc.percentile_chart(body.values or [], body.alpha, body.reference_n)
+            if body.kind == "uwma":
+                if body.span is None:
+                    raise ValueError("the UWMA chart needs a span")
+                return sc.uwma_chart(body.values or [], body.span, body.alpha, body.reference_n)
+            if body.kind == "delta-target":
+                return sc.delta_target_chart(body.values or [], body.labels or [], body.targets or {}, body.alpha, body.reference_n)
+            return sc.levey_jennings(body.values or [], body.labels or [], body.alpha)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 

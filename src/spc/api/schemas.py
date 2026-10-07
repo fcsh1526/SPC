@@ -136,6 +136,21 @@ class TrendBody(Strict):
     method: Literal["G", "Z"] = "G"
 
 
+class SpecialChartBody(Strict):
+    """Charts of figure 10-5 beyond the plain Shewhart charts, for one series: counts and sizes (Laney, standardised), event gaps (G, T), values (percentile,
+    UWMA), values with products and targets (delta to target) or with streams (Levey-Jennings)."""
+
+    kind: Literal["laney-p", "laney-u", "z-p", "z-u", "g", "t", "percentile", "uwma", "delta-target", "levey-jennings"]
+    counts: list[float] | None = Field(default=None, max_length=100_000)
+    sizes: list[float] | None = Field(default=None, max_length=100_000)
+    values: list[float] | None = Field(default=None, max_length=100_000)
+    labels: list[str] | None = Field(default=None, max_length=100_000)  # the product or the stream of each value
+    targets: dict[str, float] | None = None
+    span: int | None = Field(default=None, ge=2, le=50)
+    alpha: float = Field(default=ALPHA_3SIGMA, gt=0, lt=0.5)
+    reference_n: int | None = Field(default=None, ge=2, le=100_000)
+
+
 class ChartGuideBody(Strict):
     """The answers given so far in the control chart selection guide (draft figure 10-5), in order."""
 

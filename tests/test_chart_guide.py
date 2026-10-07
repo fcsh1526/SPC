@@ -50,14 +50,13 @@ def test_every_path_ends_in_charts_and_the_result_says_what_the_program_has():
         for c in res["charts"]:
             seen.add(c["chart"])
             assert c["support"] in ("full", "partial", "none")
-            if c["support"] == "none":
-                assert not c["kinds"] and not c.get("tool")
             for kind in c["kinds"]:
                 assert kind in KINDS, (c["chart"], kind)  # every monitor kind the guide names exists in the program
             if c["support"] == "full":
                 assert c["kinds"] or c.get("tool"), c["chart"]
-    assert {c for c in seen if g.CHARTS[c]["support"] == "none"} == {"percentile", "g_chart", "t_chart"}
-    assert {c for c in g.CHARTS if g.CHARTS[c]["support"] == "none"} == {"laney", "percentile", "g_chart", "t_chart"}  # Laney is named by the note on overdispersion
+    assert not [c for c in g.CHARTS if g.CHARTS[c]["support"] == "none"]  # every chart that figure 10-5 names is at least partly in the program
+    assert {c for c in g.CHARTS if g.CHARTS[c]["support"] == "partial"} == {"shewhart_transformed", "regression"}
+    assert {"laney", "g_chart", "t_chart", "percentile"} <= {c for c in g.CHARTS if g.CHARTS[c].get("tool") == "special"}
 
 
 def test_bad_answers_are_refused():

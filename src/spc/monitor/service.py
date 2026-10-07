@@ -440,13 +440,15 @@ class MonitorService:
                 rate = source.get("rate")
                 if not isinstance(rate, (int, float)) or isinstance(rate, bool) or not math.isfinite(rate):
                     raise ValueError("the reference level must be a number")
+                if monitor.get("laney"):
+                    raise ValueError("a Laney chart needs reference counts: sigma_z comes from how the counts vary from sample to sample")
                 return attribute_limits(kind, n, alpha, warn, rate), {"type": "rate", "rate": rate}
             if typ == "counts":
                 counts, sizes = source.get("counts"), source.get("sizes")
                 if not isinstance(counts, list) or (sizes is not None and not isinstance(sizes, list)) or len(counts) > 10000 or not all(
                         isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in [*counts, *(sizes or [])]):
                     raise ValueError("counts and sizes must be lists of numbers")
-                return limits_from_counts(kind, n, alpha, warn, counts, sizes), {"type": "counts", "n_samples": len(counts)}
+                return limits_from_counts(kind, n, alpha, warn, counts, sizes, bool(monitor.get("laney"))), {"type": "counts", "n_samples": len(counts)}
             if typ == "points":
                 lo, hi = source.get("seq_from"), source.get("seq_to")
                 if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (lo, hi)) or lo > hi:
@@ -454,7 +456,7 @@ class MonitorService:
                 pts = [p for p in self.store.points(monitor["id"], limit=100000, since_seq=lo) if p["seq"] <= hi and p["valid"]]
                 counts = [p["values"][0] for p in pts]
                 sizes = [p["values"][1] for p in pts] if kind in ("p", "u") else None
-                return (limits_from_counts(kind, n, alpha, warn, counts, sizes),
+                return (limits_from_counts(kind, n, alpha, warn, counts, sizes, bool(monitor.get("laney"))),
                         {"type": "points", "seq_from": lo, "seq_to": hi, "n_points": len(pts)})
         except ValueError as exc:
             raise MonitorError("bad_source", str(exc)) from None
@@ -483,7 +485,7 @@ class MonitorService:
         except ValueError as exc:
             raise MonitorError("invalid_input", str(exc)) from None
         self._check_system(config)
-        if (config["kind"], config["n"]) != (old["kind"], old["n"]):
+        if (config["kind"], config["n"], bool(config.get("laney"))) != (old["kind"], old["n"], bool(old.get("laney"))):
             raise MonitorError("monitor_shape_locked", "the chart type and the subgroup size cannot change: make a new monitor", 409)
         if config["kind"] in TOLERANCE_KINDS and config["specs"] != {"msa_id": None, **old["specs"], "msa_id": config["specs"]["msa_id"],
                                                                   "controlled_stable": config["specs"]["controlled_stable"],

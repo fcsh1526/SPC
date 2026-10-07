@@ -109,7 +109,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
     """Check and normalise the configuration of a monitor. Raises ValueError that names the field."""
     d = dict(data)
     allowed = {"name", "process", "characteristic", "unit", "line", "kind", "n", "alpha", "warn_alpha", "rules", "specs",
-               "ocap", "require_ack", "active"}
+               "ocap", "require_ack", "active", "laney"}
     if set(d) - allowed:
         raise ValueError(f"unknown setting(s): {sorted(set(d) - allowed)}")
     out: dict[str, Any] = {"name": _text(d, "name", 100, required=True), "process": _text(d, "process", 200),
@@ -118,6 +118,13 @@ def validate_config(data: Mapping[str, Any]) -> dict:
     if d.get("kind") not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
     out["kind"] = d["kind"]
+    laney = d.get("laney", False)
+    if not isinstance(laney, bool):
+        raise ValueError("laney must be true or false")
+    if laney and d["kind"] not in ("p", "u"):
+        raise ValueError("the Laney option is for the p and u charts: it widens or narrows the limits by what the counts really vary")
+    if laney:
+        out["laney"] = True
     kind = d["kind"]
     n = d.get("n", 1 if kind in ("imr", "c", "acc-x", ZMR_KIND, AR_KIND, *SEQ_KINDS, *VECTOR_KINDS) else (2 if kind == PRE_KIND else None))
     if isinstance(n, bool) or not isinstance(n, int):
@@ -599,6 +606,16 @@ def band(kind: str, limits: Mapping, size: float | None = None) -> dict[str, flo
     s = n if kind in ("np", "c") else size
     cl = _center_in_plot_units(kind, n, limits["center"])
     out = {"cl": cl}
+    if limits.get("sigma_z"):  # Laney p' and u': normal limits with the standard deviation of one sample scaled by what the counts really vary
+        def laney_limits(alpha):
+            c = limits["center"]
+            sigma = math.sqrt(c * (1 - c) / s) if kind == "p" else math.sqrt(c / s)
+            u = u_quantile(alpha)
+            return max(c - u * limits["sigma_z"] * sigma, 0.0), (min(c + u * limits["sigma_z"] * sigma, 1.0) if kind == "p" else c + u * limits["sigma_z"] * sigma)
+        out.update(lcl=laney_limits(limits["alpha"])[0], ucl=laney_limits(limits["alpha"])[1])
+        if limits.get("warn_alpha"):
+            out.update(wlcl=laney_limits(limits["warn_alpha"])[0], wucl=laney_limits(limits["warn_alpha"])[1])
+        return out
     lo, hi = exact_limits(kind, limits["center"], s, limits["alpha"])
     out.update(lcl=lo, ucl=hi)
     if limits.get("warn_alpha"):
@@ -607,19 +624,24 @@ def band(kind: str, limits: Mapping, size: float | None = None) -> dict[str, flo
     return out
 
 
-def attribute_limits(kind: str, n: int, alpha: float, warn_alpha: float | None, center: float) -> dict:
-    """Fixed limits from a reference level: p-bar (p, np), counts per unit (c), nonconformities per unit (u)."""
+def attribute_limits(kind: str, n: int, alpha: float, warn_alpha: float | None, center: float, sigma_z: float | None = None) -> dict:
+    """Fixed limits from a reference level: p-bar (p, np), counts per unit (c), nonconformities per unit (u). `sigma_z` makes them Laney limits (p, u)."""
     if kind in ("p", "np") and not 0 < center < 1:
         raise ValueError("the reference proportion of nonconforming units must be between 0 and 1: a chart needs some nonconforming units")
     if kind in ("c", "u") and not center > 0:
         raise ValueError("the reference number of nonconformities must be positive: a chart needs some nonconformities")
     out = {"center": float(center), "n": n, "alpha": alpha, "warn_alpha": warn_alpha}
+    if sigma_z is not None:
+        if kind not in ("p", "u") or not sigma_z > 0:
+            raise ValueError("sigma_z belongs to the Laney p and u charts and must be positive")
+        out["sigma_z"] = float(sigma_z)
     out["location"] = band(kind, out, n)
     return out
 
 
-def limits_from_counts(kind: str, n: int, alpha: float, warn_alpha: float | None, counts, sizes=None) -> dict:
-    """Limits from reference samples: counts (and sample sizes for p and u). p-bar = total / total size."""
+def limits_from_counts(kind: str, n: int, alpha: float, warn_alpha: float | None, counts, sizes=None, laney: bool = False) -> dict:
+    """Limits from reference samples: counts (and sample sizes for p and u). p-bar = total / total size. With `laney` (p, u) the standard deviation of the z values
+    of the reference (average moving range / 1.128) scales the limits."""
     x = np.asarray(counts, dtype=float)
     if x.ndim != 1 or x.size < 20 or np.any(x < 0) or np.any(x != np.floor(x)):
         raise ValueError("the reference needs at least 20 samples with whole, non-negative counts")
@@ -636,7 +658,14 @@ def limits_from_counts(kind: str, n: int, alpha: float, warn_alpha: float | None
         center = float(x.sum() / (n * x.size))
     else:
         center = float(x.mean())
-    return attribute_limits(kind, n, alpha, warn_alpha, center)
+    sigma_z = None
+    if laney:
+        from spc.core.charts import special as sc
+
+        sigma_z = sc.sigma_z(sc.standardised(kind, x, z, alpha)["z"])
+        if not sigma_z > 0:
+            raise ValueError("the reference counts show no variation from sample to sample: sigma_z cannot be found")
+    return attribute_limits(kind, n, alpha, warn_alpha, center, sigma_z)
 
 
 def check_values(config: Mapping, values) -> list[float]:
