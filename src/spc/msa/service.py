@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 from spc.auth.audit import Audit
 from spc.core import msa_more
+from spc.core import iso22514_7 as iso_core
+from spc.msa import iso
 from spc.core import msa
 from spc.core import msa_attribute
 from spc.db.database import Database
@@ -117,6 +119,10 @@ class MsaService:
             r = msa_more.linearity(inp["reference"], inp["values"], inp.get("process_variation"))
         elif study["kind"] == "budget":
             r = msa_more.budget(inp["components"], tol, pol["k"], pol["budget_pass"], pol["budget_conditional"], inp.get("lsl"), inp.get("usl"))
+        elif study["kind"] == "iso_study":
+            r = iso.evaluate_iso(inp, tol, system.get("resolution"), pol)
+        elif study["kind"] in gate.ISO_ATTRIBUTE_KINDS:
+            r = iso.evaluate_attribute_iso(study["kind"], inp, pol)
         elif study["kind"] == "attribute":
             r = msa_attribute.evaluate(inp["ratings"], inp["reference"], gate.attribute_policy(pol))
         else:
@@ -131,6 +137,21 @@ class MsaService:
             except msa.MsaError as exc:  # a study whose data no longer fit (for example a tolerance removed): shown, not counted
                 studies.append({**s, "result": None, "verdict": "unusable", "error": str(exc), "voided": s.get("voided") or {"reason": "unusable"}})
         return {**system, "studies": studies}
+
+    def linearity_monitor(self, system_id: int, references: list, readings: list, epsilon: float = 0.05) -> dict:
+        """ISO 22514-7, 11.2: the readings of standards measured after the study, transformed with the regression function of the newest linearity study of the system."""
+        system = self.with_results(self.get(system_id))
+        items = [x for x in system["studies"] if x["kind"] == "iso_study" and not x.get("voided") and x.get("result")
+                 and (x["result"]["analyses"].get("linearity") or {}).get("method") == "anova"]
+        if not items:
+            raise MsaProblem("no_linearity_study", "the system has no ISO 22514-7 study with a linearity analysis of variance", 409)
+        study = max(items, key=lambda x: (x["date"], x["id"]))
+        lin = study["result"]["analyses"]["linearity"]
+        try:
+            out = iso_core.linearity_monitor(lin["beta0"], lin["beta1"], lin["residual_sd"], lin["n"] - 2, references, readings, epsilon)
+        except msa.MsaError as exc:
+            raise MsaProblem("invalid_input", str(exc)) from None
+        return {**out, "study": study["id"], "beta0": lin["beta0"], "beta1": lin["beta1"]}
 
     def gate(self, system_id: int) -> dict:
         return gate.evaluate(self.with_results(self.get(system_id)), self.today())
@@ -195,8 +216,9 @@ class MsaService:
         if not isinstance(input_, dict):
             raise MsaProblem("invalid_input", "input must be an object")
         need = {"type1": {"values", "reference"}, "grr": {"data"}, "grr_nested": {"data"}, "stability": {"values"}, "attribute": {"ratings", "reference"},
-                "linearity": {"values", "reference"}, "budget": {"components"}}[kind]
-        optional = {"linearity": {"process_variation"}, "budget": {"lsl", "usl"}}.get(kind, set())
+                "linearity": {"values", "reference"}, "budget": {"components"}, "iso_study": set(), "bowker": {"results"},
+                "uncertainty_range": {"reference", "results", "lower", "upper"}, "attribute_review": {"reference", "results", "lower", "upper"}}[kind]
+        optional = {"linearity": {"process_variation"}, "budget": {"lsl", "usl"}, "iso_study": set(iso.ISO_KEYS), "bowker": {"alpha"}, "attribute_review": {"q_mp"}}.get(kind, set())
         if not need <= set(input_) <= need | optional:
             raise MsaProblem("invalid_input", f"the input of a {kind} study holds {sorted(need)}" + (f" and may hold {sorted(optional)}" if optional else ""))
         study = {"id": system["next_study"], "kind": kind, "date": day, "by": _label(user), "at": now_iso(), "note": note.strip(), "input": input_}

@@ -2058,3 +2058,135 @@ def test_random_plan_and_audit_anchor_in_the_browser(server, browser):
     expect(page.locator("#errors")).to_contain_text("64 characters", timeout=20000)
     assert problems == []
     ctx.close()
+
+
+def test_iso_22514_7_studies_in_the_browser(server, browser):
+    from tests.test_iso22514_7 import A1_X, A1_Y, A4, FIG6, figure_6_results
+
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=msa]")
+    page.click("#ms-new")
+    page.fill("#mse-name", "Optical comparator")
+    page.fill("#mse-resolution", "0.005")
+    page.fill("#mse-tolerance", "9")
+    page.click("#mse-save")
+    expect(page.locator("#ms-title")).to_have_text("Optical comparator", timeout=20000)
+    expect(page.locator("#ms-checks")).to_contain_text("ISO 22514-7 study")
+
+    # the worked example of the standard (annex A)
+    page.select_option("#mss-kind", "iso_study")
+    expect(page.locator("#mss-iso")).to_be_visible()
+    expect(page.locator("#mss-data")).to_be_hidden()
+    page.fill("#mss-lower", "2")
+    page.fill("#mss-upper", "11")
+    page.fill("#isof-cal-u", "0.01")
+    page.fill("#isof-lin-data", "\n".join(f"{x} " + " ".join(str(v) for v in row) for x, row in zip(A1_X, A1_Y)))
+    page.fill("#isof-proc-data", "\n".join(" ; ".join(" ".join(str(v) for v in part) for part in op) for op in A4))
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("ISO 22514-7 study 1", timeout=20000)
+    expect(page.locator("#ms-more-detail")).to_contain_text("Q_MS = 3.71")
+    expect(page.locator("#ms-more-detail")).to_contain_text("Q_MP = 9.3 %")
+    expect(page.locator("#ms-more-detail")).to_contain_text("pooled with the repeatability")
+    expect(page.locator("#ms-checks")).to_contain_text("ISO 22514-7: Q_MP 9.3 %")
+    page.fill("#isof-lin-data", "2 3 4")
+    page.click("#mss-save")
+    expect(page.locator("#errors")).to_contain_text("at least 3 readings", timeout=20000)
+    for field in ("#mss-lower", "#mss-upper", "#isof-cal-u", "#isof-lin-data", "#isof-proc-data"):
+        page.fill(field, "")  # the fields of a failed study stay: the next study starts empty
+
+    # an attribute system: the uncertainty range of 12.3
+    page.click("#ms-back")
+    page.click("#ms-new")
+    page.fill("#mse-name", "Go/no-go gauge")
+    page.select_option("#mse-kind", "attribute")
+    page.click("#mse-save")
+    expect(page.locator("#ms-title")).to_have_text("Go/no-go gauge", timeout=20000)
+    expect(page.locator("#mss-kind option[value=uncertainty_range]")).to_be_attached()
+    page.select_option("#mss-kind", "uncertainty_range")
+    expect(page.locator("#mss-lower")).to_be_visible()
+    res = figure_6_results()
+    header = "ref " + " ".join(f"{op}:{t + 1}" for op in res for t in range(3))
+    rows = [header] + [f"{ref} " + " ".join("ok" if res[op][t][i] else "ng" for op in res for t in range(3)) for i, ref in enumerate(FIG6)]
+    page.fill("#mss-data", "\n".join(rows))
+    page.click("#mss-save")
+    expect(page.locator("#errors")).to_contain_text("lower and the upper", timeout=20000)
+    page.fill("#mss-lower", "0.45")
+    page.fill("#mss-upper", "0.55")
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("Uncertainty range, study 1", timeout=20000)
+    expect(page.locator("#ms-more-detail")).to_contain_text("Q_attr = 23.8 %")
+    expect(page.locator("#ms-checks")).to_contain_text("Uncertainty range Q_attr 23.8 %")
+    assert problems == []
+    ctx.close()
+
+
+def test_linearity_monitoring_in_the_browser(server, browser):
+    from tests.test_iso22514_7 import A1_X, A1_Y
+
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=msa]")
+    page.click("#ms-new")
+    page.fill("#mse-name", "Microscope")
+    page.fill("#mse-resolution", "0.005")
+    page.fill("#mse-tolerance", "9")
+    page.click("#mse-save")
+    expect(page.locator("#ms-title")).to_have_text("Microscope", timeout=20000)
+    expect(page.locator("#lm-card")).to_be_hidden()
+    page.select_option("#mss-kind", "iso_study")
+    page.fill("#isof-lin-data", "\n".join(f"{x} " + " ".join(str(v) for v in row) for x, row in zip(A1_X, A1_Y)))
+    page.click("#mss-save")
+    expect(page.locator("#lm-card")).to_be_visible(timeout=20000)
+    ok = "\n".join(f"{x} {0.2358 + 0.987 * x + 0.02:.4f} {0.2358 + 0.987 * x - 0.03:.4f}" for x in (2, 6, 10))
+    page.fill("#lm-data", ok)
+    page.click("#lm-run")
+    expect(page.locator("#lm-out")).to_contain_text("still valid", timeout=20000)
+    drift = "\n".join(f"{x} {0.2358 + 0.987 * x + 0.6:.4f}" for x in (2, 6, 10))
+    page.fill("#lm-data", drift)
+    page.click("#lm-run")
+    expect(page.locator("#lm-out")).to_contain_text("has to be updated", timeout=20000)
+    page.fill("#lm-data", "2 1")
+    page.click("#lm-run")
+    expect(page.locator("#errors")).to_contain_text("at least 2 standards", timeout=20000)
+    assert problems == []
+    ctx.close()
+
+
+def test_a_dfd_file_is_read_in_the_browser(server, browser, tmp_path):
+    from tests.test_dfq import FILE
+
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=tools]")
+    path = tmp_path / "shaft.dfd"
+    path.write_bytes(FILE.replace("K2111/3 0.05", "K2111/3 0.05\r\nK1900/1 late remark").encode())
+    page.set_input_files("#dfd-file", str(path))
+    expect(page.locator("#dfd-out")).to_contain_text("Part 4711-A, Shaft 12 mm: 3 characteristic(s).", timeout=20000)
+    expect(page.locator("#dfd-out table")).to_contain_text("Diameter")
+    expect(page.locator("#dfd-out table")).to_contain_text("12.02")
+    expect(page.locator("#dfd-out")).to_contain_text("a part field K1900 follows a characteristic field")
+    page.locator("#dfd-out button").first.click()
+    expect(page.locator("#dfd-out")).to_contain_text("The limits of Diameter are in the analysis form")
+    assert page.locator("#a-lsl").input_value() == "11.98" and page.locator("#a-usl").input_value() == "12.02"
+    bad = tmp_path / "bad.dfd"
+    bad.write_bytes(b"hello world")
+    page.set_input_files("#dfd-file", str(bad))
+    expect(page.locator("#errors")).to_contain_text("K0100", timeout=20000)
+    assert problems == []
+    ctx.close()

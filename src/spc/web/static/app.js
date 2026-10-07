@@ -1965,15 +1965,19 @@
   function checkText(key, c) {
     const p = { ...c };
     if (c.share !== undefined) { p.share = sig(c.share * 100, 3); p.limit = sig(c.limit * 100, 3); }
-    if (c.pct !== undefined) p.pct = sig(c.pct, 3), p.ndc = sig(c.ndc, 3), p.basis = t("msa.basis_" + c.basis);
+    if (c.pct !== undefined && !c.iso) p.pct = sig(c.pct, 3), p.ndc = sig(c.ndc, 3), p.basis = t("msa.basis_" + c.basis);
+    if (c.iso && c.pct !== undefined) p.q = sig(c.pct, 3), p.c = sig(c.c, 3);
+    if (c.q_attr !== undefined) p.q = sig(c.q_attr, 3);
+    if (c.q_ms !== undefined) { p.qms = sig(c.q_ms, 3); p.cms = sig(c.c_ms, 3); p.qmp = c.q_mp == null ? "–" : sig(c.q_mp, 3); p.cmp = c.c_mp == null ? "–" : sig(c.c_mp, 3); }
     if (c.cg !== undefined) p.cg = sig(c.cg, 3), p.cgk = sig(c.cgk, 3);
     if (c.pct_linearity !== undefined) p.lin = sig(c.pct_linearity, 3), p.bias = sig(c.bias, 3);
-    if (c.q !== undefined) p.q = sig(c.q, 3), p.U = sig(c.U, 4);
+    if (c.q !== undefined && !c.iso && c.U !== undefined) p.q = sig(c.q, 3), p.U = sig(c.U, 4);
     if (c.worst) { p.eff = sig(c.worst.effectiveness, 3); p.miss = sig(c.worst.miss, 3); p.fa = sig(c.worst.false_alarm, 3); p.kappa = c.worst.kappa === null ? "–" : sig(c.worst.kappa, 3); }
     const reason = c.reason ? `.${c.reason}` : "";
     const attrSystem = MS.view && MS.view.system.kind === "attribute";
-    const k = attrSystem && key === "validity" ? `msa.res.validity_attr.${c.result}` : `msa.res.${key}.${c.result}${reason}`;
-    return k in state.msgs || k in state.fallback ? t(k, p) : t(`msa.res.${attrSystem && key === "validity" ? "validity_attr" : key}.${c.result}`, p);
+    const rk = key === "grr" && c.iso ? "grr_iso" : key === "attribute" && c.iso ? "attribute_range" : key === "validity" && attrSystem ? "validity_attr" : key;
+    const k = `msa.res.${rk}.${c.result}${reason}`;
+    return k in state.msgs || k in state.fallback ? t(k, p) : t(`msa.res.${rk}.${c.result}`, p);
   }
   function renderMsa() {
     const { system: s, gate: g } = MS.view;
@@ -2023,6 +2027,19 @@
     renderMoreDetail();
     syncStudyForm();
   }
+  async function runLinearityMonitor() {
+    const rows = lines($("#lm-data").value).map(numbers);
+    if (rows.length < 2 || rows.some((r) => r.length < 2 || r.some((v) => !Number.isFinite(v)))) return showError({ code: "invalid_input", message: t("msa.lm_bad"), params: { message: t("msa.lm_bad") } });
+    let r = null;
+    await guarded(async () => { r = await post(`/api/msa/${MS.view.system.id}/linearity-monitor`, { references: rows.map((x) => x[0]), readings: rows.map((x) => x.slice(1)) }); });
+    const box = $("#lm-out"); box.replaceChildren();
+    if (!r) return;
+    box.appendChild(el("p", r.valid ? "status-ok" : "status-alarm", t(r.valid ? "msa.lm_valid" : "msa.lm_invalid", { lim: sig(r.ucl, 4), study: r.study })));
+    const tb = el("table", "grid"), head = el("tr");
+    [t("msa.lin_reference"), t("msa.lm_differences")].forEach((x) => cell(head, x, "th")); tb.appendChild(head);
+    r.rows.forEach((x) => { const tr = el("tr"); cell(tr, sig(x.reference, 5)); const c = cell(tr, x.differences.map((d, i) => (x.out[i] ? `${sig(d, 3)} ⚠` : sig(d, 3))).join("  ")); if (x.out.some(Boolean)) c.className = "status-alarm"; tb.appendChild(tr); });
+    const w = el("div", "scroll"); w.appendChild(tb); box.appendChild(w);
+  }
   function pct(rate) { return rate.pct === null ? "–" : sig(rate.pct, 3); }
   function renderAttributeDetail() {  // the newest attribute study that counts: the figures behind the verdict
     const box = $("#ms-attr-detail"); box.replaceChildren();
@@ -2053,6 +2070,47 @@
       rows.forEach((r) => { const x = el("tr"); r.forEach((v) => cell(x, String(v))); tb.appendChild(x); });
       const w = el("div", "scroll"); w.appendChild(tb); return w;
     };
+    const iso = newest("iso_study");
+    if (iso) {
+      const r = iso.result, c = r.combined;
+      box.appendChild(el("h4", "", t("msa.isod_detail", { id: iso.id })));
+      const names = { cal: "cal", lin: "lin", bi: "bi", evr: "evr", re: "re", ms_rest: "ms_rest", evo: "evo", av: "av", gv: "gv", stab: "stab", obj: "obj", t: "t", rest: "rest" };
+      const rows = Object.entries(r.components).filter(([k]) => names[k]).map(([k, v]) => [t("msa.isoc_" + k), sig(v, 4), c.unimportant.includes(k) ? t("msa.isod_unimportant") : k === c.largest ? t("msa.isod_largest") : ""]);
+      box.appendChild(table([t("msa.isod_component"), t("msa.isod_u"), ""], rows));
+      box.appendChild(el("p", "", t("msa.isod_ms", { u: sig(c.u_ms, 4), U: sig(c.U_ms, 4), k: sig(c.k, 3), q: sig(c.q_ms, 3), c: sig(c.c_ms, 3), qmax: c.q_ms_max })));
+      if (c.u_mp !== null) box.appendChild(el("p", "", t("msa.isod_mp", { u: sig(c.u_mp, 4), U: sig(c.U_mp, 4), q: sig(c.q_mp, 3), c: sig(c.c_mp, 3), qmax: c.q_mp_max })));
+      const lin = r.analyses.linearity;
+      if (lin && lin.method === "anova") box.appendChild(el("p", "", t("msa.isod_lin", { b0: sig(lin.beta0, 4), b1: sig(lin.beta1, 4), f: sig(lin.f, 3), fc: sig(lin.f_crit, 3), ul: sig(lin.u_lin, 3), ue: sig(lin.u_evr, 3) })));
+      const rep = r.analyses.reproducibility;
+      if (rep) box.appendChild(el("p", "", t(rep.pooled ? "msa.isod_rep_pooled" : "msa.isod_rep", { evo: sig(rep.u_evo, 4), av: rep.u_av === null ? "–" : sig(rep.u_av, 4) })));
+      if (r.real_capability) box.appendChild(el("p", "", r.real_capability.real === null ? t("msa.isod_real_none", { c: sig(r.real_capability.observed, 3) }) : t("msa.isod_real", { c: sig(r.real_capability.observed, 3), real: sig(r.real_capability.real, 3), q: sig(r.real_capability.q, 3) })));
+      r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("msa.isow_" + w.code, w))));
+      box.appendChild(el("p", "muted", t("msa.isod_note")));
+    }
+    $("#lm-card").hidden = !(iso && iso.result.analyses.linearity && iso.result.analyses.linearity.method === "anova") || !canOperate();
+    const rng = newest("uncertainty_range");
+    if (rng) {
+      const r = rng.result;
+      box.appendChild(el("h4", "", t("msa.rngd_detail", { id: rng.id })));
+      box.appendChild(el("p", "", t("msa.rngd_summary", { d: sig(r.d, 5), u: sig(r.u_attr, 5), q: sig(r.q_attr, 3), dur: sig(r.d_ur, 5), dlr: sig(r.d_lr, 5) })));
+      box.appendChild(el("p", r.rule_ok ? "status-ok" : "status-warning", t(r.rule_ok ? "msa.rngd_ok" : "msa.rngd_over", { rule: r.limit_rule, max: r.limit_mp })));
+      box.appendChild(el("p", "muted", t("msa.rngd_note")));
+    }
+    const bow = newest("bowker");
+    if (bow) {
+      const r = bow.result;
+      box.appendChild(el("h4", "", t("msa.bowd_detail", { id: bow.id })));
+      box.appendChild(table([t("msa.bowd_pair"), t("msa.bowd_chi2"), t("msa.bowd_df"), t("msa.bowd_crit"), t("msa.bowd_p"), t("msa.bowd_result")],
+        r.pairs.map((p) => [`${p.a} / ${p.b}`, sig(p.chi2, 4), p.df, p.critical === null ? "–" : sig(p.critical, 4), sig(p.p_value, 3), t(p.symmetric ? "msa.bowd_symmetric" : "msa.bowd_asymmetric")])));
+      r.notes.forEach((n) => box.appendChild(el("p", "status-warning", t("msa.bowd_note_" + n))));
+    }
+    const rev = newest("attribute_review");
+    if (rev) {
+      const r = rev.result;
+      box.appendChild(el("h4", "", t("msa.revd_detail", { id: rev.id })));
+      box.appendChild(el("p", r.accepted ? "status-ok" : "status-alarm", t(r.accepted ? "msa.revd_accepted" : "msa.revd_rejected", { k: r.agreeing, n: r.results, lo: sig(100 * r.agreement_ci[0], 3), hi: sig(100 * r.agreement_ci[1], 3) })));
+      if (!(r.has_below && r.has_inside && r.has_above)) box.appendChild(el("p", "status-warning", t("msa.revd_zones")));
+    }
     const lin = newest("linearity");
     if (lin) {
       const r = lin.result;
@@ -2091,6 +2149,10 @@
   function studySummary(x) {
     const r = x.result;
     if (x.kind === "attribute") return t("msa.sum_attribute", { parts: r.parts, appraisers: r.appraisers.length, trials: r.trials, eff: sig(r.worst.effectiveness, 3), miss: sig(r.worst.miss, 3), fa: sig(r.worst.false_alarm, 3), kappa: r.worst.kappa === null ? "–" : sig(r.worst.kappa, 3) });
+    if (x.kind === "iso_study") return t("msa.sum_iso", { qms: sig(r.combined.q_ms, 3), cms: sig(r.combined.c_ms, 3), qmp: r.combined.q_mp === null ? "–" : sig(r.combined.q_mp, 3), cmp: r.combined.c_mp === null ? "–" : sig(r.combined.c_mp, 3) });
+    if (x.kind === "uncertainty_range") return t("msa.sum_range", { q: sig(r.q_attr, 3), parts: r.parts });
+    if (x.kind === "bowker") return t("msa.sum_bowker", { parts: r.parts, pairs: r.pairs.length, result: t(r.symmetric ? "msa.bowd_symmetric" : "msa.bowd_asymmetric") });
+    if (x.kind === "attribute_review") return t("msa.sum_review", { k: r.agreeing, n: r.results });
     if (x.kind === "grr_nested") return t("msa.sum_grr_nested", { pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis), ndc: sig(r.ndc, 3), ev: sig(r.sigma.ev, 3), av: sig(r.sigma.av, 3), n: `${r.operators}×${r.parts_per_operator}×${r.trials}` });
     if (x.kind === "linearity") return t("msa.sum_linearity", { parts: r.parts, readings: r.readings, lin: sig(r.pct_linearity, 3), bias: sig(r.average_bias, 3) });
     if (x.kind === "budget") return t("msa.sum_budget", { n: r.components.length, U: sig(r.U, 4), q: sig(r.q_ms, 3) });
@@ -2100,11 +2162,17 @@
   }
   function syncStudyForm() {
     const attrSystem = MS.view && MS.view.system.kind === "attribute";
-    $$("#mss-kind option").forEach((o) => { const attr = o.value === "attribute"; o.hidden = o.disabled = attr !== attrSystem; });
+    const ATTR_KINDS = ["attribute", "uncertainty_range", "bowker", "attribute_review"];
+    $$("#mss-kind option").forEach((o) => { const attr = ATTR_KINDS.includes(o.value); o.hidden = o.disabled = attr !== attrSystem; });
     if ($("#mss-kind").selectedOptions[0].disabled) $("#mss-kind").value = attrSystem ? "attribute" : "grr";
     const kind = $("#mss-kind").value;
     $("#mss-ref-label").hidden = kind !== "type1";
     $("#mss-pv-label").hidden = kind !== "linearity";
+    const withLimits = kind === "iso_study" || kind === "uncertainty_range" || kind === "attribute_review";
+    $("#mss-lower-label").hidden = $("#mss-upper-label").hidden = !withLimits;
+    $("#mss-qmp-label").hidden = kind !== "attribute_review";
+    $("#mss-iso").hidden = kind !== "iso_study";
+    $("#mss-data").parentElement.hidden = kind === "iso_study";
     $("#mss-data-label").textContent = t("msa.data_" + kind);
     if (!$("#mss-date").value) $("#mss-date").value = new Date().toISOString().slice(0, 10);
   }
@@ -2116,27 +2184,74 @@
     if (REJECT_WORDS.has(w)) return 0;
     throw new Error(t("msa.attr_bad_word", { word }));
   }
-  function readAttributeTable(text) {  // header: ref A:1 A:2 A:3 B:1 ... ; one part per line; ok/ng, 1/0, accept/reject
+  function readAttributeTable(text, mode = "bits") {  // header: ref A:1 A:2 A:3 B:1 ... ; one part per line; ok/ng, 1/0, accept/reject. mode "number": the reference is a measured value; "none": no reference column
     const rows = lines(text).map((l) => l.split(/[\s;,]+/).filter(Boolean));
     if (rows.length < 2) throw new Error(t("msa.attr_bad_table"));
     const header = rows[0];
-    if (!["ref", "reference", "標準"].includes(header[0].toLowerCase()) || header.length < 3) throw new Error(t("msa.attr_bad_table"));
-    const cols = header.slice(1).map((h) => { const m = h.match(/^(.+?)[:#.](\d+)$/); if (!m) throw new Error(t("msa.attr_bad_header", { name: h })); return { name: m[1], trial: Number(m[2]) }; });
+    const hasRef = mode !== "none";
+    if (hasRef && (!["ref", "reference", "標準"].includes(header[0].toLowerCase()) || header.length < 3)) throw new Error(t("msa.attr_bad_table"));
+    const first = hasRef ? 1 : 0;
+    const cols = header.slice(first).map((h) => { const m = h.match(/^(.+?)[:#.](\d+)$/); if (!m) throw new Error(t("msa.attr_bad_header", { name: h })); return { name: m[1], trial: Number(m[2]) }; });
     const ratings = {};
     cols.forEach((c) => { (ratings[c.name] = ratings[c.name] || {})[c.trial] = []; });
     const reference = [];
     rows.slice(1).forEach((row) => {
       if (row.length !== header.length) throw new Error(t("msa.attr_bad_table"));
-      reference.push(toBit(row[0]));
-      cols.forEach((c, i) => ratings[c.name][c.trial].push(toBit(row[i + 1])));
+      if (hasRef) {
+        if (mode === "number") { const v = Number(row[0]); if (!Number.isFinite(v)) throw new Error(t("sc.bad_number", { value: row[0] })); reference.push(v); } else reference.push(toBit(row[0]));
+      }
+      cols.forEach((c, i) => ratings[c.name][c.trial].push(toBit(row[i + first])));
     });
     const out = {};
-    Object.entries(ratings).forEach(([name, trials]) => { out[name] = Object.keys(trials).map(Number).sort((a, b) => a - b).map((k) => trials[k]); });
+    Object.entries(ratings).forEach(([name, trials]) => { out[name] = Object.keys(trials).map(Number).sort((x, y) => x - y).map((k) => trials[k]); });
     return { ratings: out, reference };
+  }
+  function readIsoStudy() {
+    const num = (id) => { const v = $(id).value.trim(); if (v === "") return null; const x = Number(v); if (!Number.isFinite(x)) throw new Error(t("sc.bad_number", { value: v })); return x; };
+    const inp = {};
+    const lo = num("#mss-lower"), hi = num("#mss-upper");
+    if (lo !== null || hi !== null) { inp.lower = lo; inp.upper = hi; }
+    const cu = num("#isof-cal-u"); if (cu !== null) inp.calibration = { expanded: cu, k: num("#isof-cal-k") ?? 2 };
+    const mpe = $("#isof-mpe").value.trim(); if (mpe) inp.mpe = numbers(mpe);
+    const re = num("#isof-re"); if (re !== null) inp.resolution = re;
+    const repValues = $("#isof-rep-values").value.trim();
+    if (repValues) { const ref = num("#isof-rep-ref"); if (ref === null) throw new Error(t("msa.iso_need_ref")); inp.repeatability = { reference: ref, values: numbers(repValues) }; }
+    const lin = $("#isof-lin-data").value.trim();
+    if (lin) {
+      const rows = lines(lin).map(numbers);
+      if (rows.some((r) => r.length < 4)) throw new Error(t("msa.iso_lin_bad"));
+      inp.linearity = { references: rows.map((r) => r[0]), values: rows.map((r) => r.slice(1)), method: $("#isof-lin-method").value };
+    } else { const a = num("#isof-lin-a"); if (a !== null) inp.linearity_a = a; }
+    const proc = $("#isof-proc-data").value.trim();
+    if (proc) inp.process = { data: lines(proc).map((row) => row.split(";").map(numbers)), kind: $("#isof-proc-kind").value };
+    const other = {};
+    [["stab", "#isof-stab"], ["obj", "#isof-obj"], ["rest", "#isof-rest"], ["ms_rest", "#isof-ms-rest"]].forEach(([k, id]) => { const v = num(id); if (v !== null) other[k] = v; });
+    const temp = $("#isof-temp").value.trim();
+    if (temp) {
+      const v = numbers(temp);
+      if (v.length < 3 || v.length > 5) throw new Error(t("msa.iso_temp_bad"));
+      other.temperature = { delta_t: v[0], alpha: v[1], length: v[2], ...(v.length > 3 ? { mean_temperature: v[3] } : {}), ...(v.length > 4 ? { u_alpha: v[4] } : {}) };
+    }
+    if (Object.keys(other).length) inp.other = other;
+    const obs = num("#isof-observed"); if (obs !== null) inp.observed_cp = obs;
+    return inp;
   }
   function readStudyInput() {
     const kind = $("#mss-kind").value, text = $("#mss-data").value;
     if (kind === "attribute") return readAttributeTable(text);
+    if (kind === "iso_study") return readIsoStudy();
+    if (kind === "bowker") return { results: readAttributeTable(text, "none").ratings };
+    if (kind === "uncertainty_range" || kind === "attribute_review") {
+      const t_ = readAttributeTable(text, "number");
+      const lo = $("#mss-lower").value.trim(), hi = $("#mss-upper").value.trim();
+      if (lo === "" || hi === "") throw new Error(t("msa.s_limits_needed"));
+      const base = { reference: t_.reference, lower: Number(lo), upper: Number(hi) };
+      if (kind === "uncertainty_range") return { ...base, results: t_.ratings };
+      const names = Object.keys(t_.ratings);
+      if (names.length !== 1) throw new Error(t("msa.review_one_operator"));
+      const qmp = $("#mss-qmp").value.trim();
+      return { ...base, results: t_.ratings[names[0]], ...(qmp ? { q_mp: Number(qmp) } : {}) };
+    }
     if (kind === "grr_nested") return { data: lines(text).map((row) => row.split(";").map(numbers)) };
     if (kind === "linearity") {  // one part per line: the reference value, then its readings
       const rows = lines(text).map(numbers);
@@ -2167,6 +2282,7 @@
     await guarded(async () => {
       MS.view = await post(`/api/msa/${MS.view.system.id}/studies`, { kind: $("#mss-kind").value, date: $("#mss-date").value, note: $("#mss-note").value, input });
       $("#mss-data").value = ""; $("#mss-note").value = "";
+      ["#mss-lower", "#mss-upper", "#mss-qmp", "#mss-pv", "#isof-cal-u", "#isof-mpe", "#isof-re", "#isof-rep-ref", "#isof-rep-values", "#isof-lin-a", "#isof-lin-data", "#isof-proc-data", "#isof-stab", "#isof-obj", "#isof-rest", "#isof-ms-rest", "#isof-temp", "#isof-observed"].forEach((id) => { $(id).value = ""; });
     });
     renderMsa();
   }
@@ -2202,7 +2318,7 @@
     $$("#ms-editor .msa-var").forEach((e) => { e.hidden = attr; });
     $$("#ms-editor .msa-attr").forEach((e) => { e.hidden = !attr; });
   }
-  const DEFAULT_MSA_POLICY = { validity_months: 12, stability_months: 6, resolution_share_max: 0.05, grr_pass: 10, grr_conditional: 30, ndc_min: 5, cg_min: 1.33, require_stability: true, k: 2, guard_band_risk: 0.05, u_cal: 0, budget_pass: 15, budget_conditional: 30,
+  const DEFAULT_MSA_POLICY = { validity_months: 12, stability_months: 6, resolution_share_max: 0.05, grr_pass: 10, grr_conditional: 30, ndc_min: 5, cg_min: 1.33, require_stability: true, k: 2, guard_band_risk: 0.05, u_cal: 0, budget_pass: 15, budget_conditional: 30, iso_q_ms_max: 15, iso_q_mp_max: 30, iso_c_min: 1.33,
     attr_eff_pass: 90, attr_eff_conditional: 80, attr_miss_pass: 2, attr_miss_conditional: 5, attr_fa_pass: 5, attr_fa_conditional: 10, attr_kappa_pass: 0.75, attr_kappa_conditional: 0.4 };
   function readMsaEditor() {
     const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
@@ -2231,6 +2347,7 @@
     $("#mss-kind").addEventListener("change", syncStudyForm);
     $("#mse-kind").addEventListener("change", syncMsaEditorKind);
     $("#mss-save").addEventListener("click", addMsaStudy);
+    $("#lm-run").addEventListener("click", runLinearityMonitor);
   }
 
   // ---------------------------------------------------------------- equipment interface, OPC UA (draft 11.1)
@@ -3254,6 +3371,29 @@
     box.appendChild(el("p", "muted", t("rp.reproduce", { seed: r.seed })));
   }
   $("#rpl-run").addEventListener("click", runRandomPlan);
+  async function readDfd(file) {
+    let r = null;
+    await guarded(async () => { r = await api("/api/interchange/dfd", { method: "POST", body: file }); });
+    const box = $("#dfd-out"); box.replaceChildren();
+    if (!r) return;
+    const p = r.part;
+    box.appendChild(el("p", "strong", t("dfd.part", { number: p.part_number || "–", description: p.part_description || "–", n: r.declared })));
+    const tb = el("table", "grid"), head = el("tr");
+    ["dfd.col_name", "dfd.col_unit", "dfd.col_lsl", "dfd.col_usl", "dfd.col_nominal", "dfd.col_resolution", "dfd.col_cal", ""].forEach((k) => cell(head, k ? t(k) : "", "th")); tb.appendChild(head);
+    const f = (v) => (v === null || v === undefined ? "–" : String(v));
+    r.characteristics.forEach((c) => {
+      const tr = el("tr");
+      [c.name, c.unit, c.lsl, c.usl, c.nominal, c.resolution, c.calibration_uncertainty].forEach((v) => cell(tr, f(v)));
+      const b = el("button", "", t("dfd.use")); b.disabled = c.lsl === null && c.usl === null;
+      b.addEventListener("click", () => { $("#a-lsl").value = c.lsl ?? ""; $("#a-usl").value = c.usl ?? ""; box.appendChild(el("p", "status-ok", t("dfd.used", { name: c.name }))); });
+      cell(tr, "").appendChild(b);
+      tb.appendChild(tr);
+    });
+    const w = el("div", "scroll"); w.appendChild(tb); box.appendChild(w);
+    r.warnings.forEach((x) => box.appendChild(el("p", "status-warning", t("dfd.warn_" + x.code, { ...x, keys: Array.isArray(x.keys) ? x.keys.join(", ") : x.keys, line: x.line ?? "–" }))));
+  }
+  $("#dfd-file").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) readDfd(f); });
+
   $("#cv-run").addEventListener("click", runCavities);
   $("#mv-run").addEventListener("click", runMultivariate);
   $("#nest-run").addEventListener("click", runNested);

@@ -439,6 +439,14 @@ class MsaBody(Strict):
     record: dict
 
 
+class LinearityMonitorBody(Strict):
+    """Readings of standards measured after the linearity study (ISO 22514-7, 11.2): one reference value and its readings per standard."""
+
+    references: list[float] = Field(min_length=2, max_length=20)
+    readings: list[list[float]] = Field(min_length=2, max_length=20)
+    epsilon: float = Field(default=0.05, gt=0, lt=0.5)
+
+
 class MsaStudyBody(Strict):
     kind: str = Field(max_length=20)
     date: str = Field(max_length=10)

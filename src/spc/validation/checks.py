@@ -238,9 +238,15 @@ def _iso22514() -> list[Check]:
     return scenarios()
 
 
+def _iso22514_7() -> list[Check]:
+    from spc.validation.iso22514_7 import scenarios
+
+    return scenarios()
+
+
 GROUPS: tuple[tuple[str, Callable[[], list[Check]]], ...] = (
     ("constants", constants), ("indices", indices), ("precision", precision), ("charts", charts), ("signals", signals),
-    ("sequential", sequential), ("msa", msa), ("agreement", agreement), ("doe", doe), ("transparency", transparency), ("archive", archive), ("iso11462", lambda: _iso()), ("iso22514", lambda: _iso22514()),
+    ("sequential", sequential), ("msa", msa), ("agreement", agreement), ("doe", doe), ("transparency", transparency), ("archive", archive), ("iso11462", lambda: _iso()), ("iso22514", lambda: _iso22514()), ("iso22514_7", lambda: _iso22514_7()),
 )
 
 

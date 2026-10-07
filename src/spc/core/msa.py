@@ -4,7 +4,7 @@ The draft assumes "the measurement process is capable, stable and does not signi
 asks for proof "in accordance with AIAG MSA and VDA 5" (the report element names ISO 22514-3 and 22514-7 as references for a supporting study). It gives no criteria of its own. The usual ones are used here
 and are parameters of the policy of a measurement system:
 
-  Type 1 study (VDA 5; the formulas are the usual ones of that guideline, not checked against ISO 22514-7, whose Cg/Cgk counterpart is C_MS), repeated measurements of one reference standard:
+  Type 1 study (VDA 5; the formulas are the usual ones of that guideline; ISO 22514-7 has no Cg/Cgk, its index is C_MS, see spc.core.iso22514_7), repeated measurements of one reference standard:
       Cg = 0.2 T / (6 s),   Cgk = (0.1 T - |mean - reference|) / (3 s),   both >= 1.33.
   Crossed gauge R&R by analysis of variance (AIAG MSA, 4th edition), p parts x o operators x r trials:
       sigma_EV (repeatability), sigma_AV (reproducibility), sigma_INT (part x operator), sigma_GRR, sigma_PV,

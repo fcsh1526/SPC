@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import Depends, FastAPI
 
-from spc.api.schemas import MsaBody, MsaStudyBody, ReasonBody
+from spc.api.schemas import LinearityMonitorBody, MsaBody, MsaStudyBody, ReasonBody
 from spc.auth import User
 from spc.msa.service import MsaService
 
@@ -29,6 +29,10 @@ def add_msa_routes(app: FastAPI, svc: MsaService, reader, engineer, admin) -> No
     @app.post("/api/msa/{sid}/studies")
     def add_study(sid: int, body: MsaStudyBody, user: User = Depends(engineer)):
         return svc.add_study(sid, body.kind, body.date, body.note, body.input, user)
+
+    @app.post("/api/msa/{sid}/linearity-monitor")
+    def linearity_monitor(sid: int, body: LinearityMonitorBody, _: User = Depends(reader)):
+        return svc.linearity_monitor(sid, body.references, body.readings, body.epsilon)
 
     @app.post("/api/msa/{sid}/studies/{study_id}/void")
     def void_study(sid: int, study_id: int, body: ReasonBody, user: User = Depends(engineer)):

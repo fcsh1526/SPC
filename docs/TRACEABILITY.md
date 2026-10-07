@@ -14,7 +14,7 @@
 | ⬜ | 未實作 |
 | ➖ | 說明性文字或組織責任，軟體沒有對應功能 |
 
-統計：✅ 75，🔶 9，◐ 9，⬜ 1，➖ 6（共 100 列）
+統計：✅ 76，🔶 9，◐ 9，⬜ 0，➖ 6（共 100 列）
 
 「驗證」欄的測試以「tests/檔名::測試名」表示。另有獨立證據：ISO/TR 11462-3 的資料集（內建確效報告，`src/spc/validation/iso11462.py`）、ISO 22514-8 附錄的算例（`src/spc/validation/iso22514.py`）、草案自己的數值範例（表 8-1、9-3、12 章範例）、AIAG MSA 手冊例。
 
@@ -41,7 +41,7 @@
 | 6.2.1、圖 6-2 | 擴充不確定度 U_MP 與驗收界限、防護帶 | ✅ | `src/spc/core/msa.py::expanded_uncertainty`；報告元素 22 | `tests/test_report.py::test_guard_band_follows_the_draft_example`、`tests/test_msa.py::test_the_expanded_uncertainty_and_the_guard_band_follow_the_report_of_the_draft` | 防護帶 g 與接受界限 L_A、U_A 算出並寫入報告元素 22（草案第 12 章範例 U＝0.0211、g＝0.0175 吻合）；不畫圖 6-2 的示意圖；U 的合成另有 GUM／ISO 14253-1 預算（見 6.3） |
 | 6.2.2 | 風險分析（FMEA）決定哪些特性做 SPC | ➖ | 控制計畫的特性分類（`src/spc/plan/`） | — | FMEA 本身不在軟體內 |
 | 6.2.3 | 特殊特性；能力不足時改 100 % 檢驗 | ✅ | `src/spc/service/analysis.py`（`consider_full_inspection` 警告） | `tests/test_service.py::test_a_characteristic_below_its_target_is_advised_100_percent_inspection` | 能力未達目標時，分析結果建議改 100 % 檢驗（是建議，不會自動切換；是否採用由人決定） |
-| 6.3 | 有效且有能力的量測與檢驗過程（依 MSA／VDA 5）；IATF 要求計量型**與計數型**都要驗證 | ◐ | 計量型：`src/spc/core/msa.py`（量具 R&R、Type 1、穩定性、擴充不確定度）；計數型：`src/spc/core/msa_attribute.py`（一致性研究：kappa、有效性、漏判率、誤判率）；`src/spc/core/msa_more.py`（線性與偏差、巢狀 GRR、不確定度預算）；`src/spc/msa/gate.py`（兩種系統的閘門） | `tests/test_msa.py::test_the_gauge_rr_of_the_aiag_example`、`tests/test_msa.py::test_the_gate_is_open_with_proof_and_blocked_without_it`、`tests/test_msa_attribute.py::test_cohens_kappa_of_the_textbook_example`、`tests/test_msa_attribute.py::test_fleiss_kappa_of_the_published_example`、`tests/test_msa_attribute.py::test_an_attribute_system_has_its_own_checks_and_a_gate`、`tests/test_msa_more.py::test_the_regression_of_the_bias_follows_the_textbook_formulas`、`tests/test_msa_more.py::test_the_nested_variance_components_are_the_textbook_ones`、`tests/test_msa_more.py::test_the_budget_combines_the_components_as_iso_14253_and_the_gum_say` | 計數型的接受準則（有效性 ≥ 90 %、漏判 ≤ 2 %、誤判 ≤ 5 %、kappa ≥ 0.75）是通常歸於 AIAG MSA 的數值，**未對照手冊**，屬系統政策可改；線性與偏差（迴歸、信賴帶）與巢狀 GRR 為 AIAG 常用算法、預算為 GUM／ISO 14253-1 的合成，合格規則與 2U/T 上限（15 %／30 %）屬系統政策，**未對照手冊**；ISO 22514-7 的完整預算（各分量的標準化合成與 Q_MS／Q_MP）未做；Type 1 公式為 VDA 5 常用算法，未對照 ISO 22514-7（只有預覽的第 1～4 章） |
+| 6.3 | 有效且有能力的量測與檢驗過程（依 MSA／VDA 5）；IATF 要求計量型**與計數型**都要驗證 | ◐ | 計量型：`src/spc/core/msa.py`（量具 R&R、Type 1、穩定性、擴充不確定度）；計數型：`src/spc/core/msa_attribute.py`（一致性研究：kappa、有效性、漏判率、誤判率）；`src/spc/core/msa_more.py`（線性與偏差、巢狀 GRR、不確定度預算）；`src/spc/msa/gate.py`（兩種系統的閘門）；`src/spc/core/iso22514_7.py`、`src/spc/msa/iso.py`（ISO 22514-7 的研究，介面「量測系統」） | `tests/test_msa.py::test_the_gauge_rr_of_the_aiag_example`、`tests/test_msa.py::test_the_gate_is_open_with_proof_and_blocked_without_it`、`tests/test_msa_attribute.py::test_cohens_kappa_of_the_textbook_example`、`tests/test_msa_attribute.py::test_fleiss_kappa_of_the_published_example`、`tests/test_msa_attribute.py::test_an_attribute_system_has_its_own_checks_and_a_gate`、`tests/test_msa_more.py::test_the_regression_of_the_bias_follows_the_textbook_formulas`、`tests/test_msa_more.py::test_the_nested_variance_components_are_the_textbook_ones`、`tests/test_msa_more.py::test_the_budget_combines_the_components_as_iso_14253_and_the_gum_say`、`tests/test_iso22514_7.py::test_the_worked_example_of_a_4_and_a_5`、`tests/test_msa_iso.py::test_the_worked_example_of_the_standard_through_the_api` | 計數型的 AIAG 接受準則（有效性 ≥ 90 %、漏判 ≤ 2 %、誤判 ≤ 5 %、kappa ≥ 0.75）與 AIAG 線性、巢狀 GRR 的合格規則**未對照 AIAG 手冊**（屬系統政策可改）。**ISO 22514-7:2012 已依全文實作**（第 5～12 章：各不確定度分量、Q_MS／Q_MP、C_MS／C_MP、線性變異數分析、重複性與再現性、與生產製程能力的關係、計數型的 Bowker 檢定與不確定範圍、定期查核），其範例與表格逐項核對（`src/spc/validation/iso22514_7.py`）；標準自己印錯或不一致處標為「已知」。Type 1 的 Cg／Cgk 是 VDA 5 的算法，ISO 22514-7 沒有對應公式（它的指標是 C_MS）。使用者提供的是 2012 第一版（BSI 版），2021 第二版只有預覽，可能有差異 |
 | 6.4 | 製程特性化（DoE／迴歸找出控制因子） | ✅ | `src/spc/core/doe.py`（迴歸、二水準完全因子設計）、`POST /api/doe/regression`、`POST /api/doe/factorial`、介面「工具」 | `tests/test_doe.py::test_the_textbook_two_level_example_with_replicates`、`tests/test_doe.py::test_multiple_regression_follows_the_normal_equations` | 草案只點名 DoE／迴歸，沒有方法；以標準方法實作（教科書範例與正規方程式驗證）。無重複的設計用 Lenth 法；不含部分因子、反應曲面與混合設計 |
 | 6.5 | 生產與檢驗規劃 | ◐ | 控制計畫（量測系統、方法、樣本數與頻率）`src/spc/plan/` | `tests/test_plan.py::test_the_measurement_system_and_the_room_for_its_uncertainty` | 規劃的其餘面向（工作站、物流）不在軟體內 |
 | 6.6 | OCAP：調整矩陣、負責人與升級、製程日誌、確保人員理解 | ✅ | `src/spc/monitor/model.py`（每條規則的反應計畫、升級）；事件紀錄；每人確認 | `tests/test_monitor.py::test_the_action_plan_must_be_acknowledged_by_each_person_and_again_after_a_change`、`tests/test_monitor.py::test_an_overdue_incident_is_flagged_and_the_response_times_are_reported` | |
@@ -140,12 +140,12 @@
 |---|---|---|---|---|---|
 | 11.1 | 自動監控、通知偏差；即時視覺化與歷史資料；自訂警報條件；事件、行動、原因須記錄 | ✅ | `src/spc/monitor/`、`src/spc/monitor/notify.py`（Webhook） | `tests/test_monitor.py::test_notifications_go_out_once_per_incident_and_a_broken_receiver_changes_nothing`、`tests/test_monitor.py::test_the_webhook_notifier_posts_json_and_survives_a_dead_url` | |
 | 11.1 | 量測資料由設備經介面自動傳入資料庫（例：OPC UA）；介面須驗證 | ✅ | `src/spc/equipment/`（OPC UA） | `tests/test_equipment.py::test_a_link_is_tested_before_it_is_enabled_and_a_change_starts_again`、`tests/test_equipment.py::test_the_test_read_and_the_runner_against_a_real_server` | 以本機測試伺服器驗證；**加密連線只接好線，未測；未接過真實設備** |
-| 11.1 | 標準化介面格式（舉例 ISO/TR 11462-5） | ⬜ | — | — | 未做；本標準本文未取得 |
+| 11.1 | 標準化介面格式（舉例 ISO/TR 11462-5） | ◐ | `src/spc/data/dfq.py`、`POST /api/interchange/dfd`、介面「工具」 | `tests/test_dfq.py::test_the_header_of_a_file_is_read_with_its_part_and_three_characteristics`、`tests/test_dfq.py::test_the_rules_of_the_standard_are_checked` | 只讀 *.DFD／*.DFQ 的**描述資料**（零件、特性：名稱、單位、規格限、量具解析度、校正不確定度）。使用者提供的 ISO/TR 11462-5:2023 是預覽版，只到表 3 的 K0017：**量測值的寫法（第 6 章）、結構與管制圖欄位、目錄（第 7 章）與附錄 A 範例不在其中，所以不讀量測值、不寫檔**；標「o」的欄位內容須與評估軟體供應商約定，原樣保留不解讀 |
 | 11.1 | 與 CAQ 系統整合 | ◐ | REST API、CSV 與 Excel 匯入匯出 | `tests/test_api.py::test_export_keeps_marks_and_opens_in_excel` | 沒有特定 CAQ 系統的連接器；提供通用介面：REST API、CSV 匯入、資料集／監控點／批次的 CSV 匯出（`GET /api/monitors/{id}/export.csv`、`GET /api/lots/export.csv`）、事件通知（`src/spc/monitor/notify.py`）、OPC UA 設備介面 |
-| 11.2 | 分析軟體須驗證（verification）與確認（validation）；以測試範例比對文件化的參考結果 | ◐ | `src/spc/validation/`（內建確效報告，約 630 項檢查）、`src/spc/validation/iso11462.py` | `tests/test_validation.py::test_the_eleven_iso_examples_are_run_against_the_program_and_nothing_is_hidden`、`tests/test_validation.py::test_a_wrong_program_fails_the_standards_examples` | 內建確效含 AIAG MSA 手冊例、Cohen／Fleiss kappa 的公開例、Montgomery 的 2² 試驗例；**沒有 ISO 22514-7 的範例**（未取得標準全文） |
+| 11.2 | 分析軟體須驗證（verification）與確認（validation）；以測試範例比對文件化的參考結果 | ◐ | `src/spc/validation/`（內建確效報告，約 630 項檢查）、`src/spc/validation/iso11462.py` | `tests/test_validation.py::test_the_eleven_iso_examples_are_run_against_the_program_and_nothing_is_hidden`、`tests/test_validation.py::test_a_wrong_program_fails_the_standards_examples` | 內建確效含 AIAG MSA 手冊例、Cohen／Fleiss kappa 的公開例、Montgomery 的 2² 試驗例、ISO 22514-7 的範例與表格（約 85 項，標準自己不一致處標為已知）；ISO/TR 11462-5 沒有範例可比對（預覽版） |
 | 11.2 | 參數須透明（最小樣本、離群處理、信賴區間、估計式、單邊公差），否則等於黑盒子 | ✅ | `src/spc/params.py`（參數與指紋，隨結果與封存保存） | `tests/test_arl_oc_and_params.py::test_params_are_explicit_and_hashable_for_archiving` | |
 | 11.2 | 客戶特定參數集可設定並保存 | ✅ | `src/spc/profile.py`、介面「管理 → 客戶設定檔」 | `tests/test_profiles.py::test_resolve_takes_the_profile_for_unset_fields_and_names_deviations`、`tests/test_profiles.py::test_the_archive_keeps_a_snapshot_so_a_later_change_does_not_touch_the_report` | |
-| 11.2 | 用於證明量測過程能力的分析軟體也須驗證、確認、「有能力」（參 6.6） | ◐ | 內建確效涵蓋 SPC 計算；量具 R&R 以 AIAG 例核對 | `tests/test_msa.py::test_the_gauge_rr_of_the_aiag_example` | MSA 部分有 AIAG 手冊例與 kappa 的公開例，沒有 ISO 22514-7 的範例（未取得標準全文） |
+| 11.2 | 用於證明量測過程能力的分析軟體也須驗證、確認、「有能力」（參 6.6） | ✅ | 內建確效涵蓋 SPC 計算；量具 R&R 以 AIAG 例核對；ISO 22514-7 的範例逐項核對 | `tests/test_msa.py::test_the_gauge_rr_of_the_aiag_example` | MSA 部分有 AIAG 手冊例、kappa 的公開例與 ISO 22514-7 的完整範例 |
 
 ## 第 12 章　文件與報告
 
@@ -170,9 +170,9 @@
 ## 缺口總表（⬜ 與 ◐，依對稽核的影響排序）
 
 1. **圖 10-5 的迴歸圖**：只做成分析用的工具，不是監控器。
-2. **ISO 22514-7 的計算部分**：未做，等決定與標準全文；Type 1 的標示已改為不主張依據該標準。計數型 MSA 已做，但接受準則未對照 AIAG 手冊。
-3. **計量型 MSA 的標準化預算**：線性與偏差、巢狀 GRR、通用不確定度預算已做，但判定規則未對照 AIAG／VDA 5 手冊，也沒有 ISO 22514-7 的 Q_MS／Q_MP 計算。
-4. **標準化介面格式**（ISO/TR 11462-5）：未做（沒有標準全文）。
+2. **ISO 22514-7**：已依 2012 第一版全文實作並以其範例核對。剩下：2021 第二版只有預覽（可能有差異）；標準自己的幾處不一致（A.5 的臨界值自由度、8.2 的 t 值、表 11 對 C_MP 的定義）以公式為準並標為已知；計數型 MSA（AIAG）接受準則未對照 AIAG 手冊。
+3. **AIAG／VDA 5 的判定門檻**：計數型 MSA、AIAG 線性、通用預算（2U/T 15 %／30 %）的門檻未對照手冊；ISO 22514-7 的 Q_MS ≤ 15 %、Q_MP ≤ 30 %、C > 1.33 已依標準。
+4. **ISO/TR 11462-5 的量測值交換**：只讀描述資料；量測值的寫法、結構與管制圖欄位、目錄與範例在預覽版之外，需要完整文件才能讀寫量測值與寫檔。
 5. 製程特性化只有迴歸與二水準完全因子設計，沒有部分因子、反應曲面與混合設計。
 6. **不在軟體範圍或需要其他系統**（仍標 ◐ 或 ➖）：與特定 CAQ 系統的連接器（11.1，已有 REST、CSV 匯出與事件通知可串接）、檢驗指令書本身（13，控制計畫每條線有方法、樣本數、頻率與反應計畫並版本化核准）、規劃的工作站與物流（6.5）、PDCA 與稽核（5.2、5.4 迴路 4～6，組織責任）。軟體只提供證據鏈與對應的記錄。
 
@@ -192,6 +192,10 @@
 | MSA 判定門檻 | 草案沒有給 | VDA 5／AIAG 常用值（≤10 %、≤30 %、ndc≥5、Cg≥1.33），屬系統政策可改 |
 | 計數型 MSA | 草案只說 IATF 要求計數型也要驗證，沒有方法 | AIAG 的一致性研究（交叉表法）：kappa、有效性（每次都判對的零件占比）、漏判率與誤判率（單次判定）；門檻為通常歸於 AIAG 的值，**未對照手冊**，屬系統政策可改 |
 | 隨機抽樣計畫與樣本涵蓋 | 草案只說隨機抽樣且須代表機台、批與班別 | 期間切成每子組一個時段並在時段內隨機取點；各因子水準平均分配、順序隨機；種子可重現。涵蓋檢查：占比低於平均占比一半或只在一個子組者視為偏少 |
+| ISO 22514-7 的 MPE 途徑 | 5.3 說可用 MPE 取代實驗，但沒印公式 | u_MS² = u_MPE² + u_EV² + u_MS-REST²（略去 u_CAL、u_LIN、u_BI） |
+| ISO 22514-7 的線性監控界限 | 11.2 的公式在可用的複本中排版殘缺 | ±(σ/β1)·t(1 − ε/2K; N·K − 2)：K 為受監控的標準件數（Bonferroni），σ 與自由度取自研究的迴歸 |
+| ISO 22514-7 的判定 | 建議 Q_MS ≤ 15 %、Q_MP ≤ 30 %、C > 1.33；計數型不確定範圍經驗法則 20 % | 研究的判定＝兩個 Q 與兩個 C 都在界限內；有設計不足（少於 5 個工件、少於 30 次量測…）、不適合度顯著、解析度過粗或標準差不一致時為「有條件」；不確定範圍 ≤ 20 % 通過、≤ Q_MP 上限有條件；Bowker 檢定的顯著差異為「有條件」 |
+| ISO 22514-7 的 u_BI | 7.1.2 偏差的標準不確定度 | 用迴歸函數修正讀值時 u_BI ＝ 0（A.3 的作法）；否則由單一標準件的偏差 |
 | 稽核鏈錨點 | 草案要求可追溯、防竄改 | 保存的「筆數＋最後雜湊」在鏈中該筆的雜湊必須相同，否則是被截斷（較短）、被改動或重建 |
 | 批次放行處置 | 草案只說放行合格品、攔下不合格品；操作員負責產品處置（6.8.1）；挑選、報廢、重工是對輸出的過渡措施 | 批次連結監控器與一段點；證據阻擋＝開著或升級（轉根本原因分析）的事件、被 MSA 閘門擋住的量測系統、範圍內沒有有效點；放行需證據乾淨，否則挑選（全檢、件數須相加）或由工程師附客戶核准編號特採；沒有連結監控器的放行須工程師與理由；操作員可記錄、暫扣、在證據乾淨時處置；重新開啟須工程師與理由；每步入歷程與稽核鏈 |
 | 抽樣間隔 | 草案只給定性建議 | 每組件數取達到目標 ARL 的最小值；抽樣間隔 ＝ 允許生產件數／ARL（件），不得小於每組件數 |

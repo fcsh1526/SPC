@@ -43,6 +43,7 @@ from spc.disposition.service import LotNotFound, LotNumberTaken, LotProblem, Lot
 from spc.msa.service import MsaProblem, MsaService, SystemNameTaken, SystemNotFound
 from spc.api.errors import ApiError, error_response as _error
 from spc.core import chart_guide
+from spc.data import dfq
 from spc.core.charts import special as special_charts
 from spc.core.time_model import recommendation as tm_recommendation
 from spc.service.model_suggestion import suggest_for_dataset
@@ -375,6 +376,14 @@ def create_app(
     async def preview(request: Request, encoding: str = "auto", delimiter: str | None = None, _: User = Depends(writer)):
         return preview_csv(await read_body(request), delimiter=delimiter or None, encoding=encoding)
 
+    @app.post("/api/interchange/dfd")
+    async def read_dfd(request: Request, _: User = Depends(writer)):
+        """The parts and characteristics of a file of ISO/TR 11462-5 (*.DFD or *.DFQ): names, units, limits, resolution. The values of a *.DFQ are not read."""
+        try:
+            return dfq.parse(await read_body(request))
+        except dfq.DfqError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
     @app.post("/api/datasets")
     async def create_dataset(
         request: Request,
@@ -569,8 +578,14 @@ def create_app(
             head = (f"Measurement system {s['name']} (attribute)"
                     + (f": effectiveness {w['effectiveness']:.0f} %, miss rate {w['miss']:.1f} %, false alarm rate {w['false_alarm']:.1f} %" if w else ""))
         else:
-            head = (f"Measurement system {s['name']}: resolution {s['resolution']}"
-                    + (f", gauge R&R {pct:.1f} % of the {gate_result['checks']['grr']['basis'].replace('_', ' ')}, ndc {gate_result['checks']['grr']['ndc']:.1f}" if pct is not None else ""))
+            g = gate_result["checks"]["grr"]
+            if pct is None:
+                proof = ""
+            elif g.get("iso"):
+                proof = f", ISO 22514-7: Q_MP {pct:.1f} %, C_MP {g['c']:.2f}"
+            else:
+                proof = f", gauge R&R {pct:.1f} % of the {g['basis'].replace('_', ' ')}, ndc {g['ndc']:.1f}"
+            head = f"Measurement system {s['name']}: resolution {s['resolution']}" + proof
         text = (head
                 + f". MSA gate: {gate_result['status']}"
                 + (f" (waived: {', '.join(gate_result['waived'])})" if gate_result["waived"] else "")

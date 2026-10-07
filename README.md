@@ -39,6 +39,8 @@ The server listens on 127.0.0.1 only. To serve a team, put it behind an https pr
 | `spc.core.distributions` | Fits for non-normal data (lognormal, Weibull, gamma, Johnson SU, Box-Cox, normal mixture, empirical), AIC ranking, seeded bootstrap interval |
 | `spc.core.charts.special`, `spc.core.doe` | Laney p′/u′, z, G, T, percentile, UWMA, delta-to-target and Levey-Jennings charts; regression and two-level factorial analysis (ANOVA / Lenth) |
 | `spc.disposition` | Lots and their disposition: evidence of the monitor, release / sort / rework / scrap / concession, roles and history |
+| `spc.core.iso22514_7`, `spc.msa.iso` | ISO 22514-7:2012 capability of measurement processes: uncertainty components, linearity and reproducibility by analysis of variance, Q_MS / Q_MP, C_MS / C_MP, real capability, Bowker test and uncertainty range for attribute processes |
+| `spc.data.dfq` | Reads the descriptive data (parts, characteristics, limits) of ISO/TR 11462-5 files (*.DFD, *.DFQ); values are not read |
 | `spc.core.arl_oc` | OC curve and ARL |
 | `spc.params` | All analysis parameters in one record, for archiving |
 | `spc.data.csv_io` | CSV import and export: Big5 / UTF-8, delimiter and decimal comma, all errors reported with line numbers, SHA-256 of the source file |

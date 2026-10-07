@@ -205,3 +205,17 @@ def test_the_worked_examples_of_iso_22514_8_are_run_and_the_standards_slips_are_
     ok = {c.id for c in J.scenarios() if c.status == "pass"}
     assert {"3-pm", "3-pmk-l", "3-fisher", "3-bartlett", "1-bartlett", "2-a8-pmk", "2-a7-fisher", "4-forced-1"} <= ok  # the examples that reproduce
     assert all(("area.iso22514." + c.area.split(".")[1]) in EN for c in checks)
+
+
+def test_the_examples_of_iso_22514_7_are_run_and_the_standards_own_inconsistencies_are_shown_as_known():
+    from spc.validation.iso22514_7 import scenarios
+
+    checks = scenarios()
+    assert len(checks) >= 80
+    assert [c.id for c in checks if c.status == "fail"] == []
+    known = {c.id for c in checks if c.status == "known"}
+    assert known == {"proc-f0-op", "proc-f0-pv", "comb-t24", "rel-example", *{f"rel-t11-{x}" for x in (2.0, 1.66, 1.33, 1.0, 0.5)}}
+    assert all(c.note for c in checks if c.status == "known")  # the evidence is written next to each
+    from spc.validation.checks import run_builtin
+
+    assert "iso22514_7.lin" in {c.area for c in run_builtin()}

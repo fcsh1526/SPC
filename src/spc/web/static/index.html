@@ -530,6 +530,12 @@
     <p><button id="rpl-run" class="primary" data-i18n="rp.run"></button></p>
     <div id="rpl-out" role="status"></div>
   </div>
+  <div class="card" id="dfd-card">
+    <h3 data-i18n="dfd.title"></h3>
+    <p class="note" data-i18n="dfd.note"></p>
+    <p><input id="dfd-file" type="file" accept=".dfd,.dfq,.txt" aria-label="DFD / DFQ"></p>
+    <div id="dfd-out" role="status"></div>
+  </div>
   <div class="card" id="guide-card">
     <h3 data-i18n="guide.title"></h3>
     <p class="note" data-i18n="guide.intro"></p>
@@ -1079,6 +1085,9 @@
         <label class="msa-var"><span data-i18n="msa.p_ndc"></span><input id="msp-ndc_min" type="number" min="1" max="20" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_budget_pass"></span><input id="msp-budget_pass" type="number" min="1" max="100" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_budget_conditional"></span><input id="msp-budget_conditional" type="number" min="1" max="200" step="any"></label>
+        <label class="msa-var"><span data-i18n="msa.p_iso_q_ms_max"></span><input id="msp-iso_q_ms_max" type="number" min="1" max="100" step="any"></label>
+        <label class="msa-var"><span data-i18n="msa.p_iso_q_mp_max"></span><input id="msp-iso_q_mp_max" type="number" min="1" max="100" step="any"></label>
+        <label class="msa-var"><span data-i18n="msa.p_iso_c_min"></span><input id="msp-iso_c_min" type="number" min="0.5" max="5" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_cg"></span><input id="msp-cg_min" type="number" min="0.5" max="5" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_k"></span><input id="msp-k" type="number" min="1" max="4" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_guard"></span><input id="msp-guard_band_risk" type="number" min="0.1" max="49.9" step="any"></label>
@@ -1109,15 +1118,47 @@
     <div class="scroll"><table id="ms-studies" class="grid"></table></div>
     <div id="ms-attr-detail"></div>
     <div id="ms-more-detail"></div>
+    <div class="card" id="lm-card" hidden>
+      <h4 data-i18n="msa.lm_title"></h4>
+      <p class="note" data-i18n="msa.lm_note"></p>
+      <label class="wide"><span data-i18n="msa.lm_data"></span><textarea id="lm-data" rows="4" spellcheck="false"></textarea></label>
+      <p class="row"><button id="lm-run" data-i18n="msa.lm_run"></button></p>
+      <div id="lm-out" role="status"></div>
+    </div>
     <div class="card" data-needs="engineer" id="ms-add-card">
       <h4 data-i18n="msa.add_study"></h4>
       <div class="form-grid">
         <label><span data-i18n="msa.s_kind"></span>
-          <select id="mss-kind"><option value="grr" data-i18n="msa.kind_grr"></option><option value="grr_nested" data-i18n="msa.kind_grr_nested"></option><option value="linearity" data-i18n="msa.kind_linearity"></option><option value="budget" data-i18n="msa.kind_budget"></option><option value="type1" data-i18n="msa.kind_type1"></option><option value="stability" data-i18n="msa.kind_stability"></option><option value="attribute" data-i18n="msa.kind_attribute"></option></select></label>
+          <select id="mss-kind"><option value="grr" data-i18n="msa.kind_grr"></option><option value="grr_nested" data-i18n="msa.kind_grr_nested"></option><option value="linearity" data-i18n="msa.kind_linearity"></option><option value="budget" data-i18n="msa.kind_budget"></option><option value="iso_study" data-i18n="msa.kind_iso_study"></option><option value="type1" data-i18n="msa.kind_type1"></option><option value="stability" data-i18n="msa.kind_stability"></option><option value="attribute" data-i18n="msa.kind_attribute"></option><option value="uncertainty_range" data-i18n="msa.kind_uncertainty_range"></option><option value="bowker" data-i18n="msa.kind_bowker"></option><option value="attribute_review" data-i18n="msa.kind_attribute_review"></option></select></label>
         <label><span data-i18n="msa.s_date"></span><input id="mss-date" type="date"></label>
         <label id="mss-ref-label" hidden><span data-i18n="msa.s_reference"></span><input id="mss-reference" type="number" step="any"></label>
+        <label id="mss-lower-label" hidden><span data-i18n="msa.s_lower"></span><input id="mss-lower" type="number" step="any"></label>
+        <label id="mss-upper-label" hidden><span data-i18n="msa.s_upper"></span><input id="mss-upper" type="number" step="any"></label>
+        <label id="mss-qmp-label" hidden><span data-i18n="msa.s_qmp"></span><input id="mss-qmp" type="number" min="1" max="100" step="any"></label>
         <label id="mss-pv-label" hidden><span data-i18n="msa.s_pv"></span><input id="mss-pv" type="number" step="any" min="0"></label>
         <label class="wide"><span id="mss-data-label"></span><textarea id="mss-data" rows="6"></textarea></label>
+      <div id="mss-iso" class="wide" hidden>
+        <p class="note" data-i18n="msa.iso_note"></p>
+        <div class="form-grid">
+          <label><span data-i18n="msa.iso_cal_u"></span><input id="isof-cal-u" type="number" min="0" step="any"></label>
+          <label><span data-i18n="msa.iso_cal_k"></span><input id="isof-cal-k" type="number" min="1" step="any" value="2"></label>
+          <label><span data-i18n="msa.iso_mpe"></span><input id="isof-mpe" type="text" placeholder="0.05 0.02"></label>
+          <label><span data-i18n="msa.iso_resolution"></span><input id="isof-re" type="number" min="0" step="any"></label>
+          <label><span data-i18n="msa.iso_rep_ref"></span><input id="isof-rep-ref" type="number" step="any"></label>
+          <label class="wide"><span data-i18n="msa.iso_rep_values"></span><textarea id="isof-rep-values" rows="3" spellcheck="false"></textarea></label>
+          <label><span data-i18n="msa.iso_lin_method"></span><select id="isof-lin-method"><option value="anova" data-i18n="msa.iso_lin_anova"></option><option value="deviation" data-i18n="msa.iso_lin_deviation"></option></select></label>
+          <label><span data-i18n="msa.iso_lin_a"></span><input id="isof-lin-a" type="number" min="0" step="any"></label>
+          <label class="wide"><span data-i18n="msa.iso_lin_data"></span><textarea id="isof-lin-data" rows="4" spellcheck="false"></textarea></label>
+          <label><span data-i18n="msa.iso_proc_kind"></span><select id="isof-proc-kind"><option value="operator" data-i18n="msa.iso_proc_operator"></option><option value="system" data-i18n="msa.iso_proc_system"></option></select></label>
+          <label class="wide"><span data-i18n="msa.iso_proc_data"></span><textarea id="isof-proc-data" rows="4" spellcheck="false"></textarea></label>
+          <label><span data-i18n="msa.iso_stab"></span><input id="isof-stab" type="number" min="0" step="any"></label>
+          <label><span data-i18n="msa.iso_obj"></span><input id="isof-obj" type="number" min="0" step="any"></label>
+          <label><span data-i18n="msa.iso_rest"></span><input id="isof-rest" type="number" min="0" step="any"></label>
+          <label><span data-i18n="msa.iso_ms_rest"></span><input id="isof-ms-rest" type="number" min="0" step="any"></label>
+          <label class="wide"><span data-i18n="msa.iso_temp"></span><input id="isof-temp" type="text" placeholder="1.5 11.5e-6 100 23 1e-6"></label>
+          <label><span data-i18n="msa.iso_observed"></span><input id="isof-observed" type="number" min="0" step="any"></label>
+        </div>
+      </div>
         <label class="wide"><span data-i18n="msa.s_note"></span><input id="mss-note" type="text" maxlength="2000"></label>
       </div>
       <p class="row"><button id="mss-save" class="primary" data-i18n="msa.add"></button></p>
