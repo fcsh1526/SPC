@@ -214,3 +214,19 @@ def test_the_report_and_the_archive_carry_the_fit_check_and_the_agreement(tmp_pa
     assert "Fit of the distribution Folded normal" in html
     check = client.post("/api/archive/check", content=client.get(out.json()["urls"]["archive"]).content).json()
     assert check == {"integrity_ok": True, "reproduced": True, "same_engine_version": True, "differences": []}
+
+
+def test_a_characteristic_below_its_target_is_advised_100_percent_inspection():
+    import numpy as np
+
+    from spc.data import Dataset
+    from spc.service import AnalysisRequest, analyze
+
+    rng = np.random.default_rng(3)
+    x = rng.normal(10, 0.2, 100)
+    ds = Dataset.from_values(x)
+    wide = analyze(ds, AnalysisRequest(stage="machine", lsl=8.0, usl=12.0, characteristic_class="major"))
+    assert "consider_full_inspection" not in [w["code"] for w in wide["warnings"]]
+    narrow = analyze(ds, AnalysisRequest(stage="machine", lsl=9.85, usl=10.15, characteristic_class="major"))
+    assert narrow["targets"]["verdict_pk"] == "fails" and "consider_full_inspection" in [w["code"] for w in narrow["warnings"]]
+    assert "consider_full_inspection" not in [w["code"] for w in analyze(ds, AnalysisRequest(stage="machine", lsl=9.85, usl=10.15))["warnings"]]  # no class, no target

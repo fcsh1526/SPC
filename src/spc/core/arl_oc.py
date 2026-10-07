@@ -43,3 +43,18 @@ def required_subgroup_size(shift: float, max_arl: float, alpha: float = ALPHA_3S
         if arl(shift, n, alpha) <= max_arl:
             return n
     raise ValueError(f"no subgroup size up to {n_max} reaches ARL <= {max_arl}")
+
+
+def sampling_interval(shift: float, n: int, max_parts: int, alpha: float = ALPHA_3SIGMA, parts_per_hour: float | None = None) -> dict:
+    """How often to sample (draft 10.4: sample size and frequency).
+
+    A subgroup of n parts is taken every h parts. After a shift of `shift` sigma the chart signals after ARL samples on average, so about h x ARL parts are made
+    before the signal; at most `max_parts` of them are accepted: h = floor(max_parts / ARL). The interval cannot be shorter than the subgroup (h >= n);
+    when it would be, the subgroup is too small for this shift and this limit (feasible = False)."""
+    a = float(arl(shift, n, alpha))
+    h = int(max_parts // a) if a > 0 else max_parts
+    out = {"n": n, "shift": shift, "arl": a, "max_parts": max_parts, "interval_parts": h, "feasible": h >= n, "parts_until_signal": float(h * a)}
+    if parts_per_hour:
+        out["interval_minutes"] = h / parts_per_hour * 60.0
+        out["samples_per_hour"] = parts_per_hour / h if h > 0 else None
+    return out

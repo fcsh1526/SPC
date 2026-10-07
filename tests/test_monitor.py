@@ -1342,3 +1342,38 @@ def test_an_ar_monitor_gives_the_correction_in_the_unit_of_the_characteristic(en
     plain = make_monitor(c["eng"], {"name": "Plain", "characteristic": "t", "kind": "imr"}, PARAMS)
     ack(c["oper"], plain)
     assert "ar" not in enter(c["oper"], plain, [10.0])["point"]
+
+
+def test_a_standardised_p_monitor_draws_z_values_with_constant_limits_and_decides_like_the_normal_limits(env):
+    from scipy import stats
+
+    app, c = env
+    mid = make_monitor(c["eng"], {"name": "Rejects z", "characteristic": "rejects", "kind": "p", "n": 100, "standardised": True}, {"type": "rate", "rate": 0.05})
+    lim = c["eng"].get(f"/api/monitors/{mid}").json()["limits"]
+    assert lim["standardised"] is True and lim["sigma_z"] == 1.0
+    ack(c["oper"], mid)
+    u = float(stats.norm.isf(0.0027 / 2))
+    for count, size in ((4, 100), (6, 60), (9, 300), (12, 40)):
+        assert c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [count, size]}).status_code == 200
+    pts = c["view"].get(f"/api/monitors/{mid}").json()["points"]
+    for pt, (count, size) in zip(pts, ((4, 100), (6, 60), (9, 300), (12, 40))):
+        expected = (count / size - 0.05) / (0.05 * 0.95 / size) ** 0.5
+        assert pt["z"] == pytest.approx(expected) and pt["zband"]["ucl"] == pytest.approx(u, abs=1e-3) and pt["zband"]["cl"] == 0 and pt["zband"]["lcl"] == pytest.approx(-pt["zband"]["ucl"])
+        assert bool(pt["alarms"]) == (abs(pt["z"]) > pt["zband"]["ucl"])
+    assert c["oper"].post(f"/api/monitors/{mid}/points", json={"values": [30, 100]}).json()["status"] == "alarm"  # z = 11.5
+    plain = make_monitor(c["eng"], {"name": "Plain", "characteristic": "rejects", "kind": "p", "n": 100}, {"type": "rate", "rate": 0.05})
+    ack(c["oper"], plain)
+    c["oper"].post(f"/api/monitors/{plain}/points", json={"values": [6, 60]})
+    assert "z" not in c["view"].get(f"/api/monitors/{plain}").json()["points"][0]
+
+
+def test_the_standardised_option_has_rules(env):
+    app, c = env
+    base = {"name": "x", "characteristic": "x"}
+    for bad in ({"kind": "c", "standardised": True}, {"kind": "p", "n": 50, "standardised": "yes"}, {"kind": "p", "n": 50, "standardised": True, "laney": True}):
+        assert c["eng"].post("/api/monitors", json={"config": {**base, **bad}, "source": {"type": "rate", "rate": 0.05}}).status_code == 400
+    mid = make_monitor(c["eng"], {"name": "Flaws z", "characteristic": "flaws", "kind": "u", "n": 10, "standardised": True}, {"type": "rate", "rate": 1.5})
+    view = c["eng"].get(f"/api/monitors/{mid}").json()["monitor"]
+    cfg = {k: view[k] for k in ("name", "characteristic", "kind", "n", "alpha", "warn_alpha", "rules", "specs", "ocap", "require_ack", "active", "process", "unit", "line")}
+    assert c["eng"].put(f"/api/monitors/{mid}", json={"config": cfg}).status_code == 409  # the option belongs to the shape
+    assert c["eng"].put(f"/api/monitors/{mid}", json={"config": {**cfg, "standardised": True}}).status_code == 200

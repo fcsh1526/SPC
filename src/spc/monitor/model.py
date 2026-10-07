@@ -109,7 +109,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
     """Check and normalise the configuration of a monitor. Raises ValueError that names the field."""
     d = dict(data)
     allowed = {"name", "process", "characteristic", "unit", "line", "kind", "n", "alpha", "warn_alpha", "rules", "specs",
-               "ocap", "require_ack", "active", "laney"}
+               "ocap", "require_ack", "active", "laney", "standardised"}
     if set(d) - allowed:
         raise ValueError(f"unknown setting(s): {sorted(set(d) - allowed)}")
     out: dict[str, Any] = {"name": _text(d, "name", 100, required=True), "process": _text(d, "process", 200),
@@ -125,6 +125,15 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         raise ValueError("the Laney option is for the p and u charts: it widens or narrows the limits by what the counts really vary")
     if laney:
         out["laney"] = True
+    standardised = d.get("standardised", False)
+    if not isinstance(standardised, bool):
+        raise ValueError("standardised must be true or false")
+    if standardised and d["kind"] not in ("p", "u"):
+        raise ValueError("the standardised option is for the p and u charts: it plots z values with constant limits (draft 10.3.2.9)")
+    if standardised and laney:
+        raise ValueError("choose the Laney option or the standardised option, not both")
+    if standardised:
+        out["standardised"] = True
     kind = d["kind"]
     n = d.get("n", 1 if kind in ("imr", "c", "acc-x", ZMR_KIND, AR_KIND, *SEQ_KINDS, *VECTOR_KINDS) else (2 if kind == PRE_KIND else None))
     if isinstance(n, bool) or not isinstance(n, int):
@@ -624,7 +633,7 @@ def band(kind: str, limits: Mapping, size: float | None = None) -> dict[str, flo
     return out
 
 
-def attribute_limits(kind: str, n: int, alpha: float, warn_alpha: float | None, center: float, sigma_z: float | None = None) -> dict:
+def attribute_limits(kind: str, n: int, alpha: float, warn_alpha: float | None, center: float, sigma_z: float | None = None, standardised: bool = False) -> dict:
     """Fixed limits from a reference level: p-bar (p, np), counts per unit (c), nonconformities per unit (u). `sigma_z` makes them Laney limits (p, u)."""
     if kind in ("p", "np") and not 0 < center < 1:
         raise ValueError("the reference proportion of nonconforming units must be between 0 and 1: a chart needs some nonconforming units")
@@ -635,11 +644,16 @@ def attribute_limits(kind: str, n: int, alpha: float, warn_alpha: float | None, 
         if kind not in ("p", "u") or not sigma_z > 0:
             raise ValueError("sigma_z belongs to the Laney p and u charts and must be positive")
         out["sigma_z"] = float(sigma_z)
+    if standardised:  # z = (value - centre) / sigma of the sample, constant limits +- u: the normal limits of the Laney branch with sigma_z = 1
+        if kind not in ("p", "u") or sigma_z is not None:
+            raise ValueError("the standardised option belongs to the p and u charts")
+        out["sigma_z"] = 1.0
+        out["standardised"] = True
     out["location"] = band(kind, out, n)
     return out
 
 
-def limits_from_counts(kind: str, n: int, alpha: float, warn_alpha: float | None, counts, sizes=None, laney: bool = False) -> dict:
+def limits_from_counts(kind: str, n: int, alpha: float, warn_alpha: float | None, counts, sizes=None, laney: bool = False, standardised: bool = False) -> dict:
     """Limits from reference samples: counts (and sample sizes for p and u). p-bar = total / total size. With `laney` (p, u) the standard deviation of the z values
     of the reference (average moving range / 1.128) scales the limits."""
     x = np.asarray(counts, dtype=float)
@@ -665,7 +679,7 @@ def limits_from_counts(kind: str, n: int, alpha: float, warn_alpha: float | None
         sigma_z = sc.sigma_z(sc.standardised(kind, x, z, alpha)["z"])
         if not sigma_z > 0:
             raise ValueError("the reference counts show no variation from sample to sample: sigma_z cannot be found")
-    return attribute_limits(kind, n, alpha, warn_alpha, center, sigma_z)
+    return attribute_limits(kind, n, alpha, warn_alpha, center, sigma_z, standardised)
 
 
 def check_values(config: Mapping, values) -> list[float]:
@@ -770,3 +784,10 @@ def check_point(config: Mapping, limits: Mapping, loc_history, var_history, loc:
                 var > limits["variation"]["ucl"] or var < limits["variation"]["lcl"]):
             warnings.append({"chart": "variation", "rule": "warning_limits"})
     return alarms, warnings
+
+
+def standardised_point(kind: str, limits: Mapping, value: float, size: float) -> float:
+    """z of one plotted value (p or u) for a standardised chart: its distance from the centre line in standard deviations of a sample of that size."""
+    c = limits["center"]
+    sigma = math.sqrt(c * (1 - c) / size) if kind == "p" else math.sqrt(c / size)
+    return float((value - c) / sigma)

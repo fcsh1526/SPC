@@ -55,7 +55,7 @@ def test_every_path_ends_in_charts_and_the_result_says_what_the_program_has():
             if c["support"] == "full":
                 assert c["kinds"] or c.get("tool"), c["chart"]
     assert not [c for c in g.CHARTS if g.CHARTS[c]["support"] == "none"]  # every chart that figure 10-5 names is at least partly in the program
-    assert {c for c in g.CHARTS if g.CHARTS[c]["support"] == "partial"} == {"shewhart_transformed", "regression"}
+    assert {c for c in g.CHARTS if g.CHARTS[c]["support"] == "partial"} == {"regression"}
     assert {"laney", "g_chart", "t_chart", "percentile"} <= {c for c in g.CHARTS if g.CHARTS[c].get("tool") == "special"}
 
 

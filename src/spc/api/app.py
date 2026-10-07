@@ -75,7 +75,7 @@ from spc.monitor.service import MonitorService
 from spc.monitor.store import IncidentNotFound, MonitorNameTaken, MonitorNotFound
 from spc.study.checklist import StudyError
 from spc.study.service import StudyNameTaken, StudyNotFound, StudyService
-from spc.core.arl_oc import alarm_probability, arl, required_subgroup_size
+from spc.core.arl_oc import alarm_probability, arl, required_subgroup_size, sampling_interval
 from spc.core.capability import Stage, TargetAdjustmentNotAllowed, required_targets
 from spc.core.charts import attribute as attr
 from spc.db import (
@@ -741,6 +741,8 @@ def create_app(
                 return sc.g_chart(body.values or [], body.alpha, body.reference_n)
             if body.kind == "t":
                 return sc.t_chart(body.values or [], body.alpha, body.reference_n)
+            if body.kind in ("box-cox", "johnson"):
+                return sc.transformed_chart(body.values or [], body.kind, body.alpha, body.reference_n)
             if body.kind == "percentile":
                 return sc.percentile_chart(body.values or [], body.alpha, body.reference_n)
             if body.kind == "uwma":
@@ -901,6 +903,8 @@ def create_app(
                 out["required_n"] = required_subgroup_size(body.shift, body.max_arl, body.alpha)
             except ValueError:
                 out["required_n"] = None
+        if body.max_parts is not None:
+            out["sampling"] = sampling_interval(body.shift, out["required_n"] or body.n, body.max_parts, body.alpha, body.parts_per_hour)
         return out
 
     @app.post("/api/attribute-chart")

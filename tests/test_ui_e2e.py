@@ -1953,3 +1953,26 @@ def test_linearity_nested_grr_and_budget_in_the_browser(server, browser):
     expect(page.locator("#errors")).to_contain_text("not understood", timeout=20000)
     assert problems == []
     ctx.close()
+
+
+def test_standardised_option_of_a_p_monitor_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=monitor]")
+    page.click("#mon-new")
+    page.select_option("#me-kind", "xbar-s")
+    expect(page.locator("#me-std-label")).to_be_hidden()
+    page.select_option("#me-kind", "p")
+    expect(page.locator("#me-std-label")).to_be_visible()
+    page.check("#me-laney")
+    page.check("#me-std")  # one of the two options: the later choice wins
+    assert not page.locator("#me-laney").is_checked() and page.locator("#me-std").is_checked()
+    page.check("#me-laney")
+    assert page.locator("#me-laney").is_checked() and not page.locator("#me-std").is_checked()
+    assert problems == []
+    ctx.close()

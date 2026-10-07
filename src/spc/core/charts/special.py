@@ -168,6 +168,55 @@ def percentile_chart(values, alpha: float = ALPHA_3SIGMA, reference_n: int | Non
     return {"charts": [chart], "parameters": {"alpha": alpha, "n_reference": int(ref.size), "minimum_reference": need}, "warnings": []}
 
 
+def transformed_chart(values, method: str, alpha: float = ALPHA_3SIGMA, reference_n: int | None = None) -> dict:
+    """Shewhart individuals chart of transformed values (draft 10.3.2.6, figure 10-5: a transformation that makes the data normal, then the plain chart).
+    method "box-cox": y = (x^lambda - 1) / lambda, lambda by maximum likelihood (positive data); "johnson": y = a + b asinh((x - loc) / scale), Johnson SU by maximum
+    likelihood (any data). The centre line and sigma of y are the mean and the average moving range / 1.128 of the reference; the limits are drawn on the scale
+    of the measurement (back-transformed), so they are not symmetric about the centre line."""
+    x = np.asarray(values, dtype=float).ravel()
+    if x.size < MIN_POINTS or not np.all(np.isfinite(x)):
+        raise ValueError(f"need at least {MIN_POINTS} finite values")
+    ref = _reference(x, reference_n)
+    u = _u(alpha)
+    params: dict
+    if method == "box-cox":
+        if np.any(x <= 0):
+            raise ValueError("the Box-Cox transformation needs positive values; use the Johnson transformation")
+        _, lam = stats.boxcox(ref)
+        lam = float(lam)
+
+        def fwd(v):
+            return np.log(v) if abs(lam) < 1e-9 else (v ** lam - 1.0) / lam
+
+        def inv(y):
+            if abs(lam) < 1e-9:
+                return float(np.exp(y))
+            base = lam * y + 1.0
+            if base <= 0:
+                raise ValueError("a limit lies outside the range of the Box-Cox transformation: use the Johnson transformation or the percentile chart")
+            return float(base ** (1.0 / lam))
+        params = {"lambda": lam}
+    elif method == "johnson":
+        a, b, loc, scale = (float(v) for v in stats.johnsonsu.fit(ref))
+
+        def fwd(v):
+            return a + b * np.arcsinh((v - loc) / scale)
+
+        def inv(y):
+            return float(loc + scale * np.sinh((y - a) / b))
+        params = {"j_a": a, "j_b": b, "j_location": loc, "j_scale": scale}
+    else:
+        raise ValueError("the method is box-cox or johnson")
+    y_ref = np.asarray(fwd(ref), dtype=float)
+    centre = float(y_ref.mean())
+    sigma = float(np.abs(np.diff(y_ref)).mean() / D2_MR)
+    if not sigma > 0:
+        raise ValueError("the reference does not vary")
+    lo, mid, hi = inv(centre - u * sigma), inv(centre), inv(centre + u * sigma)
+    chart = _chart("transformed", x, mid, lo, hi, extra={"transformed": np.asarray(fwd(x), dtype=float).tolist()})
+    return {"charts": [chart], "parameters": {"method": method, **params, "center_y": centre, "sigma_y": sigma, "alpha": alpha, "n_reference": int(ref.size)}, "warnings": []}
+
+
 def uwma_chart(values, span: int, alpha: float = ALPHA_3SIGMA, reference_n: int | None = None) -> dict:
     """Uniformly weighted moving average of the last `span` values (Montgomery): limits mean +- u sigma / sqrt(min(i, span)), mean and sigma of the reference
     (sigma from the average moving range / 1.128, so that a shift in the data does not widen the limits)."""

@@ -14,7 +14,7 @@
 | ⬜ | 未實作 |
 | ➖ | 說明性文字或組織責任，軟體沒有對應功能 |
 
-統計：✅ 71，🔶 6，◐ 16，⬜ 1，➖ 6（共 100 列）
+統計：✅ 74，🔶 7，◐ 12，⬜ 1，➖ 6（共 100 列）
 
 「驗證」欄的測試以「tests/檔名::測試名」表示。另有獨立證據：ISO/TR 11462-3 的資料集（內建確效報告，`src/spc/validation/iso11462.py`）、ISO 22514-8 附錄的算例（`src/spc/validation/iso22514.py`）、草案自己的數值範例（表 8-1、9-3、12 章範例）、AIAG MSA 手冊例。
 
@@ -36,11 +36,11 @@
 
 | 節 | 草案要求（意旨） | 狀態 | 程式 | 驗證 | 備註 |
 |---|---|---|---|---|---|
-| 6.1 | 十項前提（規格、量測、製程特性、規劃、OCAP、抽樣計畫、選圖、控制計畫、資料收集、角色、定期稽核） | ◐ | 見 6.2～6.8 各列 | — | 製程特性（6.4）與定期稽核（迴路 4～6）沒有功能；抽樣計畫與選圖見下 |
+| 6.1 | 十項前提（規格、量測、製程特性、規劃、OCAP、抽樣計畫、選圖、控制計畫、資料收集、角色、定期稽核） | ◐ | 見 6.2～6.8 各列 | — | 十項前提除「定期稽核（迴路 4～6）」與 6.5 的規劃外都有對應功能；那兩項是組織責任 |
 | 6.2.1 | 公差與責任原則；量測不確定度與生產變異不重複計入；公差限＝功能限 | ➖ | — | — | 設計責任 |
-| 6.2.1、圖 6-2 | 擴充不確定度 U_MP 與驗收界限、防護帶 | ◐ | `src/spc/core/msa.py::expanded_uncertainty`；報告元素 22 | `tests/test_report.py::test_guard_band_follows_the_draft_example`、`tests/test_msa.py::test_the_expanded_uncertainty_and_the_guard_band_follow_the_report_of_the_draft` | 防護帶 g 算出並寫入報告（草案第 12 章範例 U＝0.0211、g＝0.0175 吻合）；驗收界限 L_A、U_A 不作為圖或判定使用；U 是簡化合成（見 6.3） |
+| 6.2.1、圖 6-2 | 擴充不確定度 U_MP 與驗收界限、防護帶 | ✅ | `src/spc/core/msa.py::expanded_uncertainty`；報告元素 22 | `tests/test_report.py::test_guard_band_follows_the_draft_example`、`tests/test_msa.py::test_the_expanded_uncertainty_and_the_guard_band_follow_the_report_of_the_draft` | 防護帶 g 與接受界限 L_A、U_A 算出並寫入報告元素 22（草案第 12 章範例 U＝0.0211、g＝0.0175 吻合）；不畫圖 6-2 的示意圖；U 的合成另有 GUM／ISO 14253-1 預算（見 6.3） |
 | 6.2.2 | 風險分析（FMEA）決定哪些特性做 SPC | ➖ | 控制計畫的特性分類（`src/spc/plan/`） | — | FMEA 本身不在軟體內 |
-| 6.2.3 | 特殊特性；能力不足時改 100 % 檢驗 | ◐ | 控制計畫每行有分類與管制方式（SPC 圖／抽樣／100 % 檢驗／其他）`src/spc/plan/model.py` | `tests/test_plan.py::test_a_line_needs_what_the_draft_lists` | 不會因為能力不足自動建議 100 % 檢驗 |
+| 6.2.3 | 特殊特性；能力不足時改 100 % 檢驗 | ✅ | `src/spc/service/analysis.py`（`consider_full_inspection` 警告） | `tests/test_service.py::test_a_characteristic_below_its_target_is_advised_100_percent_inspection` | 能力未達目標時，分析結果建議改 100 % 檢驗（是建議，不會自動切換；是否採用由人決定） |
 | 6.3 | 有效且有能力的量測與檢驗過程（依 MSA／VDA 5）；IATF 要求計量型**與計數型**都要驗證 | ◐ | 計量型：`src/spc/core/msa.py`（量具 R&R、Type 1、穩定性、擴充不確定度）；計數型：`src/spc/core/msa_attribute.py`（一致性研究：kappa、有效性、漏判率、誤判率）；`src/spc/core/msa_more.py`（線性與偏差、巢狀 GRR、不確定度預算）；`src/spc/msa/gate.py`（兩種系統的閘門） | `tests/test_msa.py::test_the_gauge_rr_of_the_aiag_example`、`tests/test_msa.py::test_the_gate_is_open_with_proof_and_blocked_without_it`、`tests/test_msa_attribute.py::test_cohens_kappa_of_the_textbook_example`、`tests/test_msa_attribute.py::test_fleiss_kappa_of_the_published_example`、`tests/test_msa_attribute.py::test_an_attribute_system_has_its_own_checks_and_a_gate`、`tests/test_msa_more.py::test_the_regression_of_the_bias_follows_the_textbook_formulas`、`tests/test_msa_more.py::test_the_nested_variance_components_are_the_textbook_ones`、`tests/test_msa_more.py::test_the_budget_combines_the_components_as_iso_14253_and_the_gum_say` | 計數型的接受準則（有效性 ≥ 90 %、漏判 ≤ 2 %、誤判 ≤ 5 %、kappa ≥ 0.75）是通常歸於 AIAG MSA 的數值，**未對照手冊**，屬系統政策可改；線性與偏差（迴歸、信賴帶）與巢狀 GRR 為 AIAG 常用算法、預算為 GUM／ISO 14253-1 的合成，合格規則與 2U/T 上限（15 %／30 %）屬系統政策，**未對照手冊**；ISO 22514-7 的完整預算（各分量的標準化合成與 Q_MS／Q_MP）未做；Type 1 公式為 VDA 5 常用算法，未對照 ISO 22514-7（只有預覽的第 1～4 章） |
 | 6.4 | 製程特性化（DoE／迴歸找出控制因子） | ✅ | `src/spc/core/doe.py`（迴歸、二水準完全因子設計）、`POST /api/doe/regression`、`POST /api/doe/factorial`、介面「工具」 | `tests/test_doe.py::test_the_textbook_two_level_example_with_replicates`、`tests/test_doe.py::test_multiple_regression_follows_the_normal_equations` | 草案只點名 DoE／迴歸，沒有方法；以標準方法實作（教科書範例與正規方程式驗證）。無重複的設計用 Lenth 法；不含部分因子、反應曲面與混合設計 |
 | 6.5 | 生產與檢驗規劃 | ◐ | 控制計畫（量測系統、方法、樣本數與頻率）`src/spc/plan/` | `tests/test_plan.py::test_the_measurement_system_and_the_room_for_its_uncertainty` | 規劃的其餘面向（工作站、物流）不在軟體內 |
@@ -96,7 +96,7 @@
 | 節 | 草案要求（意旨） | 狀態 | 程式 | 驗證 | 備註 |
 |---|---|---|---|---|---|
 | 9.2 | 隨機抽樣，例如 25 組 × 5 件，須代表工具、批次、班別 | ◐ | `src/spc/service/analysis.py`（子群結構、不完整子群處理） | `tests/test_service.py::test_marked_values_leave_the_calculation_and_their_subgroup_is_reported` | 樣本是否代表製程由人判斷；程式只處理子群結構 |
-| 9.3 | 製程分析前須證明量測能力並已分析機台績效；不中斷、變更須記錄 | ◐ | MSA 閘門（量測）；研究清單 | `tests/test_msa.py::test_a_report_is_refused_for_a_blocked_system_and_carries_the_uncertainty_of_a_proven_one` | 報告**不檢查**是否已有結案的機台績效研究（也寫在 `docs/ARCHITECTURE.md` 10.3） |
+| 9.3 | 製程分析前須證明量測能力並已分析機台績效；不中斷、變更須記錄 | ✅ | `src/spc/report/builder.py`、報告請求的 `machine_study_id`（`POST /api/reports`） | `tests/test_special.py::test_a_report_can_name_a_closed_machine_study_and_refuses_an_open_one` | 報告可指名其依據的機台績效研究：研究未結案則拒絕（409 `machine_study_open`），結案則記入報告與稽核；不指名時不檢查 |
 | 9.4、表 9-1、9-2 | 八種時間相依分布模型 A1、A2、B、C1～C4、D；只有 A1、A2 統計受控 | ✅ | `src/spc/core/time_model.py`、`src/spc/service/model_suggestion.py`、分析請求的 `model` | `tests/test_time_model.py::test_the_evidence_and_the_reasons_follow_the_decision_of_the_draft_table`、`tests/test_time_model.py::test_each_model_is_found_in_most_simulated_processes` | 草案沒有給判定程序：自動建議是 🔶（標準檢定，只是建議，使用者決定）；模擬判對率 65～97 % |
 | 9.4 | 配適品質：先看全部資料，再看最靠近所算指標那一側規格限的 25 % 資料；機率圖、直方圖、淨相關係數 | ✅ | 機率圖與直方圖（`src/spc/report/svg.py`）；Anderson-Darling 與 AIC；分析請求的 `fit_check`：整體與靠近所算指標那一側規格限 25 % 資料的機率圖相關係數 | `tests/test_distributions.py::test_candidates_report_failures_instead_of_hiding_them`、`tests/test_service.py::test_the_fit_check_is_only_in_the_result_when_asked_for_and_looks_at_the_limit_that_matters` | 相關係數的判定門檻草案沒有給，結果只列數值與兩段資料的比較 |
 | 9.4、表 10-2 | 依時間模型選分析圖與 SPC 圖、樣本大小與頻率 | ✅ | `src/spc/core/time_model.py::recommendation`、`GET /api/time-models/{model}/recommendation`、分析頁選模型時顯示 | `tests/test_time_model.py::test_the_recommendation_is_table_10_2_of_the_draft`、`tests/test_time_model.py::test_the_recommendation_says_what_the_program_offers_and_when_a_model_is_not_in_control` | 表是草案的範例；樣本大小與頻率只有「較大／較小、較高／較低」，草案沒有給數字 |
@@ -113,11 +113,11 @@
 | 10.2.3 | 不穩定時的矯正：重量、調整製程參數、調整要素、根因分析、遏制；改變後重新評估界限 | ✅ | `src/spc/monitor/service.py` | `tests/test_monitor.py::test_the_plan_is_followed_step_by_step_and_an_incident_closes_only_on_proof` | |
 | 10.2.4 | 管制圖效能：OC、ARL | ✅ | `src/spc/core/arl_oc.py` | `tests/test_arl_oc_and_params.py::test_oc_values_for_a_one_sigma_shift` | |
 | 10.3.1 | 圖面要素：標頭資料、中心線、界限、警告界限、樣本編號與時間／使用者、違規標記、事件與對策記錄；現場圖不顯示規格限 | ✅ | `src/spc/monitor/`（圖表資料不含規格；規格只用於持續績效報告）、`src/spc/web/static/app.js` | `tests/test_monitor.py::test_check_point_flags_limits_warnings_and_only_what_the_new_point_completes` | |
-| 10.3.2、圖 10-5 | 選圖指南（資料類型、觀察方向、概念、有無記憶、非常態、前期、多變量、短批） | ◐ | `src/spc/core/chart_guide.py`（決策樹照圖 10-5）、`POST /api/chart-guide`、介面「工具」 | `tests/test_chart_guide.py::test_the_tree_is_figure_10_5`、`tests/test_special_charts.py::test_laney_p_follows_the_formula` | 圖中點名的 Laney p′／u′（監控選項與工具）、百分位數、G、T、UWMA、與目標的差、Levey-Jennings 都已有；**只剩「經轉換的 Shewhart 圖」與迴歸圖標為部分**（轉換只用於能力指標；迴歸圖僅分析用） |
+| 10.3.2、圖 10-5 | 選圖指南（資料類型、觀察方向、概念、有無記憶、非常態、前期、多變量、短批） | ◐ | `src/spc/core/chart_guide.py`（決策樹照圖 10-5）、`POST /api/chart-guide`、介面「工具」 | `tests/test_chart_guide.py::test_the_tree_is_figure_10_5`、`tests/test_special_charts.py::test_laney_p_follows_the_formula` | 圖中點名的圖都已有：Laney p′／u′（監控選項與工具）、z 化計數型圖、百分位數、G、T、UWMA、與目標的差、Levey-Jennings、Box-Cox 與 Johnson 轉換後的個別值圖（工具）；**只有「迴歸圖」仍標為部分**（僅分析用，不是監控） |
 | 10.3.2.6 | 非常態：轉換（Box-Cox、Johnson）、自迴歸模型殘差圖；殘差圖的修正要反轉換 | ✅ | `src/spc/core/charts/dependent.py`（AR 殘差圖）；分布轉換在 `distributions.py` | `tests/test_monitor.py::test_an_ar_monitor_end_to_end`、`tests/test_monitor.py::test_an_ar_monitor_gives_the_correction_in_the_unit_of_the_characteristic` | AR 殘差圖的修正量依 殘差/(1−Σφ) 轉回原單位；草案沒有給 AR 的公式（標準方法） |
 | 10.3.2.7 | 前期管制：用預期的最大變異或相近製程的參數；預先驗收圖；預控圖；只用於監視不用於控制 | ✅ | `src/spc/monitor/model.py`（參數來源）；預控圖 | `tests/test_monitor.py::test_pre_control_zones_follow_the_classical_rules` | 預控圖草案沒有規則，用古典規則（標明） |
 | 10.3.2.8 | 多變量：Hotelling T²、MEWMA、MCUSUM | ✅ | `src/spc/core/charts/multivariate.py` | `tests/test_monitor.py::test_hotelling_limit_has_the_stated_false_alarm_rate`、`tests/test_monitor.py::test_the_mcusum_limit_agrees_with_crosier_and_the_recursion_is_the_published_one` | 草案沒有給公式，用標準式（文件已註明）🔶 |
-| 10.3.2.9 | 短批：Z-MR；穩定化計數型圖處理不同樣本大小 | ◐ | `src/spc/core/charts/` Z-MR；計數型圖的界限逐點隨樣本大小 | `tests/test_monitor.py::test_the_zmr_monitor_standardises_each_product_and_keeps_one_set_of_limits` | z 化的 p、u 圖已在「工具」（分析用）；**監控器沒有 z 化版本** |
+| 10.3.2.9 | 短批：Z-MR；穩定化計數型圖處理不同樣本大小 | ✅ | `src/spc/core/charts/` Z-MR；p、u 監控的 `standardised` 選項（z 值＋固定界限）；工具的 z 化 p、u 圖 | `tests/test_monitor.py::test_the_zmr_monitor_standardises_each_product_and_keeps_one_set_of_limits`、`tests/test_monitor.py::test_a_standardised_p_monitor_draws_z_values_with_constant_limits_and_decides_like_the_normal_limits` | 標準化選項的判定等同於一般圖的常態界限（與 Laney 擇一） |
 | 10.3.3.2 | X̄-s 圖：σ̂＝√(s̄²)；變異圖用 χ² 精確界限 | ✅ | `src/spc/core/charts/variable.py::xbar_s` | `tests/test_variable_charts.py::test_xbar_s_limits_follow_formulas`、`tests/test_variable_charts.py::test_false_alarm_rate_matches_alpha` | 草案說先檢查 s 圖再評估 X̄ 圖：兩張圖同時評估，**沒有強制順序** |
 | 10.3.3.3 | X̄-R 圖：w 分布精確界限，d2、d3 表 | ✅ | `src/spc/core/charts/variable.py::xbar_r`、`src/spc/core/constants.py` | `tests/test_constants.py::test_w_quantiles_match_draft`、`tests/test_variable_charts.py::test_range_chart_false_alarm_rate_matches_alpha` | 草案表逐格核對 |
 | 10.3.3.4 | 中位數-全距圖：c_n 係數 | ✅ | `src/spc/core/charts/variable.py::median_r` | `tests/test_monitor.py::test_the_median_chart_limits_follow_the_c_n_factor_and_the_stated_risk` | |
@@ -129,7 +129,7 @@
 | 10.3.5.5 | EWMA | ✅ | `src/spc/core/charts/sequential.py` | `tests/test_monitor.py::test_ewma_limits_at_the_start_are_narrower_so_a_shift_at_the_start_is_found_sooner` | |
 | 10.3.6.2～10.3.6.5 | 計數型圖 p、np、u、c | ✅ | `src/spc/core/charts/attribute.py`（精確二項／卜瓦松界限） | `tests/test_attribute_charts.py::test_np_chart_limits_hold_the_stated_risk`、`tests/test_attribute_charts.py::test_p_chart_variable_sample_size_gives_point_by_point_limits` | |
 | 10.4 | 持續績效與能力報告：滾動期間重算指標、四象限（圖 10-26）、界限檢討（太窄／太寬）、反應時效 | ✅ | `src/spc/monitor/service.py`（持續績效報告） | `tests/test_monitor.py::test_ongoing_report_gives_indices_quadrant_trend_limits_review_and_response`、`tests/test_monitor.py::test_the_limits_review_notices_limits_that_are_too_narrow_too_wide_or_off_centre` | |
-| 10.4 | 依時間模型的風險分組、樣本大小與頻率建議；理性抽樣與理性分組 | ◐ | 風險分組與樣本大小／頻率的定性建議同表 10-2（`src/spc/core/time_model.py::recommendation`） | `tests/test_time_model.py::test_the_api_gives_the_recommendation_and_the_suggestion_carries_it` | 沒有計算樣本大小與頻率的數字，也沒有理性抽樣／分組的引導（ARL 與 OC 工具可用來自行評估） |
+| 10.4 | 依時間模型的風險分組、樣本大小與頻率建議；理性抽樣與理性分組 | 🔶 | 風險分組與樣本大小／頻率的定性建議同表 10-2（`src/spc/core/time_model.py::recommendation`）；樣本大小與抽樣間隔的計算：`src/spc/core/arl_oc.py::required_subgroup_size`、`sampling_interval`、介面「工具」 | `tests/test_time_model.py::test_the_api_gives_the_recommendation_and_the_suggestion_carries_it`、`tests/test_arl_oc_and_params.py::test_the_sampling_interval_follows_the_run_length` | 草案只給定性建議；數字由 ARL 推得：每組件數取達到目標 ARL 的最小值，抽樣間隔＝允許件數／ARL（件）。這是我們的解讀。理性分組只在結果中附說明，沒有互動式引導 |
 | 10.3.1、10.3.2 | 多串流與巢狀資料的變異來源（SoV）研究 | 🔶 | `src/spc/core/nested.py`、介面「特殊情形」 | `tests/test_special.py::test_balanced_nested_anova_equals_the_textbook_formulas`、`tests/test_special.py::test_unbalanced_estimators_are_unbiased_for_the_known_components` | 草案只點名沒有給方法；動差法巢狀變異數分析；交叉因子與 REML 未做 |
 | 10.3.2.6、9.4 C3 | 有趨勢的製程（刀具磨耗） | 🔶 | `src/spc/core/charts/trend.py`（迴歸管制圖，分析用） | `tests/test_special.py::test_trend_chart_matches_an_independent_regression` | 草案沒有給公式；不是監控；有趨勢的製程只算績效指標 |
 | 10.5 | 其他方法：PAA、AI 異常偵測；內部可另用，替代協議標準時須經雙方同意 | ➖ | — | — | 草案只舉例，未要求 |
@@ -142,10 +142,10 @@
 | 11.1 | 量測資料由設備經介面自動傳入資料庫（例：OPC UA）；介面須驗證 | ✅ | `src/spc/equipment/`（OPC UA） | `tests/test_equipment.py::test_a_link_is_tested_before_it_is_enabled_and_a_change_starts_again`、`tests/test_equipment.py::test_the_test_read_and_the_runner_against_a_real_server` | 以本機測試伺服器驗證；**加密連線只接好線，未測；未接過真實設備** |
 | 11.1 | 標準化介面格式（舉例 ISO/TR 11462-5） | ⬜ | — | — | 未做；本標準本文未取得 |
 | 11.1 | 與 CAQ 系統整合 | ◐ | REST API、CSV 與 Excel 匯入匯出 | `tests/test_api.py::test_export_keeps_marks_and_opens_in_excel` | 沒有特定 CAQ 系統的連接器 |
-| 11.2 | 分析軟體須驗證（verification）與確認（validation）；以測試範例比對文件化的參考結果 | ✅ | `src/spc/validation/`（內建確效報告，約 500 項檢查）、`src/spc/validation/iso11462.py` | `tests/test_validation.py::test_the_eleven_iso_examples_are_run_against_the_program_and_nothing_is_hidden`、`tests/test_validation.py::test_a_wrong_program_fails_the_standards_examples` | ISO/TR 11462-3 的 11 個範例；標準自己前後不一致處標為「已知」並附計算證據 |
+| 11.2 | 分析軟體須驗證（verification）與確認（validation）；以測試範例比對文件化的參考結果 | ◐ | `src/spc/validation/`（內建確效報告，約 630 項檢查）、`src/spc/validation/iso11462.py` | `tests/test_validation.py::test_the_eleven_iso_examples_are_run_against_the_program_and_nothing_is_hidden`、`tests/test_validation.py::test_a_wrong_program_fails_the_standards_examples` | 內建確效含 AIAG MSA 手冊例、Cohen／Fleiss kappa 的公開例、Montgomery 的 2² 試驗例；**沒有 ISO 22514-7 的範例**（未取得標準全文） |
 | 11.2 | 參數須透明（最小樣本、離群處理、信賴區間、估計式、單邊公差），否則等於黑盒子 | ✅ | `src/spc/params.py`（參數與指紋，隨結果與封存保存） | `tests/test_arl_oc_and_params.py::test_params_are_explicit_and_hashable_for_archiving` | |
 | 11.2 | 客戶特定參數集可設定並保存 | ✅ | `src/spc/profile.py`、介面「管理 → 客戶設定檔」 | `tests/test_profiles.py::test_resolve_takes_the_profile_for_unset_fields_and_names_deviations`、`tests/test_profiles.py::test_the_archive_keeps_a_snapshot_so_a_later_change_does_not_touch_the_report` | |
-| 11.2 | 用於證明量測過程能力的分析軟體也須驗證、確認、「有能力」（參 6.6） | ◐ | 內建確效涵蓋 SPC 計算；量具 R&R 以 AIAG 例核對 | `tests/test_msa.py::test_the_gauge_rr_of_the_aiag_example` | MSA 部分只有 AIAG 一個手冊例，沒有 ISO 22514-7 的範例 |
+| 11.2 | 用於證明量測過程能力的分析軟體也須驗證、確認、「有能力」（參 6.6） | ◐ | 內建確效涵蓋 SPC 計算；量具 R&R 以 AIAG 例核對 | `tests/test_msa.py::test_the_gauge_rr_of_the_aiag_example` | MSA 部分有 AIAG 手冊例與 kappa 的公開例，沒有 ISO 22514-7 的範例（未取得標準全文） |
 
 ## 第 12 章　文件與報告
 
@@ -169,12 +169,12 @@
 
 ## 缺口總表（⬜ 與 ◐，依對稽核的影響排序）
 
-1. **圖 10-5 點名的圖**：已補齊，剩「經轉換的 Shewhart 圖」（轉換只用在能力指標）與迴歸圖（僅分析用）為部分；z 化計數型圖只在工具，監控器沒有。
+1. **圖 10-5 的迴歸圖**：只做成分析用的工具，不是監控器。
 2. **ISO 22514-7 的計算部分**：未做，等決定與標準全文；Type 1 的標示已改為不主張依據該標準。計數型 MSA 已做，但接受準則未對照 AIAG 手冊。
 3. **計量型 MSA 的標準化預算**：線性與偏差、巢狀 GRR、通用不確定度預算已做，但判定規則未對照 AIAG／VDA 5 手冊，也沒有 ISO 22514-7 的 Q_MS／Q_MP 計算。
 4. **標準化介面格式**（ISO/TR 11462-5）：未做（沒有標準全文）。
 5. 製程特性化只有迴歸與二水準完全因子設計，沒有部分因子、反應曲面與混合設計。
-6. 監控器沒有 z 化計數型圖（工具有）。
+6. **不在軟體範圍或需要其他系統**（仍標 ◐ 或 ➖）：批次放行與不合格處置（5.4 迴路 2，屬 MES／品保流程）、與特定 CAQ 系統的連接器（11.1）、檢驗指令書本身（13）、規劃的工作站與物流（6.5）、抽樣是否隨機且代表製程（9.2，由人判斷）、PDCA 與稽核（5.2、5.4 迴路 4～6，組織責任）。軟體只提供證據鏈與對應的記錄。
 
 ## 我方解讀清單（🔶，建議請統計人員審閱）
 
@@ -191,6 +191,10 @@
 | 量測不確定度 | 草案第 12 章只給結果 | U＝k√(σ_GRR²＋(偏差/√3)²＋(解析度/√12)²＋u_cal²)，吻合草案範例 |
 | MSA 判定門檻 | 草案沒有給 | VDA 5／AIAG 常用值（≤10 %、≤30 %、ndc≥5、Cg≥1.33），屬系統政策可改 |
 | 計數型 MSA | 草案只說 IATF 要求計數型也要驗證，沒有方法 | AIAG 的一致性研究（交叉表法）：kappa、有效性（每次都判對的零件占比）、漏判率與誤判率（單次判定）；門檻為通常歸於 AIAG 的值，**未對照手冊**，屬系統政策可改 |
+| 抽樣間隔 | 草案只給定性建議 | 每組件數取達到目標 ARL 的最小值；抽樣間隔 ＝ 允許生產件數／ARL（件），不得小於每組件數 |
+| 能力不足時 100 % 檢驗 | 草案說改 100 % 檢驗，沒有判準 | 只在有特性類別的目標且指標未達目標（`fails`）時給建議，不自動切換 |
+| 標準化 p、u 監控 | 草案只點名穩定化的計數型圖 | z ＝（值 − 中心）／該樣本標準差，固定 ± u；判定等同常態界限 |
+| 轉換後的個別值圖 | 草案只點名轉換 | Box-Cox（λ 由最大概似）或 Johnson SU 轉換，I-MR 估 σ，界限換回量測尺度 |
 | 配適品質的 25 % 尾端評估 | 看靠近指標那一側規格限的 25 % 資料，沒有判定門檻 | 以機率圖相關係數比較整體與該段，只列數值 |
 | 製程特性化 | 只點名 DoE／迴歸 | 多元線性迴歸（t 檢定、VIF）與二水準完全因子設計（ANOVA；無重複用 Lenth 法） |
 | Laney p′／u′ 與其他圖 | 圖 10-5 只點名 | Laney：σ_z＝z 的平均移動全距／d2(2)；G 圖用幾何分布、T 圖用韋伯分布界限；百分位數圖用經驗分位數 |

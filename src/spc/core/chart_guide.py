@@ -29,7 +29,7 @@ CHARTS: dict[str, dict[str, Any]] = {
     "pre_control": {"ref": "10.3.2.7", "kinds": ["pre"], "support": "full"},
     "preliminary_acceptance": {"ref": "10.3.2.7", "kinds": ["acc-xbar", "acc-median", "acc-x"], "support": "full"},
     "acceptance": {"ref": "10.3.4", "kinds": ["acc-xbar", "acc-median", "acc-x"], "support": "full"},
-    "shewhart_transformed": {"ref": "10.3.2.6", "kinds": [], "support": "partial"},  # transformations exist for capability indices, not for the charts
+    "shewhart_transformed": {"ref": "10.3.2.6", "kinds": [], "support": "full", "tool": "special"},  # Box-Cox or Johnson, then the individuals chart: an analysis chart of the tools
     "pearson": {"ref": "10.3.5.2", "kinds": ["pearson"], "support": "full"},
     "extended": {"ref": "10.3.5.3", "kinds": ["ext-xbar"], "support": "full"},
     "percentile": {"ref": "10.3.2.6 (figure 10-5)", "kinds": [], "support": "full", "tool": "special"},

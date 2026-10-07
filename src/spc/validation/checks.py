@@ -178,6 +178,31 @@ def msa() -> list[Check]:
             Check("V07-interaction", "msa", "req.grr", "AIAG MSA 4th edition example: interaction part × operator, p = 0.974", 0.974, float(g["interaction_p"]), 5e-3)]
 
 
+def agreement() -> list[Check]:
+    from spc.core import msa_attribute as MA
+
+    a = [1] * 25 + [0] * 25
+    b = [1] * 20 + [0] * 5 + [1] * 10 + [0] * 15  # 20 both yes, 5 yes/no, 10 no/yes, 15 both no: po = 0.7, pe = 0.5
+    table = np.array([[0, 0, 0, 0, 14], [0, 2, 6, 4, 2], [0, 0, 3, 5, 6], [0, 3, 9, 2, 0], [2, 2, 8, 1, 1], [7, 7, 0, 0, 0], [3, 2, 6, 3, 0], [2, 5, 3, 2, 2], [6, 5, 2, 1, 0], [0, 2, 2, 3, 7]])
+    return [Check("V10-cohen", "msa", "req.agreement", "Cohen's kappa, the textbook example of 50 proposals: 0.4", 0.4, float(MA.cohen_kappa(a, b)), 1e-9),
+            Check("V10-fleiss", "msa", "req.agreement", "Fleiss (1971), 10 patients, 14 raters, 5 categories: kappa = 0.210", 0.210, float(MA.fleiss_kappa(table)), None, "printed with three decimals").with_abs(5e-4)]
+
+
+def doe() -> list[Check]:
+    from spc.core import doe as D
+
+    A = [-1] * 3 + [1] * 3 + [-1] * 3 + [1] * 3
+    B = [-1] * 6 + [1] * 6
+    y = [28, 25, 27, 36, 32, 32, 18, 19, 23, 31, 30, 29]
+    r = D.factorial(y, {"A": A, "B": B})
+    t = {x["term"]: x for x in r["terms"]}
+    ref = "Montgomery, Design and Analysis of Experiments, example 6.1 (2² with 3 replicates)"
+    out = [Check(f"V11-effect-{k}", "doe", "req.doe", ref + ": effect", v, float(t[k]["effect"]), None).with_abs(5e-3) for k, v in (("A", 8.33), ("B", -5.00), ("A:B", 1.67))]
+    out += [Check(f"V11-ss-{k}", "doe", "req.doe", ref + ": sum of squares", v, float(t[k]["ss"]), None).with_abs(5e-3) for k, v in (("A", 208.33), ("B", 75.00), ("A:B", 8.33))]
+    out.append(Check("V11-sse", "doe", "req.doe", ref + ": error sum of squares", 31.33, float(r["sse"]), None).with_abs(5e-3))
+    return out
+
+
 def transparency() -> list[Check]:
     _, ds = _data(41, 50)
     r = analyze(ds, AnalysisRequest(stage="production", lsl=9.7, usl=10.3))
@@ -215,7 +240,7 @@ def _iso22514() -> list[Check]:
 
 GROUPS: tuple[tuple[str, Callable[[], list[Check]]], ...] = (
     ("constants", constants), ("indices", indices), ("precision", precision), ("charts", charts), ("signals", signals),
-    ("sequential", sequential), ("msa", msa), ("transparency", transparency), ("archive", archive), ("iso11462", lambda: _iso()), ("iso22514", lambda: _iso22514()),
+    ("sequential", sequential), ("msa", msa), ("agreement", agreement), ("doe", doe), ("transparency", transparency), ("archive", archive), ("iso11462", lambda: _iso()), ("iso22514", lambda: _iso22514()),
 )
 
 

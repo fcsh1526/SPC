@@ -20,9 +20,9 @@ from spc.monitor.model import (
     VECTOR_KINDS, ZMR_KIND, check_vector_point, estimate_reference, vector_limits, zmr_limits, zmr_z,
     ACCEPT_KINDS, ACTION_STEPS, SEQ_KINDS, check_sequential_point, ewma_band, sequential_limits, ATTRIBUTE_KINDS, EVENT_KINDS, PRE_KIND, PRE_QUALIFY, TOLERANCE_KINDS, acceptance_from_values,
     acceptance_limits, base_kind, check_pre_point, pre_statistic, pre_zone, precontrol_limits, OUTCOMES, STEPS, MonitorError, attribute_limits, band, check_attribute_point,
-    check_point, check_values, compute_limits, limits_from_counts, limits_from_values, ocap_for, statistic, validate_config,
+    check_point, check_values, compute_limits, limits_from_counts, limits_from_values, ocap_for, standardised_point, statistic, validate_config,
 )
-from spc.core.constants import cn
+from spc.core.constants import cn, u_quantile
 from spc.monitor.notify import Notifier
 from spc.monitor.store import MonitorStore
 from spc.service import AnalysisRequest, analyze
@@ -442,13 +442,13 @@ class MonitorService:
                     raise ValueError("the reference level must be a number")
                 if monitor.get("laney"):
                     raise ValueError("a Laney chart needs reference counts: sigma_z comes from how the counts vary from sample to sample")
-                return attribute_limits(kind, n, alpha, warn, rate), {"type": "rate", "rate": rate}
+                return attribute_limits(kind, n, alpha, warn, rate, None, bool(monitor.get("standardised"))), {"type": "rate", "rate": rate}
             if typ == "counts":
                 counts, sizes = source.get("counts"), source.get("sizes")
                 if not isinstance(counts, list) or (sizes is not None and not isinstance(sizes, list)) or len(counts) > 10000 or not all(
                         isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in [*counts, *(sizes or [])]):
                     raise ValueError("counts and sizes must be lists of numbers")
-                return limits_from_counts(kind, n, alpha, warn, counts, sizes, bool(monitor.get("laney"))), {"type": "counts", "n_samples": len(counts)}
+                return limits_from_counts(kind, n, alpha, warn, counts, sizes, bool(monitor.get("laney")), bool(monitor.get("standardised"))), {"type": "counts", "n_samples": len(counts)}
             if typ == "points":
                 lo, hi = source.get("seq_from"), source.get("seq_to")
                 if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (lo, hi)) or lo > hi:
@@ -456,7 +456,7 @@ class MonitorService:
                 pts = [p for p in self.store.points(monitor["id"], limit=100000, since_seq=lo) if p["seq"] <= hi and p["valid"]]
                 counts = [p["values"][0] for p in pts]
                 sizes = [p["values"][1] for p in pts] if kind in ("p", "u") else None
-                return (limits_from_counts(kind, n, alpha, warn, counts, sizes, bool(monitor.get("laney"))),
+                return (limits_from_counts(kind, n, alpha, warn, counts, sizes, bool(monitor.get("laney")), bool(monitor.get("standardised"))),
                         {"type": "points", "seq_from": lo, "seq_to": hi, "n_points": len(pts)})
         except ValueError as exc:
             raise MonitorError("bad_source", str(exc)) from None
@@ -485,7 +485,7 @@ class MonitorService:
         except ValueError as exc:
             raise MonitorError("invalid_input", str(exc)) from None
         self._check_system(config)
-        if (config["kind"], config["n"], bool(config.get("laney"))) != (old["kind"], old["n"], bool(old.get("laney"))):
+        if (config["kind"], config["n"], bool(config.get("laney")), bool(config.get("standardised"))) != (old["kind"], old["n"], bool(old.get("laney")), bool(old.get("standardised"))):
             raise MonitorError("monitor_shape_locked", "the chart type and the subgroup size cannot change: make a new monitor", 409)
         if config["kind"] in TOLERANCE_KINDS and config["specs"] != {"msa_id": None, **old["specs"], "msa_id": config["specs"]["msa_id"],
                                                                   "controlled_stable": config["specs"]["controlled_stable"],
@@ -782,6 +782,13 @@ class MonitorService:
             lim = revs[p["limits_rev"]]
             size = p["values"][1] if monitor["kind"] in ("p", "u") else None
             p["band"] = None if lim is None else band(monitor["kind"], lim, size)
+            if lim is not None and lim.get("standardised") and p["valid"]:  # what is drawn: z with the constant limits
+                u = u_quantile(lim["alpha"])
+                p["z"] = standardised_point(monitor["kind"], lim, p["loc"], size)
+                p["zband"] = {"cl": 0.0, "lcl": -u, "ucl": u}
+                if lim.get("warn_alpha"):
+                    w = u_quantile(lim["warn_alpha"])
+                    p["zband"].update(wlcl=-w, wucl=w)
         return pts
 
     def incidents(self, monitor_id: int | None, status: str | None) -> list[dict]:

@@ -2,6 +2,7 @@
 
 import math
 
+from spc.core.constants import ALPHA_3SIGMA
 from spc.core.constants import d2 as _d2
 
 D2 = _d2(2)
@@ -233,3 +234,55 @@ def test_the_api_draws_each_chart_and_refuses_bad_input():
     assert client.post("/api/charts/special", json={"kind": "percentile", "values": rng.normal(0, 1, 100).tolist()}).status_code == 400  # too short for the quantiles
     assert client.post("/api/charts/special", json={"kind": "nope"}).status_code == 422
     assert client.post("/api/charts/special", json={"kind": "g", "values": []}).status_code == 400
+
+
+# ------------------------------------------------------------------ transformed values
+
+def test_the_box_cox_chart_follows_the_transformation_and_its_limits_are_not_symmetric():
+    rng = np.random.default_rng(21)
+    x = rng.lognormal(1.0, 0.4, 200)
+    r = sp.transformed_chart(x, "box-cox")
+    ch, par = r["charts"][0], r["parameters"]
+    y = (x ** par["lambda"] - 1) / par["lambda"]
+    assert par["lambda"] == pytest.approx(0.0, abs=0.25) and ch["transformed"] == pytest.approx(y.tolist())
+    sigma = np.abs(np.diff(y)).mean() / D2
+    u = stats.norm.isf(ALPHA_3SIGMA / 2)
+    inv = lambda v: (par["lambda"] * v + 1) ** (1 / par["lambda"])
+    assert par["sigma_y"] == pytest.approx(sigma) and ch["ucl"][0] == pytest.approx(inv(y.mean() + u * sigma)) and ch["lcl"][0] == pytest.approx(inv(y.mean() - u * sigma))
+    assert ch["ucl"][0] - ch["center"][0] > ch["center"][0] - ch["lcl"][0]  # skewed to the right
+    # for a lognormal series the chart signals about as often as the stated risk on both sides, the plain chart much more on the upper side
+    big = rng.lognormal(1.0, 0.4, 20000)
+    plain = np.mean(np.abs(big - big.mean()) > 3 * np.abs(np.diff(big)).mean() / D2)
+    transformed = len(sp.transformed_chart(big, "box-cox")["charts"][0]["alarms"]) / big.size
+    assert transformed < 0.006 < 0.01 < plain
+
+
+def test_the_johnson_chart_handles_any_values_and_the_limits_are_the_back_transformed_ones():
+    rng = np.random.default_rng(22)
+    x = stats.johnsonsu.rvs(-1.0, 1.5, loc=2.0, scale=1.0, size=400, random_state=rng)
+    r = sp.transformed_chart(x, "johnson", alpha=0.01)
+    ch, p = r["charts"][0], r["parameters"]
+    u = stats.norm.isf(0.005)
+    back = lambda y: p["j_location"] + p["j_scale"] * np.sinh((y - p["j_a"]) / p["j_b"])
+    assert ch["ucl"][0] == pytest.approx(back(p["center_y"] + u * p["sigma_y"])) and ch["lcl"][0] == pytest.approx(back(p["center_y"] - u * p["sigma_y"]))
+    assert len(ch["alarms"]) / x.size < 0.03
+    shifted = np.concatenate([x[:200], x[200:] + 2.0 * ch["ucl"][0]])  # the upper tail of a Johnson curve is long: the shift must be large to leave the limits
+    assert len(sp.transformed_chart(shifted, "johnson", reference_n=200)["charts"][0]["alarms"]) > 150  # a shift after the reference is found
+
+
+def test_the_transformed_chart_refuses_what_it_cannot_do():
+    rng = np.random.default_rng(23)
+    x = rng.lognormal(0, 0.3, 50)
+    for bad in (lambda: sp.transformed_chart(x[:10], "box-cox"), lambda: sp.transformed_chart(x - 5, "box-cox"), lambda: sp.transformed_chart(x, "log"),
+                lambda: sp.transformed_chart([1.0] * 30, "johnson"), lambda: sp.transformed_chart(x, "box-cox", alpha=0.7)):
+        with pytest.raises(ValueError):
+            bad()
+
+
+def test_the_transformed_charts_are_on_the_special_chart_route():
+    client = logged_in_client(make_app())
+    x = np.random.default_rng(24).lognormal(0.5, 0.3, 80).tolist()
+    for kind in ("box-cox", "johnson"):
+        r = client.post("/api/charts/special", json={"kind": kind, "values": x})
+        assert r.status_code == 200 and r.json()["charts"][0]["name"] == "transformed" and r.json()["parameters"]["method"] == kind
+    assert client.post("/api/charts/special", json={"kind": "box-cox", "values": [-1.0] * 30}).status_code == 400

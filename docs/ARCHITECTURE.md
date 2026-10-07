@@ -624,6 +624,15 @@
 - **AR 殘差圖**：殘差圖的修正量以 殘差/(1−Σφ) 轉回原單位（水準位移）。
 - **製程特性化**（`spc.core.doe`，`POST /api/doe/regression`、`/api/doe/factorial`）：多元線性迴歸（係數、標準誤、t、p、信賴區間、標準化係數、偏 R²、VIF、排名；共線性與試驗過少警告）；二水準完全因子設計（效應＝高低水準平均差，係數為其一半；有重複用 ANOVA 與純誤差，無重複用 Lenth 法：PSE、ME、SME）。驗證：Montgomery 例 6.1（效應 8.333、−5、1.667；SS 208.33、75、8.33；SSE 31.33，自由度 8）、與 `scipy.stats.linregress` 及正規方程式逐項相等、Lenth 以獨立公式重算。**不含**部分因子、反應曲面與混合設計。
 
+## 10.15 對照表逐列檢查後補上的項目
+
+- **轉換後的個別值圖**（`spc.core.charts.special.transformed_chart`，`POST /api/charts/special` 的 `box-cox`、`johnson`）：以參考資料估轉換（Box-Cox 的 λ 用最大概似；Johnson SU 用最大概似），在轉換後的值上以平均移動全距／1.128 估 σ，界限 μ ± u·σ 換回量測尺度，所以不對稱。Box-Cox 的界限落在轉換值域外時拒絕並建議改用 Johnson 或百分位數圖。驗證：與公式逐項相等；對數常態資料上轉換後誤報率低於 0.6 %，一般圖超過 1 %。圖 10-5 的選圖指南因此只剩迴歸圖標為「部分」。
+- **標準化 p、u 監控**（監控設定 `standardised`，與 `laney` 擇一，屬形狀、建立後不可改）：界限用常態界限（等同 Laney 分支且 σ_z ＝ 1），畫面畫 z ＝ (值 − 中心)/√(p̄(1 − p̄)/n)（u 為 √(ū/n)），界限固定 ± u；判定與一般常態界限相同，所以判定不因畫法而變。點資料多帶 `z`、`zband`。
+- **抽樣間隔**（`spc.core.arl_oc.sampling_interval`，`POST /api/arl` 的 `max_parts`、`parts_per_hour`）：每組件數取達到目標 ARL 的最小值；偏移後約生產 間隔 × ARL 件才發現，間隔 ＝ ⌊允許件數／ARL⌋，不得小於每組件數，否則回報組太小。**這是我們的解讀**（草案只給定性建議）。
+- **能力不足建議 100 % 檢驗**：分析結果有特性類別的目標且指標 `fails` 時給警告 `consider_full_inspection`（草案 6.2.3）；只是建議。
+- **確效報告**：新增 Cohen／Fleiss kappa 的公開例與 Montgomery 例 6.1（2² 試驗）共 10 項檢查。
+- 仍標 ◐／⬜ 的列見 `docs/TRACEABILITY.md` 的缺口總表：多為標準全文未取得（ISO 22514-7、ISO/TR 11462-5）或屬 MES／CAQ／組織責任。
+
 ## 10.1 資料庫與登入（已實作第一版）
 
 **儲存**：SQLite 單檔（`--db` 或環境變數 `SPC_DB`，預設 `spc.sqlite3`，建立時權限 0600）。一條連線加一把鎖，所有存取走 `spc.db`，日後換 PostgreSQL 只改 `database.py` 與 `stores.py`。結構版本（目前 8）放在 `PRAGMA user_version`，版本不符時拒絕啟動。

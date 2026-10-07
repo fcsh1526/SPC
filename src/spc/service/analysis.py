@@ -504,6 +504,9 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
             result["targets"] = {"class": req.characteristic_class.lower(), "blocked": True, "n": idx.n,
                                  "n_base": base}
             _warn(warnings, "target_not_allowed", n=idx.n, base=base)
+    tg = result["targets"]
+    if tg and not tg.get("blocked") and "fails" in (tg.get("verdict_pk"), tg.get("verdict_p")):  # draft 6.2.3: a characteristic that is not capable is inspected 100 % until the process is
+        _warn(warnings, "consider_full_inspection", cls=tg["class"])
     if req.pmk_excluded:  # agreed with the customer (draft 8.2.4): the index stays in the result for information, but it is not judged against a target
         result["pmk_excluded"] = {"agreement": req.pmk_excluded.strip()}
         if result["targets"] and not result["targets"].get("blocked"):

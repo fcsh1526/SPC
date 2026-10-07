@@ -908,6 +908,9 @@
       const body = { shift: Number($("#l-shift").value), n: Number($("#l-n").value) };
       const mx = $("#l-max").value.trim();
       if (mx) body.max_arl = Number(mx);
+      const mp = $("#l-parts").value.trim(), rate = $("#l-rate").value.trim();
+      if (mp) body.max_parts = Number(mp);
+      if (mp && rate) body.parts_per_hour = Number(rate);
       state.toolsArl = { body, out: await post("/api/arl", body) };
       renderArl();
     });
@@ -921,6 +924,12 @@
     box.appendChild(el("p", "strong", `${t("tools.arl_arl")}: ${fmt(out.arl, 1)}`));
     if (body.max_arl !== undefined) {
       box.appendChild(el("p", "strong", out.required_n ? `${t("tools.arl_required")}: ${out.required_n}` : t("tools.arl_none")));
+    }
+    if (out.sampling) {
+      const s = out.sampling;
+      box.appendChild(el("p", "strong", t(s.feasible ? "tools.arl_interval" : "tools.arl_interval_tight", { n: s.n, h: s.interval_parts, arl: fmt(s.arl, 1), parts: s.max_parts })));
+      if (s.interval_minutes !== undefined && s.feasible) box.appendChild(el("p", "", t("tools.arl_minutes", { min: fmt(s.interval_minutes, 1), per: fmt(s.samples_per_hour, 2) })));
+      box.appendChild(el("p", "muted", t("tools.arl_interval_note")));
     }
     box.appendChild(el("h4", "", t("tools.arl_curve")));
     const wrap = el("div", "scroll"), table = el("table", "grid");
@@ -1432,6 +1441,12 @@
     }
     if (isCount(v.monitor.kind) || v.monitor.kind === "ewma") {  // limits follow the sample size (counts) or the place in the run (EWMA): one band per point
       const rows = v.points.filter((p) => p.valid && p.band);
+      if (v.monitor.standardised) {  // z values with constant limits
+        const zc = (k) => rows.map((p) => (p.zband ? p.zband[k] : null));
+        return { values: rows.map((p) => p.z), labels: rows.map((p) => p.label || `#${p.seq}`), lcl: zc("lcl"), center: zc("cl"), ucl: zc("ucl"),
+          wlcl: v.limits.warn_alpha ? zc("wlcl") : null, wucl: v.limits.warn_alpha ? zc("wucl") : null,
+          alarms: rows.map((p, i) => ({ index: i, hit: p.alarms.length > 0 })).filter((a) => a.hit) };
+      }
       const col = (k) => rows.map((p) => p.band[k] ?? null);
       return { values: rows.map((p) => p.loc), labels: rows.map((p) => p.label || `#${p.seq}`), lcl: col("lcl"), center: col("cl"), ucl: col("ucl"),
         wlcl: v.limits.warn_alpha ? col("wlcl") : null, wucl: v.limits.warn_alpha ? col("wucl") : null,
@@ -1752,6 +1767,7 @@
     $("#mon-editor-title").textContent = monitor ? t("mon.edit_title", { name: m.name }) : t("mon.new");
     ["name", "process", "characteristic", "unit", "line"].forEach((k) => { $("#me-" + k).value = m[k] || ""; });
     $("#me-laney").checked = !!m.laney; $("#me-laney").disabled = !!monitor;
+    $("#me-std").checked = !!m.standardised; $("#me-std").disabled = !!monitor;
     $("#me-kind").value = m.kind; $("#me-n").value = m.n; $("#me-alpha").value = m.alpha && Math.abs(m.alpha - 0.01) < 1e-12 ? "0.01" : "";
     $("#me-warn").value = m.warn_alpha ?? "";
     ["#me-kind", "#me-n", "#me-alpha", "#me-warn"].forEach((s) => { $(s).disabled = !!monitor; });  // the shape is fixed once there are limits
@@ -1786,6 +1802,8 @@
     const laneyKind = kind === "p" || kind === "u";  // Laney limits: for the p and u charts, from reference counts
     $("#me-laney-label").hidden = !laneyKind;
     if (!laneyKind) $("#me-laney").checked = false;
+    $("#me-std-label").hidden = !laneyKind;
+    if (!laneyKind) $("#me-std").checked = false;
     const tol = isTol(kind);
     $("#me-warn-label").hidden = tol || SEQ_KINDS.includes(kind) || isVec(kind) || SHAPE_KINDS.includes(kind) || kind === "multistream"; if (tol || SEQ_KINDS.includes(kind) || isVec(kind) || SHAPE_KINDS.includes(kind) || kind === "multistream") $("#me-warn").value = "";
     $("#me-accept-box").hidden = !ACC_KINDS.includes(kind);
@@ -1835,6 +1853,7 @@
     };
     if (editing) config.alpha = editing.alpha; else if ($("#me-alpha").value) config.alpha = Number($("#me-alpha").value);
     if (editing ? editing.laney : $("#me-laney").checked && (config.kind === "p" || config.kind === "u")) config.laney = true;
+    if (editing ? editing.standardised : $("#me-std").checked && (config.kind === "p" || config.kind === "u")) config.standardised = true;
     config.specs = { ...config.specs, msa_id: $("#me-msa").value ? Number($("#me-msa").value) : null };
     return config;
   }
@@ -1867,7 +1886,8 @@
     $("#me-cancel").addEventListener("click", () => showMonitorView(M.id && M.editing !== "new" ? "#mon-detail" : "#mon-list-view"));
     $("#me-save").addEventListener("click", saveMonitor);
     $("#me-kind").addEventListener("change", syncKindFields);
-    $("#me-laney").addEventListener("change", syncKindFields);
+    $("#me-laney").addEventListener("change", () => { if ($("#me-laney").checked) $("#me-std").checked = false; syncKindFields(); });  // the Laney and the standardised option exclude each other: the later choice wins
+    $("#me-std").addEventListener("change", () => { if ($("#me-std").checked) $("#me-laney").checked = false; syncKindFields(); });
     $("#me-src-type").addEventListener("change", syncEditorSource);
     $("#mon-back").addEventListener("click", () => { M.id = null; M.view = null; loadMonitors(); });
     $("#mon-edit").addEventListener("click", () => openMonitorEditor(M.view.monitor));
@@ -3086,7 +3106,7 @@
   $("#tr-run").addEventListener("click", runTrend);
 
   // ---------------------------------------------------------------- charts for special situations (draft figure 10-5)
-  const SC_KINDS = { "laney-p": "pairs", "laney-u": "pairs", "z-p": "pairs", "z-u": "pairs", g: "values", t: "values", percentile: "values", uwma: "values", "delta-target": "labelled", "levey-jennings": "labelled" };
+  const SC_KINDS = { "laney-p": "pairs", "laney-u": "pairs", "z-p": "pairs", "z-u": "pairs", g: "values", t: "values", percentile: "values", uwma: "values", "box-cox": "values", johnson: "values", "delta-target": "labelled", "levey-jennings": "labelled" };
   function syncSpecialChartForm() {
     const kind = $("#sc-kind").value;
     $("#sc-data-label").textContent = t("sc.data_" + SC_KINDS[kind]);

@@ -55,3 +55,25 @@ def test_params_are_explicit_and_hashable_for_archiving():
     c = AnalysisParams(customer="A", rules=RuleSet(run_length=7))
     assert c.fingerprint() != a.fingerprint()
     assert c.to_dict()["rules"]["run_length"] == 7
+
+
+def test_the_sampling_interval_follows_the_run_length():
+    from spc.core.arl_oc import sampling_interval
+
+    a = float(arl(1.0, 5))
+    s = sampling_interval(1.0, 5, 100, parts_per_hour=60)
+    assert s["arl"] == pytest.approx(a) and s["interval_parts"] == int(100 // a) and s["parts_until_signal"] <= 100
+    assert s["feasible"] == (s["interval_parts"] >= 5) and s["interval_minutes"] == pytest.approx(s["interval_parts"])  # 60 parts per hour: one part a minute
+    tight = sampling_interval(0.5, 3, 20)
+    assert tight["feasible"] is False  # many subgroups are needed to find a small shift with 3 parts, 20 parts are too few
+    assert "interval_minutes" not in tight
+
+
+def test_the_arl_route_gives_the_interval_only_when_the_limit_is_given():
+    from tests.conftest import logged_in_client, make_app
+
+    c = logged_in_client(make_app())
+    plain = c.post("/api/arl", json={"shift": 1.0, "n": 5}).json()
+    assert "sampling" not in plain
+    r = c.post("/api/arl", json={"shift": 1.0, "n": 5, "max_arl": 4, "max_parts": 200, "parts_per_hour": 120}).json()
+    assert r["required_n"] is not None and r["sampling"]["n"] == r["required_n"] and r["sampling"]["interval_minutes"] == pytest.approx(r["sampling"]["interval_parts"] / 2)

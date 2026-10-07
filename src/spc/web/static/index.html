@@ -491,6 +491,7 @@
           <option value="z-p" data-i18n="sc.kind_z-p"></option><option value="z-u" data-i18n="sc.kind_z-u"></option>
           <option value="g" data-i18n="sc.kind_g"></option><option value="t" data-i18n="sc.kind_t"></option>
           <option value="percentile" data-i18n="sc.kind_percentile"></option><option value="uwma" data-i18n="sc.kind_uwma"></option>
+          <option value="box-cox" data-i18n="sc.kind_box-cox"></option><option value="johnson" data-i18n="sc.kind_johnson"></option>
           <option value="delta-target" data-i18n="sc.kind_delta-target"></option><option value="levey-jennings" data-i18n="sc.kind_levey-jennings"></option>
         </select></label>
       <label><span data-i18n="sc.alpha"></span>
@@ -558,6 +559,8 @@
       <label><span data-i18n="tools.arl_shift"></span><input id="l-shift" type="number" step="any" min="0.01" value="0.75"></label>
       <label><span data-i18n="tools.arl_n"></span><input id="l-n" type="number" min="1" step="1" value="5"></label>
       <label><span data-i18n="tools.arl_max"></span><input id="l-max" type="number" min="1" step="any" value="10"></label>
+      <label><span data-i18n="tools.arl_parts"></span><input id="l-parts" type="number" min="1" step="1"></label>
+      <label><span data-i18n="tools.arl_rate"></span><input id="l-rate" type="number" min="0" step="any"></label>
     </div>
     <p><button id="l-btn" class="primary" data-i18n="tools.calculate"></button></p>
     <div id="l-out"></div>
@@ -622,6 +625,7 @@
       <label><span data-i18n="mon.f_alpha"></span>
         <select id="me-alpha"><option value="" data-i18n="analysis.risk_3sigma"></option><option value="0.01" data-i18n="analysis.risk_99"></option></select></label>
       <label id="me-laney-label" class="check wide" hidden><input id="me-laney" type="checkbox"><span data-i18n="mon.f_laney"></span></label>
+      <label id="me-std-label" class="check wide" hidden><input id="me-std" type="checkbox"><span data-i18n="mon.f_std"></span></label>
       <label id="me-warn-label"><span data-i18n="mon.f_warn"></span><input id="me-warn" type="number" min="0" max="1" step="any" placeholder="0.05"></label>
     </div>
     <p id="me-source-box"></p>
