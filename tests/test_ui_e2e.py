@@ -1898,3 +1898,58 @@ def test_process_characterization_in_the_browser(server, browser):
     expect(page.locator("#doe-out")).to_contain_text("adjusted R²", timeout=20000)
     assert problems == []
     ctx.close()
+
+
+def test_linearity_nested_grr_and_budget_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=msa]")
+    page.click("#ms-new")
+    page.fill("#mse-name", "Tensile tester")
+    page.fill("#mse-resolution", "0.01")
+    page.fill("#mse-tolerance", "6")
+    page.click("#mse-save")
+    expect(page.locator("#ms-title")).to_have_text("Tensile tester", timeout=20000)
+    expect(page.locator("#ms-checks")).to_contain_text("Linearity and bias")
+    rng = np.random.default_rng(12)
+
+    # linearity: the bias grows with the size
+    page.select_option("#mss-kind", "linearity")
+    expect(page.locator("#mss-pv-label")).to_be_visible()
+    page.fill("#mss-pv", "6")
+    page.fill("#mss-data", "2 3")
+    page.click("#mss-save")
+    expect(page.locator("#errors")).to_contain_text("at least 2 readings", timeout=20000)
+    rows = [f"{x} " + " ".join(f"{x * 1.05 + rng.normal(0, 0.1):.3f}" for _ in range(10)) for x in (2, 4, 6, 8, 10)]
+    page.fill("#mss-data", "\n".join(rows))
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("Linearity and bias, study 1", timeout=20000)
+    expect(page.locator("#ms-more-detail")).to_contain_text("leaves the confidence band")
+    expect(page.locator("#ms-checks")).to_contain_text("leaves the confidence band")
+
+    # nested gauge R&R
+    page.select_option("#mss-kind", "grr_nested")
+    expect(page.locator("#mss-pv-label")).to_be_hidden()
+    data = "\n".join(" ; ".join(" ".join(f"{10 + o * 0.01 + p * 0.5 + rng.normal(0, 0.05):.3f}" for _ in range(2)) for p in range(4)) for o in range(3))
+    page.fill("#mss-data", data)
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("Nested gauge R&R, study 2", timeout=20000)
+    expect(page.locator("#ms-checks")).to_contain_text("Gauge R&R")
+
+    # uncertainty budget
+    page.select_option("#mss-kind", "budget")
+    page.fill("#mss-data", "calibration ; B ; 0.1 ; normal_k2\nresolution ; B ; 0.01 ; rectangular\nrepeatability ; A ; 0.03 ; standard ; 1 ; 19")
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("Uncertainty budget, study 3", timeout=20000)
+    expect(page.locator("#ms-more-detail")).to_contain_text("effective degrees of freedom")
+    expect(page.locator("#ms-checks")).to_contain_text("2U/T")
+    page.fill("#mss-data", "only a name")
+    page.click("#mss-save")
+    expect(page.locator("#errors")).to_contain_text("not understood", timeout=20000)
+    assert problems == []
+    ctx.close()

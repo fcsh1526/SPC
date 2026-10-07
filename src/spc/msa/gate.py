@@ -3,9 +3,11 @@
 The draft assumes a capable and stable measurement process (1, 6.3) and asks for proof in 8.2.3. The gate turns that into checks:
 
   resolution  the resolution is at most 5 % of the tolerance (policy)
-  grr         the latest gauge R&R is capable (conditional counts as a remark)
+  grr         the latest gauge R&R (crossed, or nested for destructive measurement) is capable (conditional counts as a remark)
   type1       a type 1 study, when there is one, is capable (optional)
   validity    the latest gauge R&R is not older than the validity time (12 months)
+  linearity   a linearity and bias study, when there is one, shows the line "bias = 0" inside the confidence band (optional)
+  budget      an uncertainty budget, when there is one, gives 2U/T within the limits of the policy (optional)
   stability   repeated measurements of a reference show no signal and are not older than the check interval (when required)
 
 A system of the kind `attribute` (go / no-go) has the checks `attribute` (the latest attribute agreement study is capable, `spc.core.msa_attribute`) and
@@ -27,13 +29,14 @@ from spc.core import msa_attribute
 
 POLICY_DEFAULTS: dict[str, Any] = {
     "validity_months": 12, "stability_months": 6, "resolution_share_max": 0.05, "grr_pass": 10.0, "grr_conditional": 30.0, "ndc_min": 5.0,
-    "cg_min": 1.33, "require_stability": True, "k": 2.0, "guard_band_risk": 0.05, "u_cal": 0.0,
+    "cg_min": 1.33, "require_stability": True, "k": 2.0, "guard_band_risk": 0.05, "u_cal": 0.0, "budget_pass": 15.0, "budget_conditional": 30.0,
     **{f"attr_{k}": v for k, v in msa_attribute.POLICY_DEFAULTS.items()},
 }
-CHECKS = ("resolution", "grr", "type1", "validity", "stability", "attribute")
-STUDY_KINDS = ("type1", "grr", "stability", "attribute")
+CHECKS = ("resolution", "grr", "type1", "validity", "stability", "attribute", "linearity", "budget")
+STUDY_KINDS = ("type1", "grr", "grr_nested", "stability", "linearity", "budget", "attribute")
 SYSTEM_KINDS = ("variable", "attribute")
-STUDY_KINDS_OF = {"variable": ("type1", "grr", "stability"), "attribute": ("attribute",)}
+STUDY_KINDS_OF = {"variable": ("type1", "grr", "grr_nested", "stability", "linearity", "budget"), "attribute": ("attribute",)}
+GRR_KINDS = ("grr", "grr_nested")  # the crossed study, and the nested one for destructive measurement: either proves repeatability and reproducibility
 
 
 def add_months(d: date, months: int) -> date:
@@ -48,6 +51,11 @@ def latest(system: Mapping, kind: str) -> dict | None:
     return max(items, key=lambda s: (s["date"], s["id"])) if items else None
 
 
+def latest_grr(system: Mapping) -> dict | None:
+    items = [s for s in system["studies"] if s["kind"] in GRR_KINDS and not s.get("voided") and s.get("result")]
+    return max(items, key=lambda s: (s["date"], s["id"])) if items else None
+
+
 def validate_policy(data: Mapping | None) -> dict:
     p = {**POLICY_DEFAULTS, **dict(data or {})}
     if set(p) - set(POLICY_DEFAULTS):
@@ -59,7 +67,9 @@ def validate_policy(data: Mapping | None) -> dict:
         p[key] = int(v) if whole else float(v)
     num("validity_months", 1, 60, True); num("stability_months", 1, 60, True); num("resolution_share_max", 0.001, 0.5)
     num("grr_pass", 1, 50); num("grr_conditional", 1, 100); num("ndc_min", 1, 20); num("cg_min", 0.5, 5); num("k", 1, 4)
-    num("guard_band_risk", 0.001, 0.499); num("u_cal", 0, 1e9)
+    num("guard_band_risk", 0.001, 0.499); num("u_cal", 0, 1e9); num("budget_pass", 1, 100); num("budget_conditional", 1, 200)
+    if not p["budget_pass"] < p["budget_conditional"]:
+        raise ValueError("policy: the budget limit for capable must be below the limit for conditional")
     if not p["grr_pass"] < p["grr_conditional"]:
         raise ValueError("policy: the limit for capable must be below the limit for conditional")
     p["require_stability"] = bool(p["require_stability"])
@@ -73,7 +83,7 @@ def attribute_policy(policy: Mapping) -> dict:
 
 
 def uncertainty(system: Mapping) -> dict | None:
-    g = latest(system, "grr")
+    g = latest_grr(system)
     if g is None:
         return None
     pol = system["policy"]
@@ -95,7 +105,7 @@ def evaluate(system: Mapping, today: date | None = None) -> dict[str, Any]:
         share = res / tol
         checks["resolution"] = {"result": "pass" if share <= pol["resolution_share_max"] else "fail", "share": share, "limit": pol["resolution_share_max"]}
     # gauge R&R and its age
-    g = latest(system, "grr")
+    g = latest_grr(system)
     if g is None:
         checks["grr"] = {"result": "missing", "reason": "no_study"}
         checks["validity"] = {"result": "missing", "reason": "no_study"}
@@ -120,6 +130,13 @@ def evaluate(system: Mapping, today: date | None = None) -> dict[str, Any]:
             ok = s["verdict"] == "pass" and until >= today
             checks["stability"] = {"result": "pass" if ok else "fail", "study": s["id"], "signals": s["result"]["n_signals"], "until": until.isoformat(),
                                    "reason": None if ok else ("signals" if s["verdict"] != "pass" else "expired")}
+    lin = latest(system, "linearity")
+    checks["linearity"] = ({"result": "not_done"} if lin is None else
+                           {"result": "pass" if lin["verdict"] == "pass" else "fail", "study": lin["id"], "pct_linearity": lin["result"]["pct_linearity"],
+                            "bias": lin["result"]["average_bias"]})
+    bud = latest(system, "budget")
+    checks["budget"] = ({"result": "not_done"} if bud is None else
+                        {"result": {"pass": "pass", "conditional": "warn", "fail": "fail"}[bud["verdict"]], "study": bud["id"], "q": bud["result"]["q_ms"], "U": bud["result"]["U"]})
     checks["attribute"] = {"result": "not_needed", "reason": "other_kind"}
     return _finish(system, checks, today)
 
@@ -127,7 +144,7 @@ def evaluate(system: Mapping, today: date | None = None) -> dict[str, Any]:
 def _evaluate_attribute(system: Mapping, today: date) -> dict[str, Any]:
     pol = system["policy"]
     other = {"result": "not_needed", "reason": "other_kind"}
-    checks: dict[str, dict] = {k: dict(other) for k in ("resolution", "grr", "type1", "stability")}
+    checks: dict[str, dict] = {k: dict(other) for k in ("resolution", "grr", "type1", "stability", "linearity", "budget")}
     a = latest(system, "attribute")
     if a is None:
         checks["attribute"] = {"result": "missing", "reason": "no_study"}

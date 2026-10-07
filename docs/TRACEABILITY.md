@@ -41,7 +41,7 @@
 | 6.2.1、圖 6-2 | 擴充不確定度 U_MP 與驗收界限、防護帶 | ◐ | `src/spc/core/msa.py::expanded_uncertainty`；報告元素 22 | `tests/test_report.py::test_guard_band_follows_the_draft_example`、`tests/test_msa.py::test_the_expanded_uncertainty_and_the_guard_band_follow_the_report_of_the_draft` | 防護帶 g 算出並寫入報告（草案第 12 章範例 U＝0.0211、g＝0.0175 吻合）；驗收界限 L_A、U_A 不作為圖或判定使用；U 是簡化合成（見 6.3） |
 | 6.2.2 | 風險分析（FMEA）決定哪些特性做 SPC | ➖ | 控制計畫的特性分類（`src/spc/plan/`） | — | FMEA 本身不在軟體內 |
 | 6.2.3 | 特殊特性；能力不足時改 100 % 檢驗 | ◐ | 控制計畫每行有分類與管制方式（SPC 圖／抽樣／100 % 檢驗／其他）`src/spc/plan/model.py` | `tests/test_plan.py::test_a_line_needs_what_the_draft_lists` | 不會因為能力不足自動建議 100 % 檢驗 |
-| 6.3 | 有效且有能力的量測與檢驗過程（依 MSA／VDA 5）；IATF 要求計量型**與計數型**都要驗證 | ◐ | 計量型：`src/spc/core/msa.py`（量具 R&R、Type 1、穩定性、擴充不確定度）；計數型：`src/spc/core/msa_attribute.py`（一致性研究：kappa、有效性、漏判率、誤判率）；`src/spc/msa/gate.py`（兩種系統的閘門） | `tests/test_msa.py::test_the_gauge_rr_of_the_aiag_example`、`tests/test_msa.py::test_the_gate_is_open_with_proof_and_blocked_without_it`、`tests/test_msa_attribute.py::test_cohens_kappa_of_the_textbook_example`、`tests/test_msa_attribute.py::test_fleiss_kappa_of_the_published_example`、`tests/test_msa_attribute.py::test_an_attribute_system_has_its_own_checks_and_a_gate` | 計數型的接受準則（有效性 ≥ 90 %、漏判 ≤ 2 %、誤判 ≤ 5 %、kappa ≥ 0.75）是通常歸於 AIAG MSA 的數值，**未對照手冊**，屬系統政策可改；線性與偏差研究、巢狀 GRR、完整 ISO 14253-1 預算未做；Type 1 公式為 VDA 5 常用算法，未對照 ISO 22514-7（只有預覽的第 1～4 章） |
+| 6.3 | 有效且有能力的量測與檢驗過程（依 MSA／VDA 5）；IATF 要求計量型**與計數型**都要驗證 | ◐ | 計量型：`src/spc/core/msa.py`（量具 R&R、Type 1、穩定性、擴充不確定度）；計數型：`src/spc/core/msa_attribute.py`（一致性研究：kappa、有效性、漏判率、誤判率）；`src/spc/core/msa_more.py`（線性與偏差、巢狀 GRR、不確定度預算）；`src/spc/msa/gate.py`（兩種系統的閘門） | `tests/test_msa.py::test_the_gauge_rr_of_the_aiag_example`、`tests/test_msa.py::test_the_gate_is_open_with_proof_and_blocked_without_it`、`tests/test_msa_attribute.py::test_cohens_kappa_of_the_textbook_example`、`tests/test_msa_attribute.py::test_fleiss_kappa_of_the_published_example`、`tests/test_msa_attribute.py::test_an_attribute_system_has_its_own_checks_and_a_gate`、`tests/test_msa_more.py::test_the_regression_of_the_bias_follows_the_textbook_formulas`、`tests/test_msa_more.py::test_the_nested_variance_components_are_the_textbook_ones`、`tests/test_msa_more.py::test_the_budget_combines_the_components_as_iso_14253_and_the_gum_say` | 計數型的接受準則（有效性 ≥ 90 %、漏判 ≤ 2 %、誤判 ≤ 5 %、kappa ≥ 0.75）是通常歸於 AIAG MSA 的數值，**未對照手冊**，屬系統政策可改；線性與偏差（迴歸、信賴帶）與巢狀 GRR 為 AIAG 常用算法、預算為 GUM／ISO 14253-1 的合成，合格規則與 2U/T 上限（15 %／30 %）屬系統政策，**未對照手冊**；ISO 22514-7 的完整預算（各分量的標準化合成與 Q_MS／Q_MP）未做；Type 1 公式為 VDA 5 常用算法，未對照 ISO 22514-7（只有預覽的第 1～4 章） |
 | 6.4 | 製程特性化（DoE／迴歸找出控制因子） | ✅ | `src/spc/core/doe.py`（迴歸、二水準完全因子設計）、`POST /api/doe/regression`、`POST /api/doe/factorial`、介面「工具」 | `tests/test_doe.py::test_the_textbook_two_level_example_with_replicates`、`tests/test_doe.py::test_multiple_regression_follows_the_normal_equations` | 草案只點名 DoE／迴歸，沒有方法；以標準方法實作（教科書範例與正規方程式驗證）。無重複的設計用 Lenth 法；不含部分因子、反應曲面與混合設計 |
 | 6.5 | 生產與檢驗規劃 | ◐ | 控制計畫（量測系統、方法、樣本數與頻率）`src/spc/plan/` | `tests/test_plan.py::test_the_measurement_system_and_the_room_for_its_uncertainty` | 規劃的其餘面向（工作站、物流）不在軟體內 |
 | 6.6 | OCAP：調整矩陣、負責人與升級、製程日誌、確保人員理解 | ✅ | `src/spc/monitor/model.py`（每條規則的反應計畫、升級）；事件紀錄；每人確認 | `tests/test_monitor.py::test_the_action_plan_must_be_acknowledged_by_each_person_and_again_after_a_change`、`tests/test_monitor.py::test_an_overdue_incident_is_flagged_and_the_response_times_are_reported` | |
@@ -171,7 +171,7 @@
 
 1. **圖 10-5 點名的圖**：已補齊，剩「經轉換的 Shewhart 圖」（轉換只用在能力指標）與迴歸圖（僅分析用）為部分；z 化計數型圖只在工具，監控器沒有。
 2. **ISO 22514-7 的計算部分**：未做，等決定與標準全文；Type 1 的標示已改為不主張依據該標準。計數型 MSA 已做，但接受準則未對照 AIAG 手冊。
-3. **計量型 MSA 的其餘部分**：線性與偏差研究、巢狀 GRR、完整 ISO 14253-1 不確定度預算。
+3. **計量型 MSA 的標準化預算**：線性與偏差、巢狀 GRR、通用不確定度預算已做，但判定規則未對照 AIAG／VDA 5 手冊，也沒有 ISO 22514-7 的 Q_MS／Q_MP 計算。
 4. **標準化介面格式**（ISO/TR 11462-5）：未做（沒有標準全文）。
 5. 製程特性化只有迴歸與二水準完全因子設計，沒有部分因子、反應曲面與混合設計。
 6. 監控器沒有 z 化計數型圖（工具有）。
@@ -194,6 +194,9 @@
 | 配適品質的 25 % 尾端評估 | 看靠近指標那一側規格限的 25 % 資料，沒有判定門檻 | 以機率圖相關係數比較整體與該段，只列數值 |
 | 製程特性化 | 只點名 DoE／迴歸 | 多元線性迴歸（t 檢定、VIF）與二水準完全因子設計（ANOVA；無重複用 Lenth 法） |
 | Laney p′／u′ 與其他圖 | 圖 10-5 只點名 | Laney：σ_z＝z 的平均移動全距／d2(2)；G 圖用幾何分布、T 圖用韋伯分布界限；百分位數圖用經驗分位數 |
+| 線性與偏差 | 草案只提到 MSA | AIAG 作法：每筆讀值的偏差對參考值迴歸；零件內合併標準差檢定各零件偏差；偏差 = 0 的線須整段落在 95 % 信賴帶內；%線性 ＝ 100·|斜率| |
+| 巢狀 GRR（破壞性量測） | 草案沒有給 | 作業員 > 零件 巢狀變異數分析（動差法）；重複性 ＝ 誤差，再現性 ＝ 作業員，GRR 與 %GRR、ndc 判定同交叉研究 |
+| 不確定度預算 | 草案第 12 章只給結果 | GUM：各分量以分布除數化為標準不確定度，乘靈敏係數後平方和開根；Welch-Satterthwaite 有效自由度；U ＝ k·u_c（k ＝ 2）；2U/T 上限 15 %／30 % 為政策 |
 | 選圖指南的「小偏移」「公差導向」「受控製程」選項 | 圖 10-5 沒有這些分支 | 取自 10.3.2.1、10.3.2.5、10.3.4 的文字，歸入「Shewhart 圖不適用」之下 |
 
 ## 超出草案、為 IATF 稽核與軟體管制而加的功能

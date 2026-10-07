@@ -1060,6 +1060,8 @@
         <label class="msa-var"><span data-i18n="msa.p_grr_pass"></span><input id="msp-grr_pass" type="number" min="1" max="50" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_grr_conditional"></span><input id="msp-grr_conditional" type="number" min="1" max="100" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_ndc"></span><input id="msp-ndc_min" type="number" min="1" max="20" step="any"></label>
+        <label class="msa-var"><span data-i18n="msa.p_budget_pass"></span><input id="msp-budget_pass" type="number" min="1" max="100" step="any"></label>
+        <label class="msa-var"><span data-i18n="msa.p_budget_conditional"></span><input id="msp-budget_conditional" type="number" min="1" max="200" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_cg"></span><input id="msp-cg_min" type="number" min="0.5" max="5" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_k"></span><input id="msp-k" type="number" min="1" max="4" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_guard"></span><input id="msp-guard_band_risk" type="number" min="0.1" max="49.9" step="any"></label>
@@ -1089,13 +1091,15 @@
     <h4 data-i18n="msa.studies"></h4>
     <div class="scroll"><table id="ms-studies" class="grid"></table></div>
     <div id="ms-attr-detail"></div>
+    <div id="ms-more-detail"></div>
     <div class="card" data-needs="engineer" id="ms-add-card">
       <h4 data-i18n="msa.add_study"></h4>
       <div class="form-grid">
         <label><span data-i18n="msa.s_kind"></span>
-          <select id="mss-kind"><option value="grr" data-i18n="msa.kind_grr"></option><option value="type1" data-i18n="msa.kind_type1"></option><option value="stability" data-i18n="msa.kind_stability"></option><option value="attribute" data-i18n="msa.kind_attribute"></option></select></label>
+          <select id="mss-kind"><option value="grr" data-i18n="msa.kind_grr"></option><option value="grr_nested" data-i18n="msa.kind_grr_nested"></option><option value="linearity" data-i18n="msa.kind_linearity"></option><option value="budget" data-i18n="msa.kind_budget"></option><option value="type1" data-i18n="msa.kind_type1"></option><option value="stability" data-i18n="msa.kind_stability"></option><option value="attribute" data-i18n="msa.kind_attribute"></option></select></label>
         <label><span data-i18n="msa.s_date"></span><input id="mss-date" type="date"></label>
         <label id="mss-ref-label" hidden><span data-i18n="msa.s_reference"></span><input id="mss-reference" type="number" step="any"></label>
+        <label id="mss-pv-label" hidden><span data-i18n="msa.s_pv"></span><input id="mss-pv" type="number" step="any" min="0"></label>
         <label class="wide"><span id="mss-data-label"></span><textarea id="mss-data" rows="6"></textarea></label>
         <label class="wide"><span data-i18n="msa.s_note"></span><input id="mss-note" type="text" maxlength="2000"></label>
       </div>

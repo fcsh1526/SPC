@@ -1946,6 +1946,8 @@
     if (c.share !== undefined) { p.share = sig(c.share * 100, 3); p.limit = sig(c.limit * 100, 3); }
     if (c.pct !== undefined) p.pct = sig(c.pct, 3), p.ndc = sig(c.ndc, 3), p.basis = t("msa.basis_" + c.basis);
     if (c.cg !== undefined) p.cg = sig(c.cg, 3), p.cgk = sig(c.cgk, 3);
+    if (c.pct_linearity !== undefined) p.lin = sig(c.pct_linearity, 3), p.bias = sig(c.bias, 3);
+    if (c.q !== undefined) p.q = sig(c.q, 3), p.U = sig(c.U, 4);
     if (c.worst) { p.eff = sig(c.worst.effectiveness, 3); p.miss = sig(c.worst.miss, 3); p.fa = sig(c.worst.false_alarm, 3); p.kappa = c.worst.kappa === null ? "–" : sig(c.worst.kappa, 3); }
     const reason = c.reason ? `.${c.reason}` : "";
     const attrSystem = MS.view && MS.view.system.kind === "attribute";
@@ -1997,6 +1999,7 @@
     $("#ms-add-card").hidden = !edit;
     $("#ms-edit").hidden = !edit;
     renderAttributeDetail();
+    renderMoreDetail();
     syncStudyForm();
   }
   function pct(rate) { return rate.pct === null ? "–" : sig(rate.pct, 3); }
@@ -2020,9 +2023,56 @@
     r.warnings.forEach((wn) => box.appendChild(el("p", "status-warning", t("msa.warn_" + wn.code, wn))));
     box.appendChild(el("p", "muted", t("msa.attr_note")));
   }
+  function renderMoreDetail() {  // linearity and bias, nested gauge R&R and the uncertainty budget: the newest of each that counts
+    const box = $("#ms-more-detail"); box.replaceChildren();
+    const newest = (kind) => MS.view.system.studies.filter((s) => s.kind === kind && !s.voided && s.result).slice(-1)[0];
+    const table = (head, rows) => {
+      const tb = el("table", "grid"), tr = el("tr");
+      head.forEach((h) => cell(tr, h, "th")); tb.appendChild(tr);
+      rows.forEach((r) => { const x = el("tr"); r.forEach((v) => cell(x, String(v))); tb.appendChild(x); });
+      const w = el("div", "scroll"); w.appendChild(tb); return w;
+    };
+    const lin = newest("linearity");
+    if (lin) {
+      const r = lin.result;
+      box.appendChild(el("h4", "", t("msa.lin_detail", { id: lin.id })));
+      box.appendChild(el("p", "", t("msa.lin_summary", { slope: sig(r.slope, 4), icpt: sig(r.intercept, 4), r2: sig(r.r2, 3), pl: sig(r.pct_linearity, 3), bias: sig(r.average_bias, 4), p: sig(r.average_bias_p, 3), sr: sig(r.repeatability, 4) })));
+      if (r.linearity !== null) box.appendChild(el("p", "", t("msa.lin_pv", { lin: sig(r.linearity, 4), pb: sig(r.pct_bias, 3), pv: sig(r.process_variation, 4) })));
+      box.appendChild(table([t("msa.lin_reference"), t("msa.lin_mean"), t("msa.lin_bias"), t("msa.lin_p"), t("msa.lin_ci")],
+        r.part_results.map((p) => [sig(p.reference, 5), sig(p.mean, 5), sig(p.bias, 4), sig(p.p_value, 3), `${sig(p.ci[0], 3)} … ${sig(p.ci[1], 3)}`])));
+      box.appendChild(el("p", r.zero_in_band ? "status-ok" : "status-alarm", t(r.zero_in_band ? "msa.lin_in_band" : "msa.lin_out_band")));
+      if (r.parts < 5 || r.readings < 10) box.appendChild(el("p", "status-warning", t("msa.lin_few", { parts: r.parts, readings: r.readings })));
+      box.appendChild(el("p", "muted", t("msa.lin_note")));
+    }
+    const nest = newest("grr_nested");
+    if (nest) {
+      const r = nest.result;
+      box.appendChild(el("h4", "", t("msa.nest_detail", { id: nest.id })));
+      box.appendChild(table([t("msa.nest_source"), t("msa.nest_df"), t("msa.nest_ms"), t("msa.nest_f"), t("msa.nest_var")],
+        r.table.map((x) => [t("msa.nest_" + x.level), x.df, sig(x.ms, 4), x.f == null ? "" : sig(x.f, 3), sig(x.variance, 4) + (x.truncated ? " *" : "")])));
+      box.appendChild(el("p", "", t("msa.nest_summary", { ev: sig(r.sigma.ev, 4), av: sig(r.sigma.av, 4), pv: sig(r.sigma.pv, 4), grr: sig(r.sigma.grr, 4) })));
+      if (r.notes.includes("negative_component")) box.appendChild(el("p", "status-warning", t("msa.nest_negative")));
+      if (r.notes.includes("small_design")) box.appendChild(el("p", "status-warning", t("msa.nest_small", { o: r.operators, p: r.parts_per_operator, r: r.trials })));
+      box.appendChild(el("p", "muted", t("msa.nest_note")));
+    }
+    const bud = newest("budget");
+    if (bud) {
+      const r = bud.result;
+      box.appendChild(el("h4", "", t("msa.bud_detail", { id: bud.id })));
+      box.appendChild(table([t("msa.bud_name"), t("msa.bud_type"), t("msa.bud_value"), t("msa.bud_dist"), t("msa.bud_u"), t("msa.bud_c"), t("msa.bud_contribution"), t("msa.bud_share"), t("msa.bud_dof")],
+        r.components.map((c) => [c.name, c.type, sig(c.value, 4), t("msa.bud_dist_" + c.distribution), sig(c.u, 4), sig(c.sensitivity, 3), sig(c.contribution, 4), `${sig(100 * c.share, 3)} %`, c.dof === null ? "∞" : sig(c.dof, 3)])));
+      box.appendChild(el("p", "", t("msa.bud_summary", { uc: sig(r.u_c, 4), k: r.k, U: sig(r.U, 4), nu: r.nu_eff === null ? "∞" : sig(r.nu_eff, 3), k95: sig(r.k_95, 3), q: sig(r.q_ms, 3) })));
+      if (r.zones) box.appendChild(el("p", r.zones.acceptance_exists ? "" : "status-alarm", r.zones.acceptance_exists
+        ? t("msa.bud_zones", { alo: sig(r.zones.acceptance[0], 5), ahi: sig(r.zones.acceptance[1], 5), rlo: sig(r.zones.rejection[0], 5), rhi: sig(r.zones.rejection[1], 5) }) : t("msa.bud_no_zone")));
+      box.appendChild(el("p", "muted", t("msa.bud_note")));
+    }
+  }
   function studySummary(x) {
     const r = x.result;
     if (x.kind === "attribute") return t("msa.sum_attribute", { parts: r.parts, appraisers: r.appraisers.length, trials: r.trials, eff: sig(r.worst.effectiveness, 3), miss: sig(r.worst.miss, 3), fa: sig(r.worst.false_alarm, 3), kappa: r.worst.kappa === null ? "–" : sig(r.worst.kappa, 3) });
+    if (x.kind === "grr_nested") return t("msa.sum_grr_nested", { pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis), ndc: sig(r.ndc, 3), ev: sig(r.sigma.ev, 3), av: sig(r.sigma.av, 3), n: `${r.operators}×${r.parts_per_operator}×${r.trials}` });
+    if (x.kind === "linearity") return t("msa.sum_linearity", { parts: r.parts, readings: r.readings, lin: sig(r.pct_linearity, 3), bias: sig(r.average_bias, 3) });
+    if (x.kind === "budget") return t("msa.sum_budget", { n: r.components.length, U: sig(r.U, 4), q: sig(r.q_ms, 3) });
     if (x.kind === "grr") return t("msa.sum_grr", { pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis), ndc: sig(r.ndc, 3), ev: sig(r.sigma.ev, 3), av: sig(r.sigma.av, 3), n: `${r.parts}×${r.operators}×${r.trials}` });
     if (x.kind === "type1") return t("msa.sum_type1", { cg: sig(r.cg, 3), cgk: sig(r.cgk, 3), bias: sig(r.bias, 3), n: r.n });
     return t("msa.sum_stability", { n: r.n, signals: r.n_signals });
@@ -2033,6 +2083,7 @@
     if ($("#mss-kind").selectedOptions[0].disabled) $("#mss-kind").value = attrSystem ? "attribute" : "grr";
     const kind = $("#mss-kind").value;
     $("#mss-ref-label").hidden = kind !== "type1";
+    $("#mss-pv-label").hidden = kind !== "linearity";
     $("#mss-data-label").textContent = t("msa.data_" + kind);
     if (!$("#mss-date").value) $("#mss-date").value = new Date().toISOString().slice(0, 10);
   }
@@ -2065,6 +2116,26 @@
   function readStudyInput() {
     const kind = $("#mss-kind").value, text = $("#mss-data").value;
     if (kind === "attribute") return readAttributeTable(text);
+    if (kind === "grr_nested") return { data: lines(text).map((row) => row.split(";").map(numbers)) };
+    if (kind === "linearity") {  // one part per line: the reference value, then its readings
+      const rows = lines(text).map(numbers);
+      if (rows.some((r) => r.length < 3)) throw new Error(t("msa.lin_bad"));
+      const input = { reference: rows.map((r) => r[0]), values: rows.map((r) => r.slice(1)) };
+      const pv = $("#mss-pv").value.trim(); if (pv !== "") input.process_variation = Number(pv);
+      return input;
+    }
+    if (kind === "budget") {  // one component per line: name; A or B; value; distribution; sensitivity; degrees of freedom (the last three may be left out)
+      const components = lines(text).map((l) => {
+        const f = l.split(";").map((x) => x.trim());
+        if (f.length < 3 || f.length > 6) throw new Error(t("msa.bud_bad", { line: l }));
+        const c = { name: f[0], type: f[1].toUpperCase(), value: Number(f[2]) };
+        if (f[3]) c.distribution = f[3];
+        if (f[4]) c.sensitivity = Number(f[4]);
+        if (f[5]) c.dof = Number(f[5]);
+        return c;
+      });
+      return { components };
+    }
     if (kind === "grr") return { data: lines(text).map((row) => row.split(";").map(numbers)) };
     if (kind === "type1") return { reference: Number($("#mss-reference").value), values: numbers(text) };
     return { values: numbers(text) };
@@ -2110,7 +2181,7 @@
     $$("#ms-editor .msa-var").forEach((e) => { e.hidden = attr; });
     $$("#ms-editor .msa-attr").forEach((e) => { e.hidden = !attr; });
   }
-  const DEFAULT_MSA_POLICY = { validity_months: 12, stability_months: 6, resolution_share_max: 0.05, grr_pass: 10, grr_conditional: 30, ndc_min: 5, cg_min: 1.33, require_stability: true, k: 2, guard_band_risk: 0.05, u_cal: 0,
+  const DEFAULT_MSA_POLICY = { validity_months: 12, stability_months: 6, resolution_share_max: 0.05, grr_pass: 10, grr_conditional: 30, ndc_min: 5, cg_min: 1.33, require_stability: true, k: 2, guard_band_risk: 0.05, u_cal: 0, budget_pass: 15, budget_conditional: 30,
     attr_eff_pass: 90, attr_eff_conditional: 80, attr_miss_pass: 2, attr_miss_conditional: 5, attr_fa_pass: 5, attr_fa_conditional: 10, attr_kappa_pass: 0.75, attr_kappa_conditional: 0.4 };
   function readMsaEditor() {
     const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };

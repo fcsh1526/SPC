@@ -8,6 +8,7 @@ from datetime import date
 from typing import Any, Callable
 
 from spc.auth.audit import Audit
+from spc.core import msa_more
 from spc.core import msa
 from spc.core import msa_attribute
 from spc.db.database import Database
@@ -110,6 +111,12 @@ class MsaService:
             r = msa.type1(inp["values"], inp["reference"], tol, pol["cg_min"])
         elif study["kind"] == "grr":
             r = msa.grr(inp["data"], tol, pol["grr_pass"], pol["grr_conditional"], pol["ndc_min"])
+        elif study["kind"] == "grr_nested":
+            r = msa_more.grr_nested(inp["data"], tol, pol["grr_pass"], pol["grr_conditional"], pol["ndc_min"])
+        elif study["kind"] == "linearity":
+            r = msa_more.linearity(inp["reference"], inp["values"], inp.get("process_variation"))
+        elif study["kind"] == "budget":
+            r = msa_more.budget(inp["components"], tol, pol["k"], pol["budget_pass"], pol["budget_conditional"], inp.get("lsl"), inp.get("usl"))
         elif study["kind"] == "attribute":
             r = msa_attribute.evaluate(inp["ratings"], inp["reference"], gate.attribute_policy(pol))
         else:
@@ -187,9 +194,11 @@ class MsaService:
             raise MsaProblem("invalid_input", "the note is longer than 2000 characters")
         if not isinstance(input_, dict):
             raise MsaProblem("invalid_input", "input must be an object")
-        need = {"type1": {"values", "reference"}, "grr": {"data"}, "stability": {"values"}, "attribute": {"ratings", "reference"}}[kind]
-        if set(input_) != need:
-            raise MsaProblem("invalid_input", f"the input of a {kind} study holds {sorted(need)}")
+        need = {"type1": {"values", "reference"}, "grr": {"data"}, "grr_nested": {"data"}, "stability": {"values"}, "attribute": {"ratings", "reference"},
+                "linearity": {"values", "reference"}, "budget": {"components"}}[kind]
+        optional = {"linearity": {"process_variation"}, "budget": {"lsl", "usl"}}.get(kind, set())
+        if not need <= set(input_) <= need | optional:
+            raise MsaProblem("invalid_input", f"the input of a {kind} study holds {sorted(need)}" + (f" and may hold {sorted(optional)}" if optional else ""))
         study = {"id": system["next_study"], "kind": kind, "date": day, "by": _label(user), "at": now_iso(), "note": note.strip(), "input": input_}
         try:
             computed = self._compute(system, study)
