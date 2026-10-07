@@ -14,7 +14,7 @@
 | ⬜ | 未實作 |
 | ➖ | 說明性文字或組織責任，軟體沒有對應功能 |
 
-統計：✅ 74，🔶 7，◐ 12，⬜ 1，➖ 6（共 100 列）
+統計：✅ 74，🔶 8，◐ 11，⬜ 1，➖ 6（共 100 列）
 
 「驗證」欄的測試以「tests/檔名::測試名」表示。另有獨立證據：ISO/TR 11462-3 的資料集（內建確效報告，`src/spc/validation/iso11462.py`）、ISO 22514-8 附錄的算例（`src/spc/validation/iso22514.py`）、草案自己的數值範例（表 8-1、9-3、12 章範例）、AIAG MSA 手冊例。
 
@@ -28,7 +28,7 @@
 | 5.2 | PDCA 改善循環 | ◐ | `src/spc/monitor/service.py`（警報 → 反應 → 驗證 → 結案的步驟） | `tests/test_monitor.py::test_the_action_plan_must_be_acknowledged_by_each_person_and_again_after_a_change` | 反應流程對應 PDCA 的 Do／Check／Act；Plan 與整體改善循環是組織的事 |
 | 5.3 | 製程控制系統：對製程採取行動，對輸出的行動只是暫時措施 | ✅ | `src/spc/monitor/service.py`（事件步驟含調整參數、調整要素、根因、遏制措施） | `tests/test_monitor.py::test_an_incident_that_cannot_be_fixed_goes_to_root_cause_and_containment` | |
 | 5.4 | 迴路 1：現場 SPC，反應觸發與反應 | ✅ | `src/spc/monitor/`、`src/spc/api/monitors.py`、介面「監控」 | `tests/test_monitor.py::test_a_violation_opens_one_incident_with_the_instructions_of_the_plan` | |
-| 5.4 | 迴路 2：合格閘門（通過合格、攔下不合格） | ◐ | 容許界限圖與預控圖（`src/spc/core/charts/`、`src/spc/monitor/model.py`）；MSA 閘門擋監控 | `tests/test_monitor.py::test_the_acceptance_chart_finds_the_accepted_fraction_out_of_tolerance_with_the_stated_probability` | 沒有批次放行（合格／不合格處置）的功能 |
+| 5.4 | 迴路 2：合格閘門（通過合格、攔下不合格） | 🔶 | 容許界限圖與預控圖（`src/spc/core/charts/`、`src/spc/monitor/model.py`）；MSA 閘門擋監控；批次放行處置：`src/spc/disposition/service.py`、`src/spc/api/lots.py`、介面「批次放行」 | `tests/test_monitor.py::test_the_acceptance_chart_finds_the_accepted_fraction_out_of_tolerance_with_the_stated_probability`、`tests/test_lots.py::test_a_lot_with_clean_evidence_can_be_released_by_an_operator`、`tests/test_lots.py::test_an_open_incident_in_the_range_blocks_a_release_and_sorting_is_the_way_out`、`tests/test_lots.py::test_a_concession_needs_an_engineer_a_reason_and_the_approval_of_the_customer` | 草案只說「放行合格品、攔下不合格品」，沒有規則；證據規則（開著或升級的事件、被擋的量測系統、範圍內沒有有效點）與角色分工是我們的設計。不含實物管理與 ERP／MES 的庫存扣帳 |
 | 5.4 | 迴路 3：製程後改善，定期評估穩定性與能力 | ✅ | `src/spc/service/analysis.py`、持續績效報告（`src/spc/monitor/service.py`） | `tests/test_monitor.py::test_ongoing_report_gives_indices_quadrant_trend_limits_review_and_response` | |
 | 5.4 | 迴路 4～6：產品、製程、系統稽核 | ➖ | 稽核鏈只提供證據（`src/spc/auth/audit.py`） | `tests/test_auth.py::test_the_audit_chain_shows_a_change` | 沒有稽核（audit）管理功能 |
 
@@ -174,7 +174,7 @@
 3. **計量型 MSA 的標準化預算**：線性與偏差、巢狀 GRR、通用不確定度預算已做，但判定規則未對照 AIAG／VDA 5 手冊，也沒有 ISO 22514-7 的 Q_MS／Q_MP 計算。
 4. **標準化介面格式**（ISO/TR 11462-5）：未做（沒有標準全文）。
 5. 製程特性化只有迴歸與二水準完全因子設計，沒有部分因子、反應曲面與混合設計。
-6. **不在軟體範圍或需要其他系統**（仍標 ◐ 或 ➖）：批次放行與不合格處置（5.4 迴路 2，屬 MES／品保流程）、與特定 CAQ 系統的連接器（11.1）、檢驗指令書本身（13）、規劃的工作站與物流（6.5）、抽樣是否隨機且代表製程（9.2，由人判斷）、PDCA 與稽核（5.2、5.4 迴路 4～6，組織責任）。軟體只提供證據鏈與對應的記錄。
+6. **不在軟體範圍或需要其他系統**（仍標 ◐ 或 ➖）：與特定 CAQ 系統的連接器（11.1）、檢驗指令書本身（13）、規劃的工作站與物流（6.5）、抽樣是否隨機且代表製程（9.2，由人判斷）、PDCA 與稽核（5.2、5.4 迴路 4～6，組織責任）。軟體只提供證據鏈與對應的記錄。
 
 ## 我方解讀清單（🔶，建議請統計人員審閱）
 
@@ -191,6 +191,7 @@
 | 量測不確定度 | 草案第 12 章只給結果 | U＝k√(σ_GRR²＋(偏差/√3)²＋(解析度/√12)²＋u_cal²)，吻合草案範例 |
 | MSA 判定門檻 | 草案沒有給 | VDA 5／AIAG 常用值（≤10 %、≤30 %、ndc≥5、Cg≥1.33），屬系統政策可改 |
 | 計數型 MSA | 草案只說 IATF 要求計數型也要驗證，沒有方法 | AIAG 的一致性研究（交叉表法）：kappa、有效性（每次都判對的零件占比）、漏判率與誤判率（單次判定）；門檻為通常歸於 AIAG 的值，**未對照手冊**，屬系統政策可改 |
+| 批次放行處置 | 草案只說放行合格品、攔下不合格品；操作員負責產品處置（6.8.1）；挑選、報廢、重工是對輸出的過渡措施 | 批次連結監控器與一段點；證據阻擋＝開著或升級（轉根本原因分析）的事件、被 MSA 閘門擋住的量測系統、範圍內沒有有效點；放行需證據乾淨，否則挑選（全檢、件數須相加）或由工程師附客戶核准編號特採；沒有連結監控器的放行須工程師與理由；操作員可記錄、暫扣、在證據乾淨時處置；重新開啟須工程師與理由；每步入歷程與稽核鏈 |
 | 抽樣間隔 | 草案只給定性建議 | 每組件數取達到目標 ARL 的最小值；抽樣間隔 ＝ 允許生產件數／ARL（件），不得小於每組件數 |
 | 能力不足時 100 % 檢驗 | 草案說改 100 % 檢驗，沒有判準 | 只在有特性類別的目標且指標未達目標（`fails`）時給建議，不自動切換 |
 | 標準化 p、u 監控 | 草案只點名穩定化的計數型圖 | z ＝（值 − 中心）／該樣本標準差，固定 ± u；判定等同常態界限 |

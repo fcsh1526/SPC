@@ -38,6 +38,7 @@ The server listens on 127.0.0.1 only. To serve a team, put it behind an https pr
 | `spc.core.capability` | Pm/Pmk, Pp/Ppk, Cp/Cpk, Cw/Cwk, .G / .Z, CI, PPM, naming gate, sample-size target adjustment |
 | `spc.core.distributions` | Fits for non-normal data (lognormal, Weibull, gamma, Johnson SU, Box-Cox, normal mixture, empirical), AIC ranking, seeded bootstrap interval |
 | `spc.core.charts.special`, `spc.core.doe` | Laney p′/u′, z, G, T, percentile, UWMA, delta-to-target and Levey-Jennings charts; regression and two-level factorial analysis (ANOVA / Lenth) |
+| `spc.disposition` | Lots and their disposition: evidence of the monitor, release / sort / rework / scrap / concession, roles and history |
 | `spc.core.arl_oc` | OC curve and ARL |
 | `spc.params` | All analysis parameters in one record, for archiving |
 | `spc.data.csv_io` | CSV import and export: Big5 / UTF-8, delimiter and decimal comma, all errors reported with line numbers, SHA-256 of the source file |

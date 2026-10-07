@@ -155,6 +155,7 @@
     if (name === "saved") loadSaved();
     if (name === "study") loadStudies();
     if (name === "msa") loadMsa();
+    if (name === "lots") loadLots();
     if (name === "plan") loadPlans();
     if (name === "validation") loadValidation();
     if (name === "equipment") loadEquipment();
@@ -2236,6 +2237,115 @@
   const EQ = { list: [], view: null, editing: null };
   const showEqView = (which) => { ["#eq-list-view", "#eq-editor", "#eq-detail"].forEach((sel) => { $(sel).hidden = sel !== which; }); };
   const RUNTIME_CLASS = { connected: "status-ok", connecting: "status-warning", error: "status-alarm", runner_stopped: "status-alarm", disabled: "" };
+  // ---------------------------------------------------------------- lots and their disposition (control loop 2)
+  const LOT = { list: [], view: null };
+  const LOT_CLASS = { open: "status-warning", held: "status-alarm", decided: "status-ok" };
+  async function loadLots() {
+    await guarded(async () => {
+      const f = $("#lot-filter").value;
+      LOT.list = (await api("/api/lots" + (f ? `?status=${f}` : ""))).lots;
+      const mons = (await api("/api/monitors")).monitors;
+      const sel = $("#lot-monitor"), keep = sel.value;
+      sel.replaceChildren(el("option", "", t("lot.no_monitor")));
+      sel.firstChild.value = "";
+      mons.forEach((m) => { const o = el("option", "", m.name); o.value = String(m.id); sel.appendChild(o); });
+      sel.value = keep;
+    });
+    renderLotList(); showLotView("#lot-list-view");
+  }
+  function showLotView(sel) { ["#lot-list-view", "#lot-detail"].forEach((s) => { $(s).hidden = s !== sel; }); }
+  function renderLotList() {
+    const table = $("#lot-list"); table.replaceChildren();
+    const head = el("tr"); ["lot.f_no", "lot.f_product", "lot.f_quantity", "lot.col_status", "lot.col_decision", "lot.col_created", ""].forEach((k) => cell(head, k ? t(k) : "", "th")); table.appendChild(head);
+    LOT.list.forEach((l) => {
+      const tr = el("tr");
+      cell(tr, l.lot_no); cell(tr, l.product || "–"); cell(tr, String(l.quantity));
+      cell(tr, t("lot.st_" + l.status)).className = LOT_CLASS[l.status] || "";
+      cell(tr, l.decision ? t("lot.dec_" + l.decision.kind) : "–"); cell(tr, when(l.created_at));
+      const b = el("button", "", t("mon.open")); b.addEventListener("click", () => openLot(l.id)); cell(tr, "").appendChild(b);
+      table.appendChild(tr);
+    });
+    if (!LOT.list.length) table.appendChild(el("tr")).appendChild(el("td", "muted", t("lot.none")));
+  }
+  async function openLot(id) {
+    await guarded(async () => { LOT.view = await api(`/api/lots/${id}`); });
+    if (LOT.view) { renderLot(); showLotView("#lot-detail"); }
+  }
+  function lotEvidenceText(e) { return t("lot.ev_" + e.code, e); }
+  function renderLot() {
+    const l = LOT.view;
+    $("#lot-title").textContent = t("lot.title_one", { no: l.lot_no, quantity: l.quantity });
+    $("#lot-sub").textContent = [l.product, l.characteristic, l.parent_lot_id ? t("lot.of_parent", { id: l.parent_lot_id }) : "", l.note].filter(Boolean).join(" · ");
+    $("#lot-status").textContent = t("lot.st_" + l.status); $("#lot-status").className = "strong " + (LOT_CLASS[l.status] || "");
+    const box = $("#lot-evidence"); box.replaceChildren();
+    box.appendChild(el("h4", "", t(l.status === "decided" ? "lot.evidence_fixed" : "lot.evidence_live")));
+    const ev = l.evidence;
+    if (!ev) box.appendChild(el("p", "status-warning", t("lot.no_evidence")));
+    else {
+      box.appendChild(el("p", "", t("lot.ev_summary", { monitor: ev.monitor, from: ev.seq_from, to: ev.seq_to, points: ev.points, valid: ev.valid_points, alarms: ev.alarm_points.length })));
+      box.appendChild(el("p", ev.clean ? "status-ok" : "status-alarm", t(ev.clean ? "lot.ev_clean" : "lot.ev_blocked")));
+      ev.blocking.forEach((e) => box.appendChild(el("p", "status-alarm", lotEvidenceText(e))));
+      ev.remarks.forEach((e) => box.appendChild(el("p", "status-warning", lotEvidenceText(e))));
+    }
+    const d = $("#lot-decision-box"); d.replaceChildren();
+    if (l.decision) {
+      const x = l.decision;
+      d.appendChild(el("h4", "", t("lot.decision")));
+      d.appendChild(el("p", "strong", `${t("lot.dec_" + x.kind)} · ${x.by} · ${when(x.at)}`));
+      if (x.reason) d.appendChild(el("p", "", x.reason));
+      if (x.customer_ref) d.appendChild(el("p", "", t("lot.customer_ref", { ref: x.customer_ref })));
+      if (x.sorted) d.appendChild(el("p", "", t("lot.sorted", { inspected: x.sorted.inspected, good: x.sorted.good, rejected: x.sorted.rejected, to: x.sorted.rejected_to ? t("lot.dec_" + x.sorted.rejected_to) : "–" })));
+    }
+    $("#lot-decide-card").hidden = l.status === "decided" || !canOperate();
+    $("#lot-reopen").hidden = l.status !== "decided"; $("#lotd-hold").hidden = l.status !== "open";
+    $("#lotd-inspected").value = l.quantity;
+    const h = $("#lot-history"); h.replaceChildren();
+    const head = el("tr"); ["lot.col_at", "lot.col_by", "lot.col_action", "lot.col_detail"].forEach((k) => cell(head, t(k), "th")); h.appendChild(head);
+    l.history.forEach((x) => { const tr = el("tr"); cell(tr, when(x.at)); cell(tr, x.by); cell(tr, t("lot.act_" + x.action)); cell(tr, x.detail.reason || (x.detail.kind ? t("lot.dec_" + x.detail.kind) : "")); h.appendChild(tr); });
+    syncLotDecisionForm();
+  }
+  function canOperate() { return state.user && ["operator", "engineer", "admin"].includes(state.user.role); }
+  function syncLotDecisionForm() {
+    const k = $("#lotd-decision").value;
+    $("#lotd-ref-label").hidden = k !== "concession";
+    $$(".lotd-sort").forEach((e) => { e.hidden = k !== "sort"; });
+  }
+  async function createLot() {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const record = { lot_no: $("#lot-no").value, quantity: num("#lot-quantity"), product: $("#lot-product").value, characteristic: $("#lot-characteristic").value, note: $("#lot-note").value };
+    const mon = $("#lot-monitor").value;
+    if (mon) { record.monitor_id = Number(mon); record.seq_from = num("#lot-from"); record.seq_to = num("#lot-to"); }
+    const parent = num("#lot-parent"); if (parent !== null) record.parent_lot_id = parent;
+    let made = null;
+    await guarded(async () => { made = await post("/api/lots", { record }); });
+    if (made) { ["#lot-no", "#lot-quantity", "#lot-product", "#lot-characteristic", "#lot-note", "#lot-from", "#lot-to", "#lot-parent"].forEach((s) => { $(s).value = ""; }); LOT.view = made; renderLot(); showLotView("#lot-detail"); }
+  }
+  async function decideLot() {
+    const kind = $("#lotd-decision").value;
+    const body = { decision: kind, reason: $("#lotd-reason").value };
+    if (kind === "concession") body.customer_ref = $("#lotd-ref").value;
+    if (kind === "sort") body.sorted = { inspected: Number($("#lotd-inspected").value), good: Number($("#lotd-good").value), rejected: Number($("#lotd-rejected").value), rejected_to: $("#lotd-rejected-to").value };
+    let r = null;
+    await guarded(async () => { r = await post(`/api/lots/${LOT.view.id}/decision`, body); });
+    if (r) { LOT.view = r; $("#lotd-reason").value = ""; renderLot(); }
+  }
+  async function lotAsk(action, promptKey) {
+    const reason = window.prompt(t(promptKey));
+    if (!reason) return;
+    let r = null;
+    await guarded(async () => { r = await post(`/api/lots/${LOT.view.id}/${action}`, { reason }); });
+    if (r) { LOT.view = r; renderLot(); }
+  }
+  function wireLots() {
+    $("#lot-filter").addEventListener("change", loadLots);
+    $("#lot-create").addEventListener("click", createLot);
+    $("#lot-back").addEventListener("click", loadLots);
+    $("#lotd-decision").addEventListener("change", syncLotDecisionForm);
+    $("#lotd-save").addEventListener("click", decideLot);
+    $("#lotd-hold").addEventListener("click", () => lotAsk("hold", "lot.hold_prompt"));
+    $("#lot-reopen").addEventListener("click", () => lotAsk("reopen", "lot.reopen_prompt"));
+  }
+
   async function loadEquipment() {
     if (EQ.view && !$("#eq-detail").hidden) return;
     await guarded(async () => { const r = await api("/api/equipment/links"); EQ.list = r.links; EQ.runner = r.runner; });
@@ -3467,6 +3577,7 @@
     wirePlan();
     wireValidation();
     wireEquipment();
+    wireLots();
     wireRoles();
     $("#a-profile").addEventListener("change", onProfileChange);
     $("#pf-new").addEventListener("click", () => openProfileEditor(null));

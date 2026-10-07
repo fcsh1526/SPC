@@ -374,6 +374,19 @@ class ReasonBody(Strict):
     reason: str = Field(max_length=2000)
 
 
+class LotBody(Strict):
+    """A lot: the quantity, and the monitor with the range of points that stands for its production (checked in spc.disposition.service.validate_record)."""
+
+    record: dict
+
+
+class LotDecisionBody(Strict):
+    decision: Literal["release", "concession", "sort", "rework", "scrap"]
+    reason: str = Field(default="", max_length=2000)
+    customer_ref: str = Field(default="", max_length=300)
+    sorted: dict | None = None
+
+
 class ValidationCaseBody(Strict):
     """A reference case of the user; checked in spc.validation.custom."""
 

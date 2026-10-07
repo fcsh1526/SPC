@@ -23,6 +23,7 @@ from spc import __version__
 from spc.api.accounts import add_account_routes
 from spc.api.monitors import add_monitor_routes
 from spc.api.studies import add_study_routes
+from spc.api.lots import add_lot_routes
 from spc.api.msa import add_msa_routes
 from spc.api.plans import add_plan_routes
 from spc.api.validation import add_validation_routes
@@ -38,6 +39,7 @@ from spc.equipment.service import EquipmentService
 from spc.validation.service import ValidationError, ValidationService
 from spc.plan.model import PlanError
 from spc.plan.service import PeopleService, PlanNameTaken, PlanNotFound, PlanService
+from spc.disposition.service import LotNotFound, LotNumberTaken, LotProblem, LotService
 from spc.msa.service import MsaProblem, MsaService, SystemNameTaken, SystemNotFound
 from spc.api.errors import ApiError, error_response as _error
 from spc.core import chart_guide
@@ -185,6 +187,8 @@ def create_app(
     app.state.msa = msa_systems
     monitors = MonitorService(db, audit, store, notifiers or [], msa_systems)
     app.state.monitors = monitors
+    lot_service = LotService(db, audit, monitors, msa_systems)
+    app.state.lots = lot_service
     studies = StudyService(db, audit, store, msa_systems)
     app.state.studies = studies
     people = PeopleService(db, audit, auth)
@@ -283,6 +287,18 @@ def create_app(
     async def _msa_taken(_: Request, exc: SystemNameTaken):
         return _error(409, "msa_system_name_taken", "a measurement system with this name exists already")
 
+    @app.exception_handler(LotProblem)
+    async def _lot_problem(_: Request, exc: LotProblem):
+        return _error(exc.status, exc.code, str(exc), exc.params)
+
+    @app.exception_handler(LotNotFound)
+    async def _lot_missing(_: Request, exc: LotNotFound):
+        return _error(404, "lot_not_found", "lot not found")
+
+    @app.exception_handler(LotNumberTaken)
+    async def _lot_taken(_: Request, exc: LotNumberTaken):
+        return _error(409, "lot_number_taken", "a lot with this number exists already")
+
     @app.exception_handler(StudyError)
     async def _study_error(_: Request, exc: StudyError):
         return _error(exc.status, exc.code, str(exc), exc.params)
@@ -343,6 +359,7 @@ def create_app(
 
     add_account_routes(app, auth, audit, admin, secure_cookies)
     add_monitor_routes(app, monitors, store, reports, audit, db, reader, operator, writer, admin)
+    add_lot_routes(app, lot_service, reader, operator, writer, admin)
     add_study_routes(app, studies, reader, writer, admin)
     add_msa_routes(app, msa_systems, reader, writer, admin)
     add_plan_routes(app, plan_service, people, reader, writer, admin)

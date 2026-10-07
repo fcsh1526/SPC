@@ -1976,3 +1976,45 @@ def test_standardised_option_of_a_p_monitor_in_the_browser(server, browser):
     assert page.locator("#me-laney").is_checked() and not page.locator("#me-std").is_checked()
     assert problems == []
     ctx.close()
+
+
+def test_lot_release_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=lots]")
+    page.fill("#lot-no", "L-2026-001")
+    page.fill("#lot-quantity", "200")
+    page.fill("#lot-product", "Bracket")
+    page.click("#lot-create")
+    expect(page.locator("#lot-title")).to_contain_text("L-2026-001: 200 parts", timeout=20000)
+    expect(page.locator("#lot-evidence")).to_contain_text("not linked to a monitor")
+    page.select_option("#lotd-decision", "release")
+    page.click("#lotd-save")
+    expect(page.locator("#errors")).to_contain_text("reason", timeout=20000)  # a lot without a monitor is released with a reason
+    # sorting: all parts are inspected and the counts must add up
+    page.select_option("#lotd-decision", "sort")
+    expect(page.locator("#lotd-good")).to_be_visible()
+    page.fill("#lotd-good", "180")
+    page.fill("#lotd-rejected", "10")
+    page.click("#lotd-save")
+    expect(page.locator("#errors")).to_contain_text("add up", timeout=20000)
+    page.fill("#lotd-good", "185")
+    page.fill("#lotd-rejected", "15")
+    page.select_option("#lotd-rejected-to", "rework")
+    page.click("#lotd-save")
+    expect(page.locator("#lot-status")).to_have_text("decided", timeout=20000)
+    expect(page.locator("#lot-decision-box")).to_contain_text("Sorted: 200 inspected, 185 good, 15 rejected")
+    expect(page.locator("#lot-decide-card")).to_be_hidden()
+    page.once("dialog", lambda d: d.accept("Counted wrongly"))
+    page.click("#lot-reopen")
+    expect(page.locator("#lot-status")).to_have_text("awaiting a decision", timeout=20000)
+    expect(page.locator("#lot-history")).to_contain_text("Reopened")
+    page.click("#lot-back")
+    expect(page.locator("#lot-list")).to_contain_text("L-2026-001", timeout=20000)
+    assert problems == []
+    ctx.close()

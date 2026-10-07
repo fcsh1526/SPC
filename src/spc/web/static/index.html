@@ -55,6 +55,7 @@
   <button role="tab" data-tab="data" aria-selected="false" aria-disabled="true" data-i18n="nav.data"></button>
   <button role="tab" data-tab="analysis" aria-selected="false" aria-disabled="true" data-i18n="nav.analysis"></button>
   <button role="tab" data-tab="monitor" aria-selected="false"><span data-i18n="nav.monitor"></span> <span id="alert-badge" class="badge" hidden></span></button>
+  <button role="tab" data-tab="lots" aria-selected="false" data-i18n="nav.lots"></button>
   <button role="tab" data-tab="plan" aria-selected="false" data-i18n="nav.plan"></button>
   <button role="tab" data-tab="roles" aria-selected="false" data-i18n="nav.roles"></button>
   <button role="tab" data-tab="msa" aria-selected="false" data-i18n="nav.msa"></button>
@@ -1109,6 +1110,56 @@
       </div>
       <p class="row"><button id="mss-save" class="primary" data-i18n="msa.add"></button></p>
     </div>
+  </div>
+</section>
+
+<!-- Lots and their disposition: the quality conformance gate (control loop 2) -->
+<section id="tab-lots" class="panel" hidden>
+  <h2 data-i18n="lot.title"></h2>
+  <p class="note" data-i18n="lot.intro"></p>
+  <div id="lot-list-view">
+    <p><label><span data-i18n="lot.filter"></span> <select id="lot-filter"><option value="" data-i18n="lot.all"></option><option value="open" data-i18n="lot.st_open"></option><option value="held" data-i18n="lot.st_held"></option><option value="decided" data-i18n="lot.st_decided"></option></select></label></p>
+    <div class="scroll"><table id="lot-list" class="grid"></table></div>
+    <div class="card" data-needs="operator" id="lot-new-card">
+      <h3 data-i18n="lot.new"></h3>
+      <div class="form-grid">
+        <label><span data-i18n="lot.f_no"></span><input id="lot-no" type="text" maxlength="100"></label>
+        <label><span data-i18n="lot.f_quantity"></span><input id="lot-quantity" type="number" min="1" step="1"></label>
+        <label><span data-i18n="lot.f_product"></span><input id="lot-product" type="text" maxlength="200"></label>
+        <label><span data-i18n="lot.f_characteristic"></span><input id="lot-characteristic" type="text" maxlength="200"></label>
+        <label><span data-i18n="lot.f_monitor"></span><select id="lot-monitor"></select></label>
+        <label><span data-i18n="lot.f_from"></span><input id="lot-from" type="number" min="1" step="1"></label>
+        <label><span data-i18n="lot.f_to"></span><input id="lot-to" type="number" min="1" step="1"></label>
+        <label><span data-i18n="lot.f_parent"></span><input id="lot-parent" type="number" min="1" step="1"></label>
+        <label class="wide"><span data-i18n="lot.f_note"></span><input id="lot-note" type="text" maxlength="2000"></label>
+      </div>
+      <p class="row"><button id="lot-create" class="primary" data-i18n="lot.create"></button></p>
+    </div>
+  </div>
+  <div id="lot-detail" hidden>
+    <p class="row"><button id="lot-back" data-i18n="msa.back"></button></p>
+    <h3 id="lot-title"></h3>
+    <p id="lot-sub" class="muted"></p>
+    <p id="lot-status" class="strong"></p>
+    <div id="lot-evidence"></div>
+    <div id="lot-decision-box"></div>
+    <div class="card" data-needs="operator" id="lot-decide-card">
+      <h4 data-i18n="lot.decide"></h4>
+      <div class="form-grid">
+        <label><span data-i18n="lot.f_decision"></span>
+          <select id="lotd-decision"><option value="release" data-i18n="lot.dec_release"></option><option value="sort" data-i18n="lot.dec_sort"></option><option value="rework" data-i18n="lot.dec_rework"></option><option value="scrap" data-i18n="lot.dec_scrap"></option><option value="concession" data-i18n="lot.dec_concession"></option></select></label>
+        <label id="lotd-ref-label" hidden><span data-i18n="lot.f_customer_ref"></span><input id="lotd-ref" type="text" maxlength="300"></label>
+        <label class="lotd-sort" hidden><span data-i18n="lot.f_inspected"></span><input id="lotd-inspected" type="number" min="0" step="1"></label>
+        <label class="lotd-sort" hidden><span data-i18n="lot.f_good"></span><input id="lotd-good" type="number" min="0" step="1"></label>
+        <label class="lotd-sort" hidden><span data-i18n="lot.f_rejected"></span><input id="lotd-rejected" type="number" min="0" step="1"></label>
+        <label class="lotd-sort" hidden><span data-i18n="lot.f_rejected_to"></span><select id="lotd-rejected-to"><option value="scrap" data-i18n="lot.dec_scrap"></option><option value="rework" data-i18n="lot.dec_rework"></option></select></label>
+        <label class="wide"><span data-i18n="lot.f_reason"></span><input id="lotd-reason" type="text" maxlength="2000"></label>
+      </div>
+      <p class="row"><button id="lotd-save" class="primary" data-i18n="lot.decide_btn"></button><button id="lotd-hold" data-i18n="lot.hold"></button></p>
+    </div>
+    <p class="row" data-needs="engineer"><button id="lot-reopen" data-i18n="lot.reopen"></button></p>
+    <h4 data-i18n="lot.history"></h4>
+    <div class="scroll"><table id="lot-history" class="grid"></table></div>
   </div>
 </section>
 
