@@ -3014,6 +3014,7 @@
     const has = !!state.dataset;
     $("#sp-comb-none").hidden = has; $("#sp-comb-form").hidden = !has;
     $("#sp-cav-none").hidden = has; $("#sp-cav-form").hidden = !has;
+    $("#sp-cov-none").hidden = has; $("#sp-cov-form").hidden = !has;
     $("#sp-nest-none").hidden = has; $("#sp-nest-form").hidden = !has; $("#sp-trend-none").hidden = has; $("#sp-trend-form").hidden = !has;
     const box = $("#sp-factors"); box.replaceChildren();
     if (!has) return;
@@ -3210,6 +3211,49 @@
     }
     box.appendChild(el("p", "muted", t("sp.cav_hint")));
   }
+  function readFactorLines(text) {  // "tool: A B C" per line
+    const out = {};
+    numRows(text.replace(/:/g, " ")).forEach((r) => { if (r.length < 2) throw new Error(t("rp.bad_factors")); out[r[0]] = r.slice(1); });
+    return out;
+  }
+  async function runCoverage() {
+    let expected;
+    try { expected = readFactorLines($("#cov-expected").value); } catch (e) { return showError({ code: "invalid_input", message: e.message, params: { message: e.message } }); }
+    const body = {};
+    if (Object.keys(expected).length) { body.expected = expected; body.factors = Object.keys(expected); }
+    let r = null;
+    await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/coverage`, body); });
+    const box = $("#cov-out"); box.replaceChildren();
+    if (!r) return;
+    box.appendChild(el("p", r.representative ? "status-ok" : "status-warning", t(r.representative ? "cov.ok" : "cov.not_ok", { values: r.values, subgroups: r.subgroups ?? "–" })));
+    Object.entries(r.factors).forEach(([name, f]) => {
+      box.appendChild(el("h4", "", name));
+      const rows = f.levels.map((l) => ({ cells: [l.level, l.values, `${sig(100 * l.share, 3)} %`, l.subgroups ?? "–", t(l.thin ? "cov.thin" : "cov.fine")] }));
+      const w = el("div", "scroll"); w.appendChild(spTable(["cov.col_level", "cov.col_values", "cov.col_share", "cov.col_subgroups", "cov.col_state"], rows, (r2) => (r2.cells[4] === t("cov.thin") ? "status-warning" : ""))); box.appendChild(w);
+      if (f.missing.length) box.appendChild(el("p", "status-alarm", t("cov.missing", { list: f.missing.join(", ") })));
+    });
+    box.appendChild(el("p", "muted", t("cov.rule")));
+  }
+  $("#cov-run").addEventListener("click", runCoverage);
+  async function runRandomPlan() {
+    let factors;
+    try { factors = readFactorLines($("#rpl-factors").value); } catch (e) { return showError({ code: "invalid_input", message: e.message, params: { message: e.message } }); }
+    const body = { subgroups: Number($("#rpl-k").value), size: Number($("#rpl-n").value), factors };
+    const seed = $("#rpl-seed").value.trim(); if (seed !== "") body.seed = Number(seed);
+    let r = null;
+    await guarded(async () => { r = await post("/api/sampling/random", body); });
+    const box = $("#rpl-out"); box.replaceChildren();
+    if (!r) return;
+    box.appendChild(el("p", "strong", t("rp.result", { k: r.subgroups, n: r.size, parts: r.parts, seed: r.seed })));
+    const names = Object.keys(factors);
+    const rows = r.plan.map((p) => ({ cells: [p.subgroup, `${sig(100 * p.window[0], 3)}–${sig(100 * p.window[1], 3)} %`, `${sig(100 * p.position, 4)} %`, ...names.map((n) => p.levels[n])] }));
+    const w = el("div", "scroll"); w.appendChild(spTable(["rp.col_subgroup", "rp.col_window", "rp.col_position", ...names.map(() => "")], rows));
+    const hr = w.querySelector("tr"); names.forEach((n, i) => { hr.children[3 + i].textContent = n; });
+    box.appendChild(w);
+    if (names.length) box.appendChild(el("p", "muted", names.map((n) => `${n}: ${Object.entries(r.counts[n]).map(([k, v]) => `${k} × ${v}`).join(", ")}`).join(" · ")));
+    box.appendChild(el("p", "muted", t("rp.reproduce", { seed: r.seed })));
+  }
+  $("#rpl-run").addEventListener("click", runRandomPlan);
   $("#cv-run").addEventListener("click", runCavities);
   $("#mv-run").addEventListener("click", runMultivariate);
   $("#nest-run").addEventListener("click", runNested);
@@ -3500,6 +3544,17 @@
     });
   }
 
+  async function checkAnchor() {
+    const entries = $("#anchor-entries").value.trim(), hash = $("#anchor-hash").value.trim().toLowerCase();
+    if (entries === "" || !/^[0-9a-f]{64}$/.test(hash)) { showError({ code: "invalid_input", message: t("admin.anchor_bad"), params: { message: t("admin.anchor_bad") } }); return; }
+    await guarded(async () => {
+      const r = await post("/api/audit/anchor-check", { entries: Number(entries), last_hash: hash });
+      const box = $("#anchor-verdict");
+      box.textContent = t("admin.anchor_" + r.reason, { now: r.entries_now, id: r.broken_at });
+      box.className = "strong " + (r.ok ? "status-ok" : "status-alarm");
+    });
+  }
+
   // ---------------------------------------------------------------- wiring
   function syncDistributionControls() {
     const d = $("#a-dist").value, nonNormal = d !== "normal";
@@ -3589,6 +3644,7 @@
     $("#pf-logo-file").addEventListener("change", (e) => onLogoChosen(e.target.files[0]));
     $("#pf-logo-remove").addEventListener("click", () => { state.logo = ""; $("#pf-logo-file").value = ""; showLogo(); });
     $("#audit-verify").addEventListener("click", verifyAudit);
+    $("#anchor-check").addEventListener("click", checkAnchor);
     restoreReportMeta();
     $("#rp-language").addEventListener("change", () => { state.reportLangTouched = true; });
     $("#rp-create").addEventListener("click", createReport);

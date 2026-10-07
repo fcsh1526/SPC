@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import Depends, FastAPI, Query, Request, Response
 
-from spc.api.schemas import LoginBody, NewUserBody, PasswordBody, ResetPasswordBody, UpdateUserBody
+from spc.api.schemas import AnchorBody, LoginBody, NewUserBody, PasswordBody, ResetPasswordBody, UpdateUserBody
 from spc.auth import Audit, AuthService, User
 
 COOKIE = "spc_session"
@@ -76,3 +76,8 @@ def add_account_routes(app: FastAPI, auth: AuthService, audit: Audit, admin, sec
     @app.get("/api/audit/verify")
     def audit_verify(_: User = Depends(admin)):
         return audit.verify()
+
+    @app.post("/api/audit/anchor-check")
+    def audit_anchor_check(body: AnchorBody, _: User = Depends(admin)):
+        """Compare the chain with the number of entries and the last hash that were kept outside the database (an earlier answer of /api/audit/verify)."""
+        return audit.check_anchor(body.entries, body.last_hash)

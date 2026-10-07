@@ -2018,3 +2018,43 @@ def test_lot_release_in_the_browser(server, browser):
     expect(page.locator("#lot-list")).to_contain_text("L-2026-001", timeout=20000)
     assert problems == []
     ctx.close()
+
+
+def test_random_plan_and_audit_anchor_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page, user="admin")
+    page.click("nav.tabs button[data-tab=tools]")
+    page.fill("#rpl-k", "12")
+    page.fill("#rpl-n", "5")
+    page.fill("#rpl-seed", "42")
+    page.fill("#rpl-factors", "tool: A B C\nshift: 1 2")
+    page.click("#rpl-run")
+    expect(page.locator("#rpl-out")).to_contain_text("12 subgroups of 5 parts (60 parts), seed 42", timeout=20000)
+    expect(page.locator("#rpl-out table tr")).to_have_count(13)
+    expect(page.locator("#rpl-out")).to_contain_text("tool: A × 4, B × 4, C × 4")
+    page.fill("#rpl-factors", "tool")
+    page.click("#rpl-run")
+    expect(page.locator("#errors")).to_contain_text("at least one level", timeout=20000)
+    page.click("nav.tabs button[data-tab=admin]")
+    page.click("#audit-verify")
+    expect(page.locator("#audit-verdict")).not_to_be_empty(timeout=20000)
+    text = page.locator("#audit-verdict").inner_text()
+    import re
+    n, h = re.search(r"(\d+)", text).group(1), re.search(r"\b([0-9a-f]{64})\b", text).group(1)
+    page.fill("#anchor-entries", n)
+    page.fill("#anchor-hash", h)
+    page.click("#anchor-check")
+    expect(page.locator("#anchor-verdict")).to_contain_text("still holds the entry you kept", timeout=20000)
+    page.fill("#anchor-hash", "0" * 64)
+    page.click("#anchor-check")
+    expect(page.locator("#anchor-verdict")).to_contain_text("not the one you kept", timeout=20000)
+    page.fill("#anchor-hash", "xyz")
+    page.click("#anchor-check")
+    expect(page.locator("#errors")).to_contain_text("64 characters", timeout=20000)
+    assert problems == []
+    ctx.close()

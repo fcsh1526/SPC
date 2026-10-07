@@ -14,7 +14,7 @@
 | ⬜ | 未實作 |
 | ➖ | 說明性文字或組織責任，軟體沒有對應功能 |
 
-統計：✅ 74，🔶 8，◐ 11，⬜ 1，➖ 6（共 100 列）
+統計：✅ 75，🔶 9，◐ 9，⬜ 1，➖ 6（共 100 列）
 
 「驗證」欄的測試以「tests/檔名::測試名」表示。另有獨立證據：ISO/TR 11462-3 的資料集（內建確效報告，`src/spc/validation/iso11462.py`）、ISO 22514-8 附錄的算例（`src/spc/validation/iso22514.py`）、草案自己的數值範例（表 8-1、9-3、12 章範例）、AIAG MSA 手冊例。
 
@@ -95,7 +95,7 @@
 
 | 節 | 草案要求（意旨） | 狀態 | 程式 | 驗證 | 備註 |
 |---|---|---|---|---|---|
-| 9.2 | 隨機抽樣，例如 25 組 × 5 件，須代表工具、批次、班別 | ◐ | `src/spc/service/analysis.py`（子群結構、不完整子群處理） | `tests/test_service.py::test_marked_values_leave_the_calculation_and_their_subgroup_is_reported` | 樣本是否代表製程由人判斷；程式只處理子群結構 |
+| 9.2 | 隨機抽樣，例如 25 組 × 5 件，須代表工具、批次、班別 | 🔶 | `src/spc/service/analysis.py`（子群結構、不完整子群處理）；`src/spc/core/sampling_plan.py`（隨機抽樣計畫、樣本涵蓋檢查）、`POST /api/sampling/random`、`POST /api/datasets/{key}/coverage`、介面「工具」與「特殊情形」 | `tests/test_service.py::test_marked_values_leave_the_calculation_and_their_subgroup_is_reported`、`tests/test_sampling.py::test_the_plan_deals_the_levels_out_evenly_and_the_same_seed_gives_the_same_plan`、`tests/test_sampling.py::test_coverage_finds_missing_and_thin_levels` | 草案只說隨機抽樣且須代表機台、批與班別，沒有方法。隨機計畫：期間切成每子組一個時段、時段內隨機取點、各因子的水準平均分配且順序隨機，種子可重現；涵蓋檢查：水準缺少，或占比低於平均占比的一半、或只出現在一個子組（子組 5 個以上）視為偏少。規則是我們的；樣本是否真的隨機取得仍由人負責 |
 | 9.3 | 製程分析前須證明量測能力並已分析機台績效；不中斷、變更須記錄 | ✅ | `src/spc/report/builder.py`、報告請求的 `machine_study_id`（`POST /api/reports`） | `tests/test_special.py::test_a_report_can_name_a_closed_machine_study_and_refuses_an_open_one` | 報告可指名其依據的機台績效研究：研究未結案則拒絕（409 `machine_study_open`），結案則記入報告與稽核；不指名時不檢查 |
 | 9.4、表 9-1、9-2 | 八種時間相依分布模型 A1、A2、B、C1～C4、D；只有 A1、A2 統計受控 | ✅ | `src/spc/core/time_model.py`、`src/spc/service/model_suggestion.py`、分析請求的 `model` | `tests/test_time_model.py::test_the_evidence_and_the_reasons_follow_the_decision_of_the_draft_table`、`tests/test_time_model.py::test_each_model_is_found_in_most_simulated_processes` | 草案沒有給判定程序：自動建議是 🔶（標準檢定，只是建議，使用者決定）；模擬判對率 65～97 % |
 | 9.4 | 配適品質：先看全部資料，再看最靠近所算指標那一側規格限的 25 % 資料；機率圖、直方圖、淨相關係數 | ✅ | 機率圖與直方圖（`src/spc/report/svg.py`）；Anderson-Darling 與 AIC；分析請求的 `fit_check`：整體與靠近所算指標那一側規格限 25 % 資料的機率圖相關係數 | `tests/test_distributions.py::test_candidates_report_failures_instead_of_hiding_them`、`tests/test_service.py::test_the_fit_check_is_only_in_the_result_when_asked_for_and_looks_at_the_limit_that_matters` | 相關係數的判定門檻草案沒有給，結果只列數值與兩段資料的比較 |
@@ -141,7 +141,7 @@
 | 11.1 | 自動監控、通知偏差；即時視覺化與歷史資料；自訂警報條件；事件、行動、原因須記錄 | ✅ | `src/spc/monitor/`、`src/spc/monitor/notify.py`（Webhook） | `tests/test_monitor.py::test_notifications_go_out_once_per_incident_and_a_broken_receiver_changes_nothing`、`tests/test_monitor.py::test_the_webhook_notifier_posts_json_and_survives_a_dead_url` | |
 | 11.1 | 量測資料由設備經介面自動傳入資料庫（例：OPC UA）；介面須驗證 | ✅ | `src/spc/equipment/`（OPC UA） | `tests/test_equipment.py::test_a_link_is_tested_before_it_is_enabled_and_a_change_starts_again`、`tests/test_equipment.py::test_the_test_read_and_the_runner_against_a_real_server` | 以本機測試伺服器驗證；**加密連線只接好線，未測；未接過真實設備** |
 | 11.1 | 標準化介面格式（舉例 ISO/TR 11462-5） | ⬜ | — | — | 未做；本標準本文未取得 |
-| 11.1 | 與 CAQ 系統整合 | ◐ | REST API、CSV 與 Excel 匯入匯出 | `tests/test_api.py::test_export_keeps_marks_and_opens_in_excel` | 沒有特定 CAQ 系統的連接器 |
+| 11.1 | 與 CAQ 系統整合 | ◐ | REST API、CSV 與 Excel 匯入匯出 | `tests/test_api.py::test_export_keeps_marks_and_opens_in_excel` | 沒有特定 CAQ 系統的連接器；提供通用介面：REST API、CSV 匯入、資料集／監控點／批次的 CSV 匯出（`GET /api/monitors/{id}/export.csv`、`GET /api/lots/export.csv`）、事件通知（`src/spc/monitor/notify.py`）、OPC UA 設備介面 |
 | 11.2 | 分析軟體須驗證（verification）與確認（validation）；以測試範例比對文件化的參考結果 | ◐ | `src/spc/validation/`（內建確效報告，約 630 項檢查）、`src/spc/validation/iso11462.py` | `tests/test_validation.py::test_the_eleven_iso_examples_are_run_against_the_program_and_nothing_is_hidden`、`tests/test_validation.py::test_a_wrong_program_fails_the_standards_examples` | 內建確效含 AIAG MSA 手冊例、Cohen／Fleiss kappa 的公開例、Montgomery 的 2² 試驗例；**沒有 ISO 22514-7 的範例**（未取得標準全文） |
 | 11.2 | 參數須透明（最小樣本、離群處理、信賴區間、估計式、單邊公差），否則等於黑盒子 | ✅ | `src/spc/params.py`（參數與指紋，隨結果與封存保存） | `tests/test_arl_oc_and_params.py::test_params_are_explicit_and_hashable_for_archiving` | |
 | 11.2 | 客戶特定參數集可設定並保存 | ✅ | `src/spc/profile.py`、介面「管理 → 客戶設定檔」 | `tests/test_profiles.py::test_resolve_takes_the_profile_for_unset_fields_and_names_deviations`、`tests/test_profiles.py::test_the_archive_keeps_a_snapshot_so_a_later_change_does_not_touch_the_report` | |
@@ -163,7 +163,7 @@
 | 13 | 文件須防竄改、受保護、可取得、可讀；可追溯到原因事件；已處理資料須連同評估與所用參數一起保存 | ✅ | `src/spc/report/archive.py`（SHA-256 摘要、資料＋參數＋結果）、`src/spc/auth/audit.py`（雜湊鏈）、`src/spc/signing/`（外部簽章） | `tests/test_report.py::test_any_change_to_the_archive_is_noticed`、`tests/test_report.py::test_reproduction_finds_a_result_that_does_not_follow_from_the_data`、`tests/test_signing.py::test_a_changed_archive_invalidates_the_signature` | 封存檔可離線重算驗證；簽章不含時間戳記服務、不驗憑證鏈 |
 | 13 | 檢驗指令、量測與檢驗方法須文件化、版本化、歸檔 | ◐ | 控制計畫（版本、核准、快照）`src/spc/plan/`；量測系統記錄 | `tests/test_plan.py::test_the_life_of_a_control_plan` | 檢驗指令書本身不是軟體的文件類型 |
 | 13 | 保存期限、儲存媒體、儲存地點由公司決定；文件分類系統 | ➖ | — | — | 組織決策；軟體**沒有保存期限或自動清除**功能，資料集可被其擁有者或管理員刪除（報告保留當時的快照） |
-| 13 | 可追溯到起因事件與製程（CQI-28、IATF 7.5.3.2.1） | ◐ | 稽核鏈、標記與重啟日誌、事件紀錄 | `tests/test_auth.py::test_the_audit_chain_shows_a_change`、`tests/test_auth.py::test_removing_the_newest_entries_is_only_seen_against_a_hash_kept_elsewhere` | 只提供證據鏈；刪除最新幾筆稽核紀錄只有拿另外保存的雜湊才看得出（已在程式與文件說明） |
+| 13 | 可追溯到起因事件與製程（CQI-28、IATF 7.5.3.2.1） | ✅ | 稽核鏈、標記與重啟日誌、事件紀錄；`src/spc/auth/audit.py::check_anchor`、`POST /api/audit/anchor-check`、介面「管理」 | `tests/test_auth.py::test_the_audit_chain_shows_a_change`、`tests/test_auth.py::test_removing_the_newest_entries_is_only_seen_against_a_hash_kept_elsewhere`、`tests/test_sampling.py::test_an_anchor_kept_outside_shows_that_the_newest_entries_were_cut` | 鏈本身看不出尾端被截斷；把「筆數與最後雜湊」存在資料庫外（管理員驗證時會顯示），之後貼回「與保存的雜湊比對」即可查出截斷、改動或重建。**錨點必須由人保存在資料庫之外**，軟體無法替你保存 |
 
 ---
 
@@ -174,7 +174,7 @@
 3. **計量型 MSA 的標準化預算**：線性與偏差、巢狀 GRR、通用不確定度預算已做，但判定規則未對照 AIAG／VDA 5 手冊，也沒有 ISO 22514-7 的 Q_MS／Q_MP 計算。
 4. **標準化介面格式**（ISO/TR 11462-5）：未做（沒有標準全文）。
 5. 製程特性化只有迴歸與二水準完全因子設計，沒有部分因子、反應曲面與混合設計。
-6. **不在軟體範圍或需要其他系統**（仍標 ◐ 或 ➖）：與特定 CAQ 系統的連接器（11.1）、檢驗指令書本身（13）、規劃的工作站與物流（6.5）、抽樣是否隨機且代表製程（9.2，由人判斷）、PDCA 與稽核（5.2、5.4 迴路 4～6，組織責任）。軟體只提供證據鏈與對應的記錄。
+6. **不在軟體範圍或需要其他系統**（仍標 ◐ 或 ➖）：與特定 CAQ 系統的連接器（11.1，已有 REST、CSV 匯出與事件通知可串接）、檢驗指令書本身（13，控制計畫每條線有方法、樣本數、頻率與反應計畫並版本化核准）、規劃的工作站與物流（6.5）、PDCA 與稽核（5.2、5.4 迴路 4～6，組織責任）。軟體只提供證據鏈與對應的記錄。
 
 ## 我方解讀清單（🔶，建議請統計人員審閱）
 
@@ -191,6 +191,8 @@
 | 量測不確定度 | 草案第 12 章只給結果 | U＝k√(σ_GRR²＋(偏差/√3)²＋(解析度/√12)²＋u_cal²)，吻合草案範例 |
 | MSA 判定門檻 | 草案沒有給 | VDA 5／AIAG 常用值（≤10 %、≤30 %、ndc≥5、Cg≥1.33），屬系統政策可改 |
 | 計數型 MSA | 草案只說 IATF 要求計數型也要驗證，沒有方法 | AIAG 的一致性研究（交叉表法）：kappa、有效性（每次都判對的零件占比）、漏判率與誤判率（單次判定）；門檻為通常歸於 AIAG 的值，**未對照手冊**，屬系統政策可改 |
+| 隨機抽樣計畫與樣本涵蓋 | 草案只說隨機抽樣且須代表機台、批與班別 | 期間切成每子組一個時段並在時段內隨機取點；各因子水準平均分配、順序隨機；種子可重現。涵蓋檢查：占比低於平均占比一半或只在一個子組者視為偏少 |
+| 稽核鏈錨點 | 草案要求可追溯、防竄改 | 保存的「筆數＋最後雜湊」在鏈中該筆的雜湊必須相同，否則是被截斷（較短）、被改動或重建 |
 | 批次放行處置 | 草案只說放行合格品、攔下不合格品；操作員負責產品處置（6.8.1）；挑選、報廢、重工是對輸出的過渡措施 | 批次連結監控器與一段點；證據阻擋＝開著或升級（轉根本原因分析）的事件、被 MSA 閘門擋住的量測系統、範圍內沒有有效點；放行需證據乾淨，否則挑選（全檢、件數須相加）或由工程師附客戶核准編號特採；沒有連結監控器的放行須工程師與理由；操作員可記錄、暫扣、在證據乾淨時處置；重新開啟須工程師與理由；每步入歷程與稽核鏈 |
 | 抽樣間隔 | 草案只給定性建議 | 每組件數取達到目標 ARL 的最小值；抽樣間隔 ＝ 允許生產件數／ARL（件），不得小於每組件數 |
 | 能力不足時 100 % 檢驗 | 草案說改 100 % 檢驗，沒有判準 | 只在有特性類別的目標且指標未達目標（`fails`）時給建議，不自動切換 |

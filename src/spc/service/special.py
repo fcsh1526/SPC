@@ -30,6 +30,18 @@ def _columns(ds: Dataset, factors: list[str]) -> tuple[list[float], dict[str, li
     return [v for v, ok in zip(ds.values.tolist(), mask.tolist()) if ok], cols
 
 
+def coverage_for_dataset(ds: Dataset, factors: list[str] | None = None, expected: dict | None = None, thin_share: float = 0.5) -> dict:
+    """Does the sample stand for the tools, lots and shifts (draft 9.2)? `factors` are tag names (all of them when empty); values marked invalid are left out."""
+    from spc.core import sampling_plan
+
+    names = list(factors or ds.tags)
+    if not names:
+        raise ValueError("the data has no tags (tool, lot, shift ...) to look at")
+    _, cols = _columns(ds, names)
+    sub = [str(v) for v, ok in zip(ds.subgroup.tolist(), ds.valid_mask.tolist()) if ok] if ds.subgroup is not None else None
+    return sampling_plan.coverage(cols, sub, expected, thin_share)
+
+
 def multistage_for_dataset(ds: Dataset, factors: list[str], lsl: float | None, usl: float | None, **options) -> dict:
     """The factors are tag names (pallet, spindle, machine, position ...) or `subgroup`. Values marked invalid are left out."""
     values, cols = _columns(ds, factors)

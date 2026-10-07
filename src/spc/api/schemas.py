@@ -127,6 +127,26 @@ class DoeBody(Strict):
     max_order: int | None = Field(default=None, ge=1, le=12)
 
 
+class AnchorBody(Strict):
+    entries: int = Field(ge=0, le=10**9)
+    last_hash: str = Field(pattern="^[0-9a-f]{64}$")
+
+
+class RandomPlanBody(Strict):
+    """A random sampling plan (draft 9.2): subgroups spread over the period, the levels of each factor dealt out evenly."""
+
+    subgroups: int = Field(ge=1, le=1000)
+    size: int = Field(ge=1, le=1000)
+    factors: dict[str, list[str]] = Field(default_factory=dict, max_length=6)
+    seed: int | None = Field(default=None, ge=0, lt=2**32)
+
+
+class CoverageBody(Strict):
+    factors: list[str] | None = Field(default=None, max_length=20)
+    expected: dict[str, list[str]] | None = None
+    thin_share: float = Field(default=0.5, gt=0, le=1)
+
+
 class MultivariateBody(Strict):
     """Pm and Pmk of a multidimensional characteristic (draft 8.5.2): one row per part, one column per characteristic."""
 

@@ -31,6 +31,30 @@ def add_monitor_routes(app: FastAPI, svc: MonitorService, datasets: DatasetStore
     def get_monitor(mid: int, user: User = Depends(reader), limit: int = Query(100, ge=1, le=1000)):
         return svc.view(mid, user, limit)
 
+    @app.get("/api/monitors/{mid}/export.csv")
+    def export_points(mid: int, _: User = Depends(reader)):
+        """The points of a monitor as CSV, for a CAQ system or a spreadsheet: one row per point, with the alarms, the incident and the validity."""
+        import csv
+        import io
+
+        from fastapi.responses import Response
+
+        from spc.data.csv_io import spreadsheet_safe as safe
+
+        monitor = store.get(mid)
+        points = store.points(mid, limit=1_000_000)
+        width = max((len(p["values"]) for p in points), default=0)
+        out = io.StringIO()
+        w = csv.writer(out, lineterminator="\r\n")
+        w.writerow(["seq", "taken_at", "entered_at", "entered_by", "label", "tags", *[f"value_{i + 1}" for i in range(width)], "location", "variation", "valid", "invalid_reason", "alarms", "warnings", "incident_id"])
+        for p in points:
+            w.writerow([p["seq"], p["taken_at"], p["entered_at"], safe(p["entered_by"] or ""), safe(p["label"] or ""), safe(";".join(f"{k}={v}" for k, v in sorted((p["tags"] or {}).items()))),
+                        *[repr(v) for v in p["values"]], *[""] * (width - len(p["values"])), p["loc"] if p["loc"] is not None else "", p["var"] if p["var"] is not None else "",
+                        int(p["valid"]), safe((p["invalid"] or {}).get("reason") or ""), ";".join(f"{a['chart']}:{a['rule']}" for a in p["alarms"]),
+                        ";".join(f"{a['chart']}:{a['rule']}" for a in p["warnings"]), p["incident_id"] or ""])
+        return Response(("\ufeff" + out.getvalue()).encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="monitor-{monitor["id"]}-points.csv"'})
+
     @app.put("/api/monitors/{mid}")
     def update_monitor(mid: int, body: MonitorConfigBody, user: User = Depends(engineer)):
         svc.update(mid, body.config, user)

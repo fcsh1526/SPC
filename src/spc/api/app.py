@@ -31,8 +31,8 @@ from spc.api.equipment import add_equipment_routes
 from spc.api.signing import add_signing_routes
 from spc.signing.core import SigningError
 from spc.signing.service import SigningService
-from spc.core import doe, gdt, multistage as mstage, multivariate_perf as mvperf
-from spc.service.special import cavity_study, multistage_for_dataset, nested_for_dataset, special_snapshot, trend_for_dataset
+from spc.core import doe, gdt, sampling_plan, multistage as mstage, multivariate_perf as mvperf
+from spc.service.special import cavity_study, coverage_for_dataset, multistage_for_dataset, nested_for_dataset, special_snapshot, trend_for_dataset
 from spc.service.state_tests import multistate_for_dataset, state_tests_for_dataset
 from spc.equipment.model import EquipmentError
 from spc.equipment.service import EquipmentService
@@ -52,6 +52,8 @@ from spc.api.schemas import (
     MultistageScopeBody,
     GdtBody,
     CavityBody,
+    CoverageBody,
+    RandomPlanBody,
     DoeBody,
     ChartGuideBody,
     SpecialChartBody,
@@ -846,6 +848,22 @@ def create_app(
         """Equipment with several cavities, stations or clamping devices (draft 8.2.6): Pm and Pmk of each, and the variation between and within them."""
         try:
             return cavity_study(store.get(key), body.factor, body.lsl, body.usl, body.alpha)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/sampling/random")
+    def sampling_random(body: RandomPlanBody):
+        """A random sampling plan (draft 9.2). The seed is in the answer: the same seed gives the same plan."""
+        try:
+            return sampling_plan.random_plan(body.subgroups, body.size, body.factors, body.seed)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/datasets/{key}/coverage")
+    def coverage(key: str, body: CoverageBody):
+        """Does the sample stand for the tools, lots and shifts of the tags of the data (draft 9.2)?"""
+        try:
+            return coverage_for_dataset(store.get(key), body.factors, body.expected, body.thin_share)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 

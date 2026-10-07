@@ -518,6 +518,18 @@
     <p><button id="doe-run" class="primary" data-i18n="doe.run"></button></p>
     <div id="doe-out" role="status"></div>
   </div>
+  <div class="card" id="rpl-card">
+    <h3 data-i18n="rp.title"></h3>
+    <p class="note" data-i18n="rp.note"></p>
+    <div class="form-grid">
+      <label><span data-i18n="rp.subgroups"></span><input id="rpl-k" type="number" min="1" max="1000" step="1" value="25"></label>
+      <label><span data-i18n="rp.size"></span><input id="rpl-n" type="number" min="1" max="1000" step="1" value="5"></label>
+      <label><span data-i18n="rp.seed"></span><input id="rpl-seed" type="number" min="0" step="1"></label>
+      <label class="wide"><span data-i18n="rp.factors"></span><textarea id="rpl-factors" rows="3" spellcheck="false" placeholder="tool: A B C&#10;shift: 1 2 3"></textarea></label>
+    </div>
+    <p><button id="rpl-run" class="primary" data-i18n="rp.run"></button></p>
+    <div id="rpl-out" role="status"></div>
+  </div>
   <div class="card" id="guide-card">
     <h3 data-i18n="guide.title"></h3>
     <p class="note" data-i18n="guide.intro"></p>
@@ -1291,6 +1303,18 @@
     <div id="cv-out" role="status"></div>
   </div>
   <div class="card">
+    <h3 data-i18n="cov.title"></h3>
+    <p class="note" data-i18n="cov.note"></p>
+    <p id="sp-cov-none" class="muted" data-i18n="sp.comb_no_data"></p>
+    <div id="sp-cov-form" hidden>
+      <div class="form-grid">
+        <label class="wide"><span data-i18n="cov.expected"></span><textarea id="cov-expected" rows="3" spellcheck="false" placeholder="tool: A B C&#10;shift: 1 2 3"></textarea></label>
+      </div>
+      <p><button id="cov-run" class="primary" data-i18n="cov.run"></button></p>
+    </div>
+    <div id="cov-out" role="status"></div>
+  </div>
+  <div class="card">
     <h3 data-i18n="sp.mv_title"></h3>
     <p class="note" data-i18n="sp.mv_note"></p>
     <div class="form-grid">
@@ -1480,6 +1504,11 @@
   <h3 data-i18n="admin.audit"></h3>
   <p class="note" data-i18n="admin.audit_note"></p>
   <p class="row"><button id="audit-verify" data-i18n="admin.audit_verify"></button><span id="audit-verdict" class="strong"></span></p>
+  <div class="form-grid">
+    <label><span data-i18n="admin.anchor_entries"></span><input id="anchor-entries" type="number" min="0" step="1"></label>
+    <label class="wide"><span data-i18n="admin.anchor_hash"></span><input id="anchor-hash" type="text" maxlength="64" spellcheck="false"></label>
+  </div>
+  <p class="row"><button id="anchor-check" data-i18n="admin.anchor_check"></button><span id="anchor-verdict" class="strong"></span></p>
   <div class="scroll"><table id="audit-log" class="grid"></table></div>
 </section>
 </main>

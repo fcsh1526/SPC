@@ -644,6 +644,14 @@
 - **這是我們的設計**：草案只說放行合格品、攔下不合格品。軟體不判斷產品合格，只把監控器的證據擺在人面前並拒絕證據不支持的放行；**不含**實物管理與庫存扣帳。
 - 驗證：`tests/test_lots.py`（乾淨放行、開著與升級的事件擋放行、挑選的計數規則、特採的角色與核准編號、範圍外的事件不影響、無監控器的放行、重新開啟與稽核、輸入檢查）與瀏覽器測試。
 
+## 10.17 抽樣計畫、稽核錨點與匯出（草案 9.2、13、11.1，剩餘缺口逐列檢查後補上）
+
+- **隨機抽樣計畫**（`spc.core.sampling_plan.random_plan`，`POST /api/sampling/random`）：期間切成 k 個時段，第 i 個子組在第 i 個時段內取隨機位置；每個因子的水準盡量平均分給各子組（兩個水準的數量最多差 1）並隨機排序，各因子獨立排序。結果含種子，相同種子得到相同計畫。
+- **樣本涵蓋檢查**（`coverage`，`POST /api/datasets/{key}/coverage`）：對資料的標籤算每個水準的值數、占比、出現的子組數；預期水準缺少 → `missing`；占比低於平均占比 × `thin_share`（預設 0.5）或只在一個子組（子組 ≥ 5）→ `thin`。**規則是我們的**；不進報告與封存（僅工具）。
+- **稽核鏈錨點**（`Audit.check_anchor`，`POST /api/audit/anchor-check`，管理員）：驗證鏈後，比對第 N 筆的雜湊是否等於保存的最後雜湊；結果 `intact`、`shorter`（較短，最新紀錄被移除）、`hash_differs`、`chain_broken`。錨點（驗證時顯示的筆數與雜湊）須由人存在資料庫之外。
+- **CSV 匯出**：監控點（`GET /api/monitors/{id}/export.csv`）、批次與處置（`GET /api/lots/export.csv`）。文字欄位以 `spreadsheet_safe` 處理，以 `=`、`+`、`-`、`@` 開頭者加單引號，避免試算表當成公式執行。
+- 測試：`tests/test_sampling.py`；頁面的 id 唯一性：`tests/test_static_page.py`（曾因 `rp-out` 重複而選到錯的元素）。
+
 ## 10.1 資料庫與登入（已實作第一版）
 
 **儲存**：SQLite 單檔（`--db` 或環境變數 `SPC_DB`，預設 `spc.sqlite3`，建立時權限 0600）。一條連線加一把鎖，所有存取走 `spc.db`，日後換 PostgreSQL 只改 `database.py` 與 `stores.py`。結構版本（目前 8）放在 `PRAGMA user_version`，版本不符時拒絕啟動。

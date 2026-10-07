@@ -55,3 +55,18 @@ class Audit:
                 return {"ok": False, "entries": n, "last_hash": prev, "broken_at": r["id"]}
             prev, n = r["hash"], n + 1
         return {"ok": True, "entries": n, "last_hash": prev, "broken_at": None}
+
+    def check_anchor(self, entries: int, last_hash: str) -> dict:
+        """Is the chain still the one that had `entries` entries and the hash `last_hash` at the end, which somebody kept outside the database?
+        This is what shows that the newest entries were cut: the chain alone cannot (the shorter chain is a chain too).
+        {'ok': bool, 'reason': 'intact' | 'chain_broken' | 'shorter' | 'hash_differs', 'entries_now': n, 'broken_at': id or None}"""
+        now = self.verify()
+        if not now["ok"]:
+            return {"ok": False, "reason": "chain_broken", "entries_now": now["entries"], "broken_at": now["broken_at"]}
+        if entries == 0:
+            return {"ok": last_hash == GENESIS, "reason": "intact" if last_hash == GENESIS else "hash_differs", "entries_now": now["entries"], "broken_at": None}
+        row = self.db.one("SELECT hash FROM audit ORDER BY id LIMIT 1 OFFSET ?", (entries - 1,))
+        if row is None:
+            return {"ok": False, "reason": "shorter", "entries_now": now["entries"], "broken_at": None}
+        same = row["hash"] == last_hash
+        return {"ok": same, "reason": "intact" if same else "hash_differs", "entries_now": now["entries"], "broken_at": None}
