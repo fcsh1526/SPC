@@ -2190,3 +2190,45 @@ def test_a_dfd_file_is_read_in_the_browser(server, browser, tmp_path):
     expect(page.locator("#errors")).to_contain_text("K0100", timeout=20000)
     assert problems == []
     ctx.close()
+
+
+def test_an_improvement_cycle_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=monitor]")
+    page.click("#mon-new")
+    page.fill("#me-name", "Bore diameter")
+    page.fill("#me-characteristic", "diameter")
+    page.fill("#me-lsl", "9.5")
+    page.fill("#me-usl", "10.5")
+    page.fill("#me-mu", "10")
+    page.fill("#me-sigma", "0.1")
+    page.locator("#me-ocap tr[data-key=default] input").nth(0).fill("Stop")
+    page.locator("#me-ocap tr[data-key=default] input").nth(1).fill("Setter")
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Bore diameter", timeout=20000)
+    page.click("nav.tabs button[data-tab=improve]")
+    page.fill("#imp-title", "Fewer rejects of the bore")
+    page.fill("#imp-target", "1.5")
+    page.fill("#imp-plan", "Replace the spindle bearings")
+    page.click("#imp-create")
+    expect(page.locator("#imp-d-title")).to_have_text("Fewer rejects of the bore", timeout=20000)
+    expect(page.locator("#imp-d-status")).to_have_text("planned")
+    expect(page.locator("#imp-d-body")).to_contain_text("No baseline yet")  # the monitor has no points yet
+    page.click("#imp-act-btn")
+    expect(page.locator("#errors")).to_be_visible(timeout=20000)  # nothing was said about what was done
+    page.fill("#imp-act-text", "Bearings replaced")
+    page.click("#imp-act-btn")
+    expect(page.locator("#imp-d-status")).to_have_text("implemented, to be verified", timeout=20000)
+    expect(page.locator("#imp-act-text")).to_be_hidden()
+    page.click("#imp-act-btn")
+    expect(page.locator("#errors")).to_contain_text("at least 25 valid points", timeout=20000)
+    page.click("#imp-back")
+    expect(page.locator("#imp-list")).to_contain_text("Fewer rejects of the bore", timeout=20000)
+    assert problems == []
+    ctx.close()

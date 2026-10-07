@@ -139,3 +139,11 @@ def test_the_points_of_a_monitor_and_the_lots_can_be_exported_as_csv():
     csv_text = c["view"].get("/api/lots/export.csv").content.decode("utf-8-sig")
     assert csv_text.splitlines()[0].startswith("lot_no,product,characteristic,quantity,status,decision") and "'=L1" in csv_text
     assert c["view"].get("/api/monitors/999/export.csv").status_code == 404
+
+
+def test_the_plan_can_take_every_subgroup_in_the_middle_of_its_window():
+    mid = sp.random_plan(8, 5, {"shift": ["1", "2"]}, seed=3, position="middle")
+    assert mid["position_mode"] == "middle" and all(r["position"] == pytest.approx((r["subgroup"] - 0.5) / 8) for r in mid["plan"])
+    assert mid["plan"][0]["levels"] == sp.random_plan(8, 5, {"shift": ["1", "2"]}, seed=3)["plan"][0]["levels"]  # the levels do not depend on the position
+    with pytest.raises(ValueError):
+        sp.random_plan(8, 5, position="sometimes")

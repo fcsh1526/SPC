@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 SCHEMA = """
 CREATE TABLE users (
@@ -238,6 +238,14 @@ CREATE TABLE lots (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
+);
+CREATE TABLE improvements (
+    id         INTEGER PRIMARY KEY,
+    status     TEXT NOT NULL,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
 )
 """
 
@@ -256,6 +264,18 @@ CREATE TABLE validation_runs (
     data       TEXT NOT NULL,
     digest     TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+)
+"""
+
+
+MIGRATION_10_TO_11 = """
+CREATE TABLE improvements (
+    id         INTEGER PRIMARY KEY,
+    status     TEXT NOT NULL,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
 )
 """
@@ -390,7 +410,7 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9):
+        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
@@ -434,9 +454,14 @@ class Database:
                         self._conn.execute(statement)
                 self._conn.execute("PRAGMA user_version = 9")
                 self._conn.execute("COMMIT")
-            self._conn.execute("BEGIN IMMEDIATE")  # version 10 adds the lots and their disposition
-            self._conn.execute(MIGRATION_9_TO_10)
-            self._conn.execute("PRAGMA user_version = 10")
+            if version <= 9:
+                self._conn.execute("BEGIN IMMEDIATE")  # version 10 adds the lots and their disposition
+                self._conn.execute(MIGRATION_9_TO_10)
+                self._conn.execute("PRAGMA user_version = 10")
+                self._conn.execute("COMMIT")
+            self._conn.execute("BEGIN IMMEDIATE")  # version 11 adds the improvement cycles (PDCA of control loop 3)
+            self._conn.execute(MIGRATION_10_TO_11)
+            self._conn.execute("PRAGMA user_version = 11")
             self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")

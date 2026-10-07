@@ -139,6 +139,7 @@ class RandomPlanBody(Strict):
     size: int = Field(ge=1, le=1000)
     factors: dict[str, list[str]] = Field(default_factory=dict, max_length=6)
     seed: int | None = Field(default=None, ge=0, lt=2**32)
+    position: Literal["random", "middle"] = "random"
 
 
 class CoverageBody(Strict):
@@ -392,6 +393,16 @@ class PointBody(Strict):
 
 class ReasonBody(Strict):
     reason: str = Field(max_length=2000)
+
+
+class ImprovementBody(Strict):
+    """An improvement cycle (checked in spc.improvement.service.validate_record)."""
+
+    record: dict
+
+
+class ImprovementTextBody(Strict):
+    text: str = Field(max_length=2000)
 
 
 class LotBody(Strict):

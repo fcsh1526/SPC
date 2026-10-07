@@ -56,6 +56,7 @@
   <button role="tab" data-tab="analysis" aria-selected="false" aria-disabled="true" data-i18n="nav.analysis"></button>
   <button role="tab" data-tab="monitor" aria-selected="false"><span data-i18n="nav.monitor"></span> <span id="alert-badge" class="badge" hidden></span></button>
   <button role="tab" data-tab="lots" aria-selected="false" data-i18n="nav.lots"></button>
+  <button role="tab" data-tab="improve" aria-selected="false" data-i18n="nav.improve"></button>
   <button role="tab" data-tab="plan" aria-selected="false" data-i18n="nav.plan"></button>
   <button role="tab" data-tab="roles" aria-selected="false" data-i18n="nav.roles"></button>
   <button role="tab" data-tab="msa" aria-selected="false" data-i18n="nav.msa"></button>
@@ -525,6 +526,7 @@
       <label><span data-i18n="rp.subgroups"></span><input id="rpl-k" type="number" min="1" max="1000" step="1" value="25"></label>
       <label><span data-i18n="rp.size"></span><input id="rpl-n" type="number" min="1" max="1000" step="1" value="5"></label>
       <label><span data-i18n="rp.seed"></span><input id="rpl-seed" type="number" min="0" step="1"></label>
+      <label><span data-i18n="rp.position"></span><select id="rpl-position"><option value="random" data-i18n="rp.pos_random"></option><option value="middle" data-i18n="rp.pos_middle"></option></select></label>
       <label class="wide"><span data-i18n="rp.factors"></span><textarea id="rpl-factors" rows="3" spellcheck="false" placeholder="tool: A B C&#10;shift: 1 2 3"></textarea></label>
     </div>
     <p><button id="rpl-run" class="primary" data-i18n="rp.run"></button></p>
@@ -1002,6 +1004,7 @@
         <label><span data-i18n="plan.l_msa"></span><select id="pll-msa"></select></label>
         <label><span data-i18n="plan.l_monitor"></span><select id="pll-monitor"></select></label>
         <label class="wide"><span data-i18n="plan.l_method"></span><input id="pll-method" type="text" maxlength="2000"></label>
+        <label class="wide"><span data-i18n="plan.l_instruction_ref"></span><input id="pll-instruction_ref" type="text" maxlength="200" placeholder="WI-0457 rev. C"></label>
         <label><span data-i18n="plan.l_sample_size"></span><input id="pll-sample_size" type="number" min="1" step="1"></label>
         <label><span data-i18n="plan.l_frequency"></span><input id="pll-frequency" type="text" maxlength="200"></label>
         <label class="wide"><span data-i18n="plan.l_reaction"></span><input id="pll-reaction" type="text" maxlength="2000"></label>
@@ -1213,6 +1216,42 @@
     <p class="row" data-needs="engineer"><button id="lot-reopen" data-i18n="lot.reopen"></button></p>
     <h4 data-i18n="lot.history"></h4>
     <div class="scroll"><table id="lot-history" class="grid"></table></div>
+  </div>
+</section>
+
+<!-- Improvement cycles: the PDCA of control loop 3 -->
+<section id="tab-improve" class="panel" hidden>
+  <h2 data-i18n="imp.title"></h2>
+  <p class="note" data-i18n="imp.intro"></p>
+  <div id="imp-list-view">
+    <p><label><span data-i18n="lot.filter"></span> <select id="imp-filter"><option value="" data-i18n="lot.all"></option><option value="planned" data-i18n="imp.st_planned"></option><option value="implemented" data-i18n="imp.st_implemented"></option><option value="verified" data-i18n="imp.st_verified"></option><option value="standardised" data-i18n="imp.st_standardised"></option></select></label></p>
+    <div class="scroll"><table id="imp-list" class="grid"></table></div>
+    <div class="card" data-needs="engineer" id="imp-new-card">
+      <h3 data-i18n="imp.new"></h3>
+      <div class="form-grid">
+        <label class="wide"><span data-i18n="imp.f_title"></span><input id="imp-title" type="text" maxlength="200"></label>
+        <label><span data-i18n="imp.f_monitor"></span><select id="imp-monitor"></select></label>
+        <label><span data-i18n="imp.f_kpi"></span><select id="imp-kpi"><option value="pk" data-i18n="imp.kpi_pk"></option><option value="p" data-i18n="imp.kpi_p"></option></select></label>
+        <label><span data-i18n="imp.f_target"></span><input id="imp-target" type="number" min="0.1" max="10" step="any" value="1.33"></label>
+        <label><span data-i18n="imp.f_due"></span><input id="imp-due" type="date"></label>
+        <label class="wide"><span data-i18n="imp.f_problem"></span><textarea id="imp-problem" rows="2" maxlength="2000"></textarea></label>
+        <label class="wide"><span data-i18n="imp.f_plan"></span><textarea id="imp-plan" rows="3" maxlength="2000"></textarea></label>
+      </div>
+      <p class="row"><button id="imp-create" class="primary" data-i18n="imp.create"></button></p>
+    </div>
+  </div>
+  <div id="imp-detail" hidden>
+    <p class="row"><button id="imp-back" data-i18n="msa.back"></button></p>
+    <h3 id="imp-d-title"></h3>
+    <p id="imp-d-sub" class="muted"></p>
+    <p id="imp-d-status" class="strong"></p>
+    <div id="imp-d-body"></div>
+    <div class="card" data-needs="engineer" id="imp-act-card">
+      <label class="wide"><span id="imp-act-label"></span><textarea id="imp-act-text" rows="3" maxlength="2000"></textarea></label>
+      <p class="row"><button id="imp-act-btn" class="primary"></button></p>
+    </div>
+    <h4 data-i18n="lot.history"></h4>
+    <div class="scroll"><table id="imp-history" class="grid"></table></div>
   </div>
 </section>
 

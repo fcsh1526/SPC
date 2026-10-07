@@ -156,6 +156,7 @@
     if (name === "study") loadStudies();
     if (name === "msa") loadMsa();
     if (name === "lots") loadLots();
+    if (name === "improve") loadImprovements();
     if (name === "plan") loadPlans();
     if (name === "validation") loadValidation();
     if (name === "equipment") loadEquipment();
@@ -2354,6 +2355,84 @@
   const EQ = { list: [], view: null, editing: null };
   const showEqView = (which) => { ["#eq-list-view", "#eq-editor", "#eq-detail"].forEach((sel) => { $(sel).hidden = sel !== which; }); };
   const RUNTIME_CLASS = { connected: "status-ok", connecting: "status-warning", error: "status-alarm", runner_stopped: "status-alarm", disabled: "" };
+  // ---------------------------------------------------------------- improvement cycles (PDCA of control loop 3)
+  const IMP = { list: [], view: null };
+  const IMP_CLASS = { planned: "status-warning", implemented: "status-warning", verified: "", standardised: "status-ok" };
+  async function loadImprovements() {
+    await guarded(async () => {
+      const f = $("#imp-filter").value;
+      IMP.list = (await api("/api/improvements" + (f ? `?status=${f}` : ""))).improvements;
+      const mons = (await api("/api/monitors")).monitors;
+      const sel = $("#imp-monitor"), keep = sel.value;
+      sel.replaceChildren();
+      mons.forEach((m) => { const o = el("option", "", m.name); o.value = String(m.id); sel.appendChild(o); });
+      sel.value = keep || (mons[0] ? String(mons[0].id) : "");
+    });
+    const table = $("#imp-list"); table.replaceChildren();
+    const head = el("tr"); ["imp.f_title", "imp.col_monitor", "imp.col_kpi", "lot.col_status", "lot.col_created", ""].forEach((k) => cell(head, k ? t(k) : "", "th")); table.appendChild(head);
+    const names = Object.fromEntries(Array.from($("#imp-monitor").options).map((o) => [o.value, o.textContent]));
+    IMP.list.forEach((i) => {
+      const tr = el("tr");
+      cell(tr, i.title); cell(tr, names[i.monitor_id] || `#${i.monitor_id}`); cell(tr, t("imp.kpi_line", { kpi: t("imp.kpi_" + i.kpi), target: i.target }));
+      cell(tr, t("imp.st_" + i.status)).className = IMP_CLASS[i.status] || ""; cell(tr, when(i.created_at));
+      const b = el("button", "", t("mon.open")); b.addEventListener("click", () => openImprovement(i.id)); cell(tr, "").appendChild(b);
+      table.appendChild(tr);
+    });
+    if (!IMP.list.length) table.appendChild(el("tr")).appendChild(el("td", "muted", t("imp.none")));
+    $("#imp-list-view").hidden = false; $("#imp-detail").hidden = true;
+  }
+  async function openImprovement(id) {
+    await guarded(async () => { IMP.view = await api(`/api/improvements/${id}`); });
+    if (IMP.view) { renderImprovement(); $("#imp-list-view").hidden = true; $("#imp-detail").hidden = false; }
+  }
+  function renderImprovement() {
+    const i = IMP.view;
+    $("#imp-d-title").textContent = i.title;
+    $("#imp-d-sub").textContent = t("imp.sub", { monitor: i.monitor_name || `#${i.monitor_id}`, kpi: t("imp.kpi_" + i.kpi), target: i.target });
+    $("#imp-d-status").textContent = t("imp.st_" + i.status); $("#imp-d-status").className = "strong " + (IMP_CLASS[i.status] || "");
+    const box = $("#imp-d-body"); box.replaceChildren();
+    if (i.problem) box.appendChild(el("p", "", t("imp.problem", { text: i.problem })));
+    box.appendChild(el("p", "", t("imp.plan_is", { text: i.plan })));
+    if (i.baseline) box.appendChild(el("p", "", t("imp.baseline", { name: i.baseline.name, value: i.baseline.value === null ? "–" : sig(i.baseline.value, 4), points: i.baseline.points, stable: t(i.baseline.stable ? "imp.stable" : "imp.not_stable") })));
+    else box.appendChild(el("p", "status-warning", t("imp.no_baseline", { why: t("error." + i.baseline_missing, {}) })));
+    if (i.implementation) box.appendChild(el("p", "", t("imp.done", { by: i.implementation.by, at: when(i.implementation.at), text: i.implementation.description, seq: i.implementation.after_seq })));
+    if (i.verification) {
+      const v = i.verification;
+      box.appendChild(el("p", v.effective ? "status-ok" : "status-alarm", t(v.effective ? "imp.effective" : "imp.not_effective", { name: v.name, value: v.value === null ? "–" : sig(v.value, 4), target: v.target, points: v.points, from: v.from_seq, to: v.to_seq, stable: t(v.stable ? "imp.stable" : "imp.not_stable") })));
+    }
+    if (i.standard) box.appendChild(el("p", "status-ok", t("imp.standard", { by: i.standard.by, text: i.standard.note })));
+    const st = i.status, eff = i.verification && i.verification.effective;
+    const label = { planned: "imp.act_implement", implemented: null, verified: eff ? "imp.act_standardise" : "imp.act_rework" }[st];
+    $("#imp-act-card").hidden = st === "standardised";
+    $("#imp-act-text").parentElement.hidden = st === "implemented";
+    $("#imp-act-label").textContent = label ? t(label) : "";
+    $("#imp-act-btn").textContent = t({ planned: "imp.btn_implement", implemented: "imp.btn_verify", verified: eff ? "imp.btn_standardise" : "imp.btn_rework" }[st] || "imp.btn_verify");
+    const h = $("#imp-history"); h.replaceChildren();
+    const head = el("tr"); ["lot.col_at", "lot.col_by", "lot.col_action", "lot.col_detail"].forEach((k) => cell(head, t(k), "th")); h.appendChild(head);
+    i.history.forEach((x) => { const tr = el("tr"); cell(tr, when(x.at)); cell(tr, x.by); cell(tr, t("imp.step_" + x.step)); cell(tr, x.detail.plan || x.detail.description || x.detail.note || (x.detail.effective !== undefined ? t(x.detail.effective ? "imp.effective_short" : "imp.not_effective_short") : "") || x.detail.outcome || ""); h.appendChild(tr); });
+  }
+  async function improvementAct() {
+    const i = IMP.view, st = i.status, text = $("#imp-act-text").value;
+    const eff = i.verification && i.verification.effective;
+    const [path, body] = st === "planned" ? ["implement", { text }] : st === "implemented" ? ["verify", null] : eff ? ["standardise", { text }] : ["rework", { text }];
+    let r = null;
+    await guarded(async () => { r = body === null ? await post(`/api/improvements/${i.id}/${path}`, {}) : await post(`/api/improvements/${i.id}/${path}`, body); });
+    if (r) { IMP.view = r; $("#imp-act-text").value = ""; renderImprovement(); }
+  }
+  async function createImprovement() {
+    const record = { title: $("#imp-title").value, problem: $("#imp-problem").value, monitor_id: Number($("#imp-monitor").value), kpi: $("#imp-kpi").value, target: Number($("#imp-target").value), plan: $("#imp-plan").value };
+    if ($("#imp-due").value) record.due = $("#imp-due").value;
+    let made = null;
+    await guarded(async () => { made = await post("/api/improvements", { record }); });
+    if (made) { ["#imp-title", "#imp-problem", "#imp-plan", "#imp-due"].forEach((s) => { $(s).value = ""; }); IMP.view = made; renderImprovement(); $("#imp-list-view").hidden = true; $("#imp-detail").hidden = false; }
+  }
+  function wireImprovements() {
+    $("#imp-filter").addEventListener("change", loadImprovements);
+    $("#imp-create").addEventListener("click", createImprovement);
+    $("#imp-back").addEventListener("click", loadImprovements);
+    $("#imp-act-btn").addEventListener("click", improvementAct);
+  }
+
   // ---------------------------------------------------------------- lots and their disposition (control loop 2)
   const LOT = { list: [], view: null };
   const LOT_CLASS = { open: "status-warning", held: "status-alarm", decided: "status-ok" };
@@ -2644,7 +2723,7 @@
   const PL = { list: [], view: null, editing: null, lines: [], lineIndex: null, roles: null, person: null, people: [] };
   const showPlanView = (which) => { ["#pl-list-view", "#pl-editor", "#pl-detail"].forEach((sel) => { $(sel).hidden = sel !== which; }); };
   const RESULT_CLASS = { pass: "status-ok", warn: "status-warning", fail: "status-alarm" };
-  const LINE_FIELDS = ["step", "characteristic", "unit", "method", "frequency", "reaction", "note"];
+  const LINE_FIELDS = ["step", "characteristic", "unit", "method", "instruction_ref", "frequency", "reaction", "note"];
   const rolesList = () => (PL.roles ? PL.roles.roles : []);
 
   async function loadPlans() {
@@ -3357,6 +3436,7 @@
     try { factors = readFactorLines($("#rpl-factors").value); } catch (e) { return showError({ code: "invalid_input", message: e.message, params: { message: e.message } }); }
     const body = { subgroups: Number($("#rpl-k").value), size: Number($("#rpl-n").value), factors };
     const seed = $("#rpl-seed").value.trim(); if (seed !== "") body.seed = Number(seed);
+    body.position = $("#rpl-position").value;
     let r = null;
     await guarded(async () => { r = await post("/api/sampling/random", body); });
     const box = $("#rpl-out"); box.replaceChildren();
@@ -3773,6 +3853,7 @@
     wireValidation();
     wireEquipment();
     wireLots();
+    wireImprovements();
     wireRoles();
     $("#a-profile").addEventListener("change", onProfileChange);
     $("#pf-new").addEventListener("click", () => openProfileEditor(null));

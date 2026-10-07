@@ -301,3 +301,12 @@ def test_a_report_carries_the_released_plan_into_its_archive(env):
     assert "control_plan" not in c["eng"].get(f"/api/reports/{plain}/archive.json").json()
     assert "Annex C" not in c["eng"].get(f"/api/reports/{plain}").text
     assert any(e["action"] == "report_created" and e["detail"].get("control_plan") == "Housing" for e in app.state.audit.list(100))
+
+
+def test_a_line_names_the_controlled_inspection_instruction():
+    from spc.plan.model import validate_line
+
+    line = validate_line({**LINE, "instruction_ref": "WI-0457 rev. C"}, 1)
+    assert line["instruction_ref"] == "WI-0457 rev. C" and validate_line(LINE, 1)["instruction_ref"] == ""
+    with pytest.raises(ValueError):
+        validate_line({**LINE, "instruction_ref": "x" * 201}, 1)

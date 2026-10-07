@@ -61,7 +61,7 @@ def _id(v, name: str):
 def validate_line(raw: Mapping[str, Any], n: int) -> dict:
     where = f"line {n}: "
     allowed = {"step", "kind", "characteristic", "unit", "target", "lsl", "usl", "class", "msa_id", "method", "sample_size", "frequency", "control",
-               "monitor_id", "reaction", "responsible", "note"}
+               "monitor_id", "reaction", "responsible", "note", "instruction_ref"}
     if set(raw) - allowed:
         raise ValueError(f"{where}unknown setting(s): {sorted(set(raw) - allowed)}")
     kind = raw.get("kind", "product_characteristic")
@@ -85,7 +85,8 @@ def validate_line(raw: Mapping[str, Any], n: int) -> dict:
     return {"step": _text(raw, "step", 200, where), "kind": kind, "characteristic": _text(raw, "characteristic", 200, where), "unit": _text(raw, "unit", 40, where),
             "target": target, "lsl": lsl, "usl": usl, "class": cls, "msa_id": _id(raw.get("msa_id"), f"{where}msa_id"), "method": _text(raw, "method", TEXT, where),
             "sample_size": size, "frequency": _text(raw, "frequency", 200, where), "control": control, "monitor_id": _id(raw.get("monitor_id"), f"{where}monitor_id"),
-            "reaction": _text(raw, "reaction", TEXT, where), "responsible": list(resp), "note": _text(raw, "note", TEXT, where)}
+            "reaction": _text(raw, "reaction", TEXT, where), "responsible": list(resp), "note": _text(raw, "note", TEXT, where),
+            "instruction_ref": _text(raw, "instruction_ref", 200, where)}
 
 
 def validate_record(data: Mapping[str, Any]) -> dict:

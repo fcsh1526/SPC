@@ -14,7 +14,7 @@
 | ⬜ | 未實作 |
 | ➖ | 說明性文字或組織責任，軟體沒有對應功能 |
 
-統計：✅ 76，🔶 9，◐ 9，⬜ 0，➖ 6（共 100 列）
+統計：✅ 78，🔶 10，◐ 6，⬜ 0，➖ 6（共 100 列）
 
 「驗證」欄的測試以「tests/檔名::測試名」表示。另有獨立證據：ISO/TR 11462-3 的資料集（內建確效報告，`src/spc/validation/iso11462.py`）、ISO 22514-8 附錄的算例（`src/spc/validation/iso22514.py`）、草案自己的數值範例（表 8-1、9-3、12 章範例）、AIAG MSA 手冊例。
 
@@ -25,7 +25,7 @@
 | 節 | 草案要求（意旨） | 狀態 | 程式 | 驗證 | 備註 |
 |---|---|---|---|---|---|
 | 5.1 | 預防優於檢出；零缺陷策略 | ➖ | — | — | 方法論說明 |
-| 5.2 | PDCA 改善循環 | ◐ | `src/spc/monitor/service.py`（警報 → 反應 → 驗證 → 結案的步驟） | `tests/test_monitor.py::test_the_action_plan_must_be_acknowledged_by_each_person_and_again_after_a_change` | 反應流程對應 PDCA 的 Do／Check／Act；Plan 與整體改善循環是組織的事 |
+| 5.2 | PDCA 改善循環 | 🔶 | 反應流程（`src/spc/monitor/service.py`）；改善循環：`src/spc/improvement/service.py`、`src/spc/api/improvements.py`、介面「改善」 | `tests/test_improvement.py::test_an_improvement_goes_through_plan_do_check_act_and_becomes_the_standard`、`tests/test_improvement.py::test_an_improvement_that_misses_its_target_is_reworked_with_a_new_plan` | P：以 KPI（持續報告的 Pk 或 P）與目標規劃，並記錄當時的基準；D：記錄實施；C：以實施後至少 25 個有效點重算持續報告，指標達標且穩定才算有效；A：有效則寫下新標準，無效則重擬計畫。每步入歷程與稽核鏈。草案只給 PDCA 的方法，沒有規則；25 點與「有效＝達標且穩定」是我們的解讀。整體的改善文化與資源是組織的事 |
 | 5.3 | 製程控制系統：對製程採取行動，對輸出的行動只是暫時措施 | ✅ | `src/spc/monitor/service.py`（事件步驟含調整參數、調整要素、根因、遏制措施） | `tests/test_monitor.py::test_an_incident_that_cannot_be_fixed_goes_to_root_cause_and_containment` | |
 | 5.4 | 迴路 1：現場 SPC，反應觸發與反應 | ✅ | `src/spc/monitor/`、`src/spc/api/monitors.py`、介面「監控」 | `tests/test_monitor.py::test_a_violation_opens_one_incident_with_the_instructions_of_the_plan` | |
 | 5.4 | 迴路 2：合格閘門（通過合格、攔下不合格） | 🔶 | 容許界限圖與預控圖（`src/spc/core/charts/`、`src/spc/monitor/model.py`）；MSA 閘門擋監控；批次放行處置：`src/spc/disposition/service.py`、`src/spc/api/lots.py`、介面「批次放行」 | `tests/test_monitor.py::test_the_acceptance_chart_finds_the_accepted_fraction_out_of_tolerance_with_the_stated_probability`、`tests/test_lots.py::test_a_lot_with_clean_evidence_can_be_released_by_an_operator`、`tests/test_lots.py::test_an_open_incident_in_the_range_blocks_a_release_and_sorting_is_the_way_out`、`tests/test_lots.py::test_a_concession_needs_an_engineer_a_reason_and_the_approval_of_the_customer` | 草案只說「放行合格品、攔下不合格品」，沒有規則；證據規則（開著或升級的事件、被擋的量測系統、範圍內沒有有效點）與角色分工是我們的設計。不含實物管理與 ERP／MES 的庫存扣帳 |
@@ -36,7 +36,7 @@
 
 | 節 | 草案要求（意旨） | 狀態 | 程式 | 驗證 | 備註 |
 |---|---|---|---|---|---|
-| 6.1 | 十項前提（規格、量測、製程特性、規劃、OCAP、抽樣計畫、選圖、控制計畫、資料收集、角色、定期稽核） | ◐ | 見 6.2～6.8 各列 | — | 十項前提除「定期稽核（迴路 4～6）」與 6.5 的規劃外都有對應功能；那兩項是組織責任 |
+| 6.1 | 十項前提（規格、量測、製程特性、規劃、OCAP、抽樣計畫、選圖、控制計畫、資料收集、角色、定期稽核） | ◐ | 見 6.2～6.8 各列 | — | 十項前提只剩「定期稽核（迴路 4～6）」與 6.5 的生產規劃（工作站、物流）不在軟體內；其餘都有對應功能 |
 | 6.2.1 | 公差與責任原則；量測不確定度與生產變異不重複計入；公差限＝功能限 | ➖ | — | — | 設計責任 |
 | 6.2.1、圖 6-2 | 擴充不確定度 U_MP 與驗收界限、防護帶 | ✅ | `src/spc/core/msa.py::expanded_uncertainty`；報告元素 22 | `tests/test_report.py::test_guard_band_follows_the_draft_example`、`tests/test_msa.py::test_the_expanded_uncertainty_and_the_guard_band_follow_the_report_of_the_draft` | 防護帶 g 與接受界限 L_A、U_A 算出並寫入報告元素 22（草案第 12 章範例 U＝0.0211、g＝0.0175 吻合）；不畫圖 6-2 的示意圖；U 的合成另有 GUM／ISO 14253-1 預算（見 6.3） |
 | 6.2.2 | 風險分析（FMEA）決定哪些特性做 SPC | ➖ | 控制計畫的特性分類（`src/spc/plan/`） | — | FMEA 本身不在軟體內 |
@@ -142,7 +142,7 @@
 | 11.1 | 量測資料由設備經介面自動傳入資料庫（例：OPC UA）；介面須驗證 | ✅ | `src/spc/equipment/`（OPC UA） | `tests/test_equipment.py::test_a_link_is_tested_before_it_is_enabled_and_a_change_starts_again`、`tests/test_equipment.py::test_the_test_read_and_the_runner_against_a_real_server` | 以本機測試伺服器驗證；**加密連線只接好線，未測；未接過真實設備** |
 | 11.1 | 標準化介面格式（舉例 ISO/TR 11462-5） | ◐ | `src/spc/data/dfq.py`、`POST /api/interchange/dfd`、介面「工具」 | `tests/test_dfq.py::test_the_header_of_a_file_is_read_with_its_part_and_three_characteristics`、`tests/test_dfq.py::test_the_rules_of_the_standard_are_checked` | 只讀 *.DFD／*.DFQ 的**描述資料**（零件、特性：名稱、單位、規格限、量具解析度、校正不確定度）。使用者提供的 ISO/TR 11462-5:2023 是預覽版，只到表 3 的 K0017：**量測值的寫法（第 6 章）、結構與管制圖欄位、目錄（第 7 章）與附錄 A 範例不在其中，所以不讀量測值、不寫檔**；標「o」的欄位內容須與評估軟體供應商約定，原樣保留不解讀 |
 | 11.1 | 與 CAQ 系統整合 | ◐ | REST API、CSV 與 Excel 匯入匯出 | `tests/test_api.py::test_export_keeps_marks_and_opens_in_excel` | 沒有特定 CAQ 系統的連接器；提供通用介面：REST API、CSV 匯入、資料集／監控點／批次的 CSV 匯出（`GET /api/monitors/{id}/export.csv`、`GET /api/lots/export.csv`）、事件通知（`src/spc/monitor/notify.py`）、OPC UA 設備介面 |
-| 11.2 | 分析軟體須驗證（verification）與確認（validation）；以測試範例比對文件化的參考結果 | ◐ | `src/spc/validation/`（內建確效報告，約 630 項檢查）、`src/spc/validation/iso11462.py` | `tests/test_validation.py::test_the_eleven_iso_examples_are_run_against_the_program_and_nothing_is_hidden`、`tests/test_validation.py::test_a_wrong_program_fails_the_standards_examples` | 內建確效含 AIAG MSA 手冊例、Cohen／Fleiss kappa 的公開例、Montgomery 的 2² 試驗例、ISO 22514-7 的範例與表格（約 85 項，標準自己不一致處標為已知）；ISO/TR 11462-5 沒有範例可比對（預覽版） |
+| 11.2 | 分析軟體須驗證（verification）與確認（validation）；以測試範例比對文件化的參考結果 | ✅ | `src/spc/validation/`（內建確效報告，約 630 項檢查）、`src/spc/validation/iso11462.py` | `tests/test_validation.py::test_the_eleven_iso_examples_are_run_against_the_program_and_nothing_is_hidden`、`tests/test_validation.py::test_a_wrong_program_fails_the_standards_examples` | 內建確效含 AIAG MSA 手冊例、Cohen／Fleiss kappa 的公開例、Montgomery 的 2² 試驗例、ISO 22514-7 的範例與表格（約 85 項，標準自己不一致處標為已知）、ISO/TR 11462-3 與 ISO 22514-8 的範例；ISO/TR 11462-5 的預覽版沒有範例可比對 |
 | 11.2 | 參數須透明（最小樣本、離群處理、信賴區間、估計式、單邊公差），否則等於黑盒子 | ✅ | `src/spc/params.py`（參數與指紋，隨結果與封存保存） | `tests/test_arl_oc_and_params.py::test_params_are_explicit_and_hashable_for_archiving` | |
 | 11.2 | 客戶特定參數集可設定並保存 | ✅ | `src/spc/profile.py`、介面「管理 → 客戶設定檔」 | `tests/test_profiles.py::test_resolve_takes_the_profile_for_unset_fields_and_names_deviations`、`tests/test_profiles.py::test_the_archive_keeps_a_snapshot_so_a_later_change_does_not_touch_the_report` | |
 | 11.2 | 用於證明量測過程能力的分析軟體也須驗證、確認、「有能力」（參 6.6） | ✅ | 內建確效涵蓋 SPC 計算；量具 R&R 以 AIAG 例核對；ISO 22514-7 的範例逐項核對 | `tests/test_msa.py::test_the_gauge_rr_of_the_aiag_example` | MSA 部分有 AIAG 手冊例、kappa 的公開例與 ISO 22514-7 的完整範例 |
@@ -161,7 +161,7 @@
 | 節 | 草案要求（意旨） | 狀態 | 程式 | 驗證 | 備註 |
 |---|---|---|---|---|---|
 | 13 | 文件須防竄改、受保護、可取得、可讀；可追溯到原因事件；已處理資料須連同評估與所用參數一起保存 | ✅ | `src/spc/report/archive.py`（SHA-256 摘要、資料＋參數＋結果）、`src/spc/auth/audit.py`（雜湊鏈）、`src/spc/signing/`（外部簽章） | `tests/test_report.py::test_any_change_to_the_archive_is_noticed`、`tests/test_report.py::test_reproduction_finds_a_result_that_does_not_follow_from_the_data`、`tests/test_signing.py::test_a_changed_archive_invalidates_the_signature` | 封存檔可離線重算驗證；簽章不含時間戳記服務、不驗憑證鏈 |
-| 13 | 檢驗指令、量測與檢驗方法須文件化、版本化、歸檔 | ◐ | 控制計畫（版本、核准、快照）`src/spc/plan/`；量測系統記錄 | `tests/test_plan.py::test_the_life_of_a_control_plan` | 檢驗指令書本身不是軟體的文件類型 |
+| 13 | 檢驗指令、量測與檢驗方法須文件化、版本化、歸檔 | ✅ | 控制計畫（版本、核准、快照）`src/spc/plan/`：每條線有量測方法、樣本數、頻率、反應計畫與**受管制檢驗指令書的編號與版次**（`instruction_ref`）；量測系統記錄 | `tests/test_plan.py::test_the_life_of_a_control_plan` | 檢驗指令書的內文由公司的文件管理系統保管，控制計畫以編號與版次指向它並隨計畫版本核准、歸檔 |
 | 13 | 保存期限、儲存媒體、儲存地點由公司決定；文件分類系統 | ➖ | — | — | 組織決策；軟體**沒有保存期限或自動清除**功能，資料集可被其擁有者或管理員刪除（報告保留當時的快照） |
 | 13 | 可追溯到起因事件與製程（CQI-28、IATF 7.5.3.2.1） | ✅ | 稽核鏈、標記與重啟日誌、事件紀錄；`src/spc/auth/audit.py::check_anchor`、`POST /api/audit/anchor-check`、介面「管理」 | `tests/test_auth.py::test_the_audit_chain_shows_a_change`、`tests/test_auth.py::test_removing_the_newest_entries_is_only_seen_against_a_hash_kept_elsewhere`、`tests/test_sampling.py::test_an_anchor_kept_outside_shows_that_the_newest_entries_were_cut` | 鏈本身看不出尾端被截斷；把「筆數與最後雜湊」存在資料庫外（管理員驗證時會顯示），之後貼回「與保存的雜湊比對」即可查出截斷、改動或重建。**錨點必須由人保存在資料庫之外**，軟體無法替你保存 |
 
@@ -174,7 +174,7 @@
 3. **AIAG／VDA 5 的判定門檻**：計數型 MSA、AIAG 線性、通用預算（2U/T 15 %／30 %）的門檻未對照手冊；ISO 22514-7 的 Q_MS ≤ 15 %、Q_MP ≤ 30 %、C > 1.33 已依標準。
 4. **ISO/TR 11462-5 的量測值交換**：只讀描述資料；量測值的寫法、結構與管制圖欄位、目錄與範例在預覽版之外，需要完整文件才能讀寫量測值與寫檔。
 5. 製程特性化只有迴歸與二水準完全因子設計，沒有部分因子、反應曲面與混合設計。
-6. **不在軟體範圍或需要其他系統**（仍標 ◐ 或 ➖）：與特定 CAQ 系統的連接器（11.1，已有 REST、CSV 匯出與事件通知可串接）、檢驗指令書本身（13，控制計畫每條線有方法、樣本數、頻率與反應計畫並版本化核准）、規劃的工作站與物流（6.5）、PDCA 與稽核（5.2、5.4 迴路 4～6，組織責任）。軟體只提供證據鏈與對應的記錄。
+6. **不在軟體範圍或需要其他系統**（仍標 ◐ 或 ➖）：與特定 CAQ 系統的連接器（11.1，已有 REST、CSV 匯出與事件通知可串接）、規劃的工作站與物流（6.5 的生產規劃）、產品／製程／系統稽核（5.4 迴路 4～6，組織責任）。軟體只提供證據鏈與對應的記錄。
 
 ## 我方解讀清單（🔶，建議請統計人員審閱）
 
@@ -196,6 +196,8 @@
 | ISO 22514-7 的線性監控界限 | 11.2 的公式在可用的複本中排版殘缺 | ±(σ/β1)·t(1 − ε/2K; N·K − 2)：K 為受監控的標準件數（Bonferroni），σ 與自由度取自研究的迴歸 |
 | ISO 22514-7 的判定 | 建議 Q_MS ≤ 15 %、Q_MP ≤ 30 %、C > 1.33；計數型不確定範圍經驗法則 20 % | 研究的判定＝兩個 Q 與兩個 C 都在界限內；有設計不足（少於 5 個工件、少於 30 次量測…）、不適合度顯著、解析度過粗或標準差不一致時為「有條件」；不確定範圍 ≤ 20 % 通過、≤ Q_MP 上限有條件；Bowker 檢定的顯著差異為「有條件」 |
 | ISO 22514-7 的 u_BI | 7.1.2 偏差的標準不確定度 | 用迴歸函數修正讀值時 u_BI ＝ 0（A.3 的作法）；否則由單一標準件的偏差 |
+| 改善循環（PDCA） | 草案只給 PDCA 的方法與負責人 | KPI＝持續報告的 Pk 或 P 與目標；驗證用實施後至少 25 個有效點重算；有效＝指標 ≥ 目標且穩定；有效才可成為新標準，無效須重擬計畫 |
+| 隨機抽樣的取點位置 | 草案例：「在班別中段取樣」 | 每個子組一個時段；取點位置可選隨機或正中 |
 | 稽核鏈錨點 | 草案要求可追溯、防竄改 | 保存的「筆數＋最後雜湊」在鏈中該筆的雜湊必須相同，否則是被截斷（較短）、被改動或重建 |
 | 批次放行處置 | 草案只說放行合格品、攔下不合格品；操作員負責產品處置（6.8.1）；挑選、報廢、重工是對輸出的過渡措施 | 批次連結監控器與一段點；證據阻擋＝開著或升級（轉根本原因分析）的事件、被 MSA 閘門擋住的量測系統、範圍內沒有有效點；放行需證據乾淨，否則挑選（全檢、件數須相加）或由工程師附客戶核准編號特採；沒有連結監控器的放行須工程師與理由；操作員可記錄、暫扣、在證據乾淨時處置；重新開啟須工程師與理由；每步入歷程與稽核鏈 |
 | 抽樣間隔 | 草案只給定性建議 | 每組件數取達到目標 ARL 的最小值；抽樣間隔 ＝ 允許生產件數／ARL（件），不得小於每組件數 |
