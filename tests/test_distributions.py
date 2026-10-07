@@ -325,3 +325,48 @@ def test_weibull2_and_rayleigh_have_the_lower_limit_at_zero_and_are_never_chosen
     assert res["distribution"]["name"] == "weibull2" and res["indices"]["p"] is None and res["indices"]["pk"] > 0
     auto = analyze(ds, AnalysisRequest(lsl=0.0, usl=0.04, distribution="auto", bootstrap_n=0))
     assert all(c["family"] not in ("weibull2", "rayleigh") for c in auto["distribution"]["candidates"])
+
+
+# ------------------------------------------------------------------ folded normal and the fit check (draft 7.8.1, 9.4)
+
+def test_the_folded_normal_is_fitted_by_maximum_likelihood_and_never_chosen_automatically():
+    import numpy as np
+    from scipy import optimize, stats
+
+    from spc.core import distributions as d
+
+    rng = np.random.default_rng(41)
+    x = np.abs(rng.normal(0.03, 0.02, 20000))
+    m = d.fit(x, "folded_normal")
+    p = m.describe()
+    assert p["location"] == 0.0 and p["mean_over_sd"] * p["sd"] == pytest.approx(0.03, abs=0.002) and p["sd"] == pytest.approx(0.02, rel=0.05)
+    # an independent maximum likelihood search on mu and sd gives the same fit
+    nll = lambda v: -np.sum(stats.foldnorm.logpdf(x, abs(v[0]) / v[1], 0, v[1])) if v[1] > 0 else np.inf
+    best = optimize.minimize(nll, [0.02, 0.02], method="Nelder-Mead", options={"xatol": 1e-7, "fatol": 1e-7})
+    assert p["mean_over_sd"] * p["sd"] == pytest.approx(abs(best.x[0]), rel=2e-3) and p["sd"] == pytest.approx(best.x[1], rel=2e-3)
+    q = m.ppf([0.00135, 0.5, 0.99865])
+    assert q == pytest.approx(stats.foldnorm(p["mean_over_sd"], 0, p["sd"]).ppf([0.00135, 0.5, 0.99865]))
+    assert "folded_normal" in d.EXPLICIT_ONLY and "folded_normal" not in d.FAMILIES
+    assert all(c.family != "folded_normal" for c in d.fit_candidates(x))  # the automatic choice does not know it
+    with pytest.raises(d.FitError):
+        d.fit(np.array([-0.1, 0.2, 0.3, 0.4, 0.5, 0.6]), "folded_normal")
+
+
+def test_the_probability_plot_correlation_follows_its_definition_and_sees_a_wrong_tail():
+    import numpy as np
+    from scipy import stats
+
+    from spc.core import distributions as d
+
+    rng = np.random.default_rng(42)
+    x = rng.lognormal(0, 0.5, 400)
+    good = d.fit(x, "lognormal")
+    norm = stats.norm(x.mean(), x.std())
+    pc_good, pc_bad = d.probability_plot_correlation(good, x, "upper"), d.probability_plot_correlation(norm, x, "upper")
+    xs = np.sort(x)
+    pp = (np.arange(1, 401) - 0.3) / 400.4
+    assert pc_good["all"] == pytest.approx(np.corrcoef(xs, good.ppf(pp))[0, 1]) and pc_good["n_tail"] == 100
+    assert pc_good["tail"] == pytest.approx(np.corrcoef(xs[300:], good.ppf(pp)[300:])[0, 1])
+    assert pc_good["all"] > 0.995 and pc_bad["tail"] < pc_good["tail"] and pc_bad["all"] < pc_good["all"]  # a normal curve misses the long upper tail
+    low = d.probability_plot_correlation(good, x, "lower")
+    assert low["side"] == "lower" and low["tail"] == pytest.approx(np.corrcoef(xs[:100], good.ppf(pp)[:100])[0, 1])

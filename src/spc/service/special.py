@@ -42,6 +42,30 @@ def nested_for_dataset(ds: Dataset, levels: list[str], alpha: float = 0.05) -> d
     return nested.analyse(values, cols, alpha)
 
 
+def cavity_study(ds: Dataset, factor: str, lsl: float | None, usl: float | None, alpha: float = 0.05) -> dict:
+    """Equipment with several cavities, stations or clamping devices (draft 8.2.6): each one is a machine of its own (Pm and Pmk of its values), and the variation is split
+    into the part between the cavities and the part within them. `factor` is a tag name or `subgroup`."""
+    from spc.core.capability.indices import overall_indices
+
+    values, cols = _columns(ds, [factor])
+    labels = cols[factor]
+    x = np.asarray(values, dtype=float)
+    per = []
+    for name in dict.fromkeys(labels):
+        v = x[[i for i, k in enumerate(labels) if k == name]]
+        row = {"label": name, "n": int(v.size), "mean": float(v.mean()), "sd": float(v.std(ddof=1)) if v.size > 1 else None, "pm": None, "pmk": None}
+        if (lsl is not None or usl is not None) and v.size >= 5 and np.ptp(v) > 0:
+            idx = overall_indices(v, lsl, usl)
+            row["pm"], row["pmk"] = (None if idx.p is None else float(idx.p)), float(idx.pk)
+        per.append(row)
+    whole = None
+    if (lsl is not None or usl is not None) and x.size >= 5 and np.ptp(x) > 0:
+        idx = overall_indices(x, lsl, usl)
+        whole = {"pm": None if idx.p is None else float(idx.p), "pmk": float(idx.pk), "n": int(x.size)}
+    return {"factor": factor, "cavities": per, "whole": whole, "variance": nested.analyse(values, {factor: labels}, alpha) if len(per) >= 2 else None,
+            "combinations": mst.analyse_combinations(values, {factor: labels}, lsl, usl, alpha=alpha) if len(per) >= 2 else None, "alpha": alpha}
+
+
 def trend_for_dataset(ds: Dataset, cycle: int | None = None, subgroup_size: int | None = None, lsl: float | None = None, usl: float | None = None,
                       distribution: str = "auto", method: str = "G") -> dict:
     """The regression control chart of the subgroup means (the labels of the data, or `subgroup_size`) or of the individual values."""
@@ -94,7 +118,7 @@ def trend_for_dataset(ds: Dataset, cycle: int | None = None, subgroup_size: int 
 
 
 # ---------------------------------------------------------------- results kept in a report and its archive (annex E)
-SPECIAL_ITEMS = ("scope", "multistage", "nested", "trend", "gdt", "multivariate")
+SPECIAL_ITEMS = ("scope", "multistage", "nested", "trend", "gdt", "multivariate", "cavities")
 _DROP = {"gdt": ("clearance", "position_deviation")}  # per-part arrays are made again from the stored request: the archive keeps the figures
 
 
@@ -112,6 +136,8 @@ def run_special(name: str, req: dict, dataset: Dataset) -> dict:
                                       per_combination=req.get("per_combination", mst.PER_COMBINATION), minimum_total=req.get("minimum_total", mst.MINIMUM_TOTAL))
     if name == "nested":
         return nested_for_dataset(dataset, req["levels"], req.get("alpha", 0.05))
+    if name == "cavities":
+        return cavity_study(dataset, req["factor"], req.get("lsl"), req.get("usl"), req.get("alpha", 0.05))
     if name == "trend":
         return trend_for_dataset(dataset, req.get("cycle"), req.get("subgroup_size"), req.get("lsl"), req.get("usl"), req.get("distribution", "auto"), req.get("method", "G"))
     if name == "gdt":

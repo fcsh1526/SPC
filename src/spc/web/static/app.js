@@ -447,6 +447,8 @@
     }
     if (!$("#a-moving-wrap").hidden) body.moving_n = Math.max(1, Math.min(10, Math.round(Number($("#a-moving").value) || 1)));
     body.distribution = $("#a-dist").value;
+    if ($("#a-fitcheck").checked) body.fit_check = true;
+    if (body.stage === "machine" && $("#a-pmk-excluded").value.trim()) body.pmk_excluded = $("#a-pmk-excluded").value.trim();
     if (body.distribution !== "normal") {
       body.method = $("#a-method").value;
       body.bootstrap_n = Math.max(0, Math.min(2000, Math.round(Number($("#a-boot").value) || 0)));
@@ -591,7 +593,7 @@
     await guarded(async () => {
       const body = buildAnalysisBody();
       state.result = await post(`/api/datasets/${state.dataset.id}/analyze`, body);
-      fillMsaSelect($("#rp-msa"), $("#rp-msa").value);
+      fillMsaSelect($("#rp-msa"), $("#rp-msa").value); fillReportStudySelect();
       fillReportPlanSelect();
       state.lastAnalysisBody = body;
       state.reportOut = null;
@@ -696,6 +698,13 @@
     $("#r-counts").textContent = t("result.counts", { total: r.counts.n_total, used: r.counts.n_used, n: r.counts.subgroup_size });
     $("#r-names").textContent = t("result.names_line", { p: r.names.p, pk: r.names.pk });
     $("#r-names-reason").textContent = namesReason(r);
+    $("#r-pmk-excluded").hidden = !r.pmk_excluded;
+    if (r.pmk_excluded) $("#r-pmk-excluded").textContent = t("result.pmk_excluded", { agreement: r.pmk_excluded.agreement });
+    $("#r-fitcheck").hidden = !r.fit_check;
+    if (r.fit_check) {
+      const fc = r.fit_check, f4 = (v) => (v === null ? "–" : v.toFixed(4));
+      $("#r-fitcheck").textContent = t("result.fit_check", { name: t("dist." + fc.distribution), all: f4(fc.all), tail: f4(fc.tail), share: Math.round(100 * fc.tail_share), side: t("result.side_" + fc.side) });
+    }
     const st = r.stability;
     $("#r-stability").textContent = st.assessed ? t("result.class_" + st.class) : t("result.class_not_tested");
     $("#r-alarm-points").textContent = st.assessed
@@ -836,6 +845,7 @@
         analysis: state.lastAnalysisBody, meta, language: $("#rp-language").value,
         measurement_system_id: $("#rp-msa").value ? Number($("#rp-msa").value) : null,
         control_plan_id: $("#rp-plan").value ? Number($("#rp-plan").value) : null,
+        machine_study_id: $("#rp-study").value ? Number($("#rp-study").value) : null,
         multistate: $("#rp-ms").checked ? multistateOptions() : null,
         special: specialForReport(),
       });
@@ -1484,6 +1494,9 @@
     const div = el("div", { ok: "ok-box", warning: "warn-box", alarm: "alarm-box" }[r.status]);
     div.appendChild(el("p", "strong status-" + r.status, t("mon.result_" + r.status, { seq: r.point.seq })));
     if (r.verification) div.appendChild(el("p", "", t("mon.verification_note")));
+    if (r.point.ar) {  // the correction of a residual chart in the unit of the characteristic (draft 10.3.2.6)
+      div.appendChild(el("p", "muted", t("mon.ar_correction", { predicted: sig(r.point.ar.predicted, 6), residual: sig(r.point.ar.residual, 4), shift: r.point.ar.level_shift === null ? "–" : sig(r.point.ar.level_shift, 4) })));
+    }
     if (r.msa && r.msa.status === "conditional") div.appendChild(el("p", "status-warning", t("msa.monitor_conditional", { name: r.msa.name })));
     if (r.status === "alarm") {
       div.appendChild(el("p", "", r.point.alarms.map((a) => `${t("mon.chart_" + a.chart)}: ${t("alarmrule." + a.rule)}`).join("; ")));
@@ -1878,6 +1891,15 @@
   const GATE_CLASS = { pass: "status-ok", conditional: "status-warning", block: "status-alarm" };
   const CHECK_CLASS = { pass: "status-ok", waived: "status-warning", warn: "status-warning", fail: "status-alarm", missing: "status-alarm", not_done: "", not_needed: "" };
   const POLICY_PCT = ["resolution_share_max", "guard_band_risk"];  // shown in percent
+  async function fillReportStudySelect() {  // draft 9.3: only a closed machine performance study can stand in a report
+    const select = $("#rp-study"), current = select.value;
+    let list = [];
+    try { list = (await api("/api/studies")).studies.filter((x) => x.closed); } catch (e) { /* none */ }
+    select.replaceChildren();
+    const none = el("option", "", t("report.study_none")); none.value = ""; select.appendChild(none);
+    list.forEach((x) => { const o = el("option", "", `${x.name} (${x.machine || "–"})`); o.value = String(x.id); select.appendChild(o); });
+    select.value = list.some((x) => String(x.id) === current) ? current : "";
+  }
   async function fillReportPlanSelect() {  // only a released plan can stand in a report
     const select = $("#rp-plan"), current = select.value;
     let list = [];
@@ -2769,7 +2791,7 @@
 
   // ---------------------------------------------------------------- special cases (draft 8.5): multi-stage machining and GD&T
   const SP = { scope: null, comb: null, gdt: null, req: {} };
-  const SP_ITEMS = ["scope", "multistage", "nested", "trend", "gdt", "multivariate"];
+  const SP_ITEMS = ["scope", "multistage", "nested", "trend", "gdt", "multivariate", "cavities"];
   function renderReportSpecial() {  // the results that were run in the tab Special cases can go into the report (annex E)
     const box = $("#rp-special"); if (!box) return;
     const chosen = new Set($$("#rp-special input").filter((i) => i.checked).map((i) => i.value));
@@ -2790,6 +2812,7 @@
   function loadSpecial() {
     const has = !!state.dataset;
     $("#sp-comb-none").hidden = has; $("#sp-comb-form").hidden = !has;
+    $("#sp-cav-none").hidden = has; $("#sp-cav-form").hidden = !has;
     $("#sp-nest-none").hidden = has; $("#sp-nest-form").hidden = !has; $("#sp-trend-none").hidden = has; $("#sp-trend-form").hidden = !has;
     const box = $("#sp-factors"); box.replaceChildren();
     if (!has) return;
@@ -2802,6 +2825,9 @@
       lab.appendChild(cb); lab.appendChild(el("span", "", n === "subgroup" ? t("sp.factor_subgroup") : n)); box.appendChild(lab);
     });
     if (!names.length) box.appendChild(el("span", "muted", t("sp.no_factors")));
+    const cf = $("#cv-factor"); const keep = cf.value; cf.replaceChildren();
+    names.forEach((n) => { const o = el("option", "", n === "subgroup" ? t("sp.factor_subgroup") : n); o.value = n; cf.appendChild(o); });
+    if (names.includes(keep)) cf.value = keep;
   }
   function spTable(headKeys, rows, rowClass) {
     const table = el("table", "grid"); const head = el("tr");
@@ -2889,6 +2915,7 @@
     r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("warn." + w.code, w))));
   }
   $("#a-model").addEventListener("change", showModelRecommendation);
+  $("#a-stage").addEventListener("change", () => { $("#a-pmk-wrap").hidden = $("#a-stage").value !== "machine"; });
   $("#sp-scope-btn").addEventListener("click", runScope);
   $("#sp-comb-btn").addEventListener("click", runCombinations);
   $("#gd-run").addEventListener("click", runGdt);
@@ -2959,6 +2986,30 @@
     r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("warn." + w.code, w))));
     box.appendChild(el("p", "muted", t("sp.trend_stability")));
   }
+  async function runCavities() {
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const body = { factor: $("#cv-factor").value, lsl: num("#cv-lsl"), usl: num("#cv-usl") };
+    if (!body.factor) { showError({ code: "invalid_input", message: t("sp.no_factor_chosen"), params: { message: t("sp.no_factor_chosen") } }); return; }
+    let r = null;
+    await guarded(async () => { r = await post(`/api/datasets/${state.dataset.id}/cavities`, body); });
+    const box = $("#cv-out"); box.replaceChildren();
+    if (!r) return;
+    SP.req.cavities = body; renderReportSpecial();
+    box.appendChild(el("p", "strong", t("sp.cav_setup", { factor: r.factor === "subgroup" ? t("sp.factor_subgroup") : r.factor, n: r.cavities.length })));
+    if (r.whole) box.appendChild(el("p", "", t("sp.cav_whole", { pm: r.whole.pm === null ? "–" : sig(r.whole.pm, 3), pmk: sig(r.whole.pmk, 3), n: r.whole.n })));
+    const rows = r.cavities.map((c) => ({ cells: [c.label, c.n, sig(c.mean, 5), c.sd === null ? "–" : sig(c.sd, 4), c.pm === null ? "–" : sig(c.pm, 3), c.pmk === null ? "–" : sig(c.pmk, 3)] }));
+    const w = el("div", "scroll"); w.appendChild(spTable(["sp.col_combination", "st.col_n", "st.col_mean", "st.col_sd", "sp.col_pm", "sp.col_pmk"], rows)); box.appendChild(w);
+    if (r.variance) {
+      const t0 = r.variance.table[0], e = r.variance.error;
+      box.appendChild(el("p", t0.significant ? "status-warning" : "status-ok", t("sp.cav_variance", { between: t0.share === null ? "–" : sig(100 * t0.share, 3), within: e.share === null ? "–" : sig(100 * e.share, 3), p: pv(t0.p_value), result: t(t0.significant ? "st.differs" : "st.same") })));
+    }
+    if (r.combinations) {
+      const bad = r.combinations.combinations.filter((c) => c.different).map((c) => c.labels[r.factor]);
+      box.appendChild(el("p", bad.length ? "status-warning" : "muted", bad.length ? t("sp.cav_deviating", { list: bad.join(", ") }) : t("sp.cav_none_deviating")));
+    }
+    box.appendChild(el("p", "muted", t("sp.cav_hint")));
+  }
+  $("#cv-run").addEventListener("click", runCavities);
   $("#mv-run").addEventListener("click", runMultivariate);
   $("#nest-run").addEventListener("click", runNested);
   $("#tr-run").addEventListener("click", runTrend);
@@ -3016,6 +3067,47 @@
     r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("sc.warn_" + w.code, w))));
     box.appendChild(el("p", "muted", t("sc.note_" + body.kind)));
   }
+  async function runDoe() {
+    const mode = $("#doe-mode").value;
+    const rows = numRows($("#doe-data").value);
+    const bad = (m) => showError({ code: "invalid_input", message: m, params: { message: m } });
+    if (rows.length < 5 || rows[0].length < 2 || rows.some((r) => r.length !== rows[0].length)) return bad(t("doe.bad"));
+    const names = rows[0], body = { y: [], factors: {}, alpha: Number($("#doe-alpha").value) };
+    names.slice(1).forEach((n) => { body.factors[n] = []; });
+    for (const r of rows.slice(1)) {
+      const y = Number(r[0]); if (!Number.isFinite(y)) return bad(t("doe.bad"));
+      body.y.push(y);
+      names.slice(1).forEach((n, i) => body.factors[n].push(mode === "regression" || r[i + 1] === "" || !Number.isNaN(Number(r[i + 1])) ? Number(r[i + 1]) : r[i + 1]));
+    }
+    if (mode === "regression" && Object.values(body.factors).some((c) => c.some((v) => !Number.isFinite(v)))) return bad(t("doe.bad"));
+    let r = null;
+    await guarded(async () => { r = await post("/api/doe/" + mode, body); });
+    const box = $("#doe-out"); box.replaceChildren();
+    if (!r) return;
+    const table = (head, body_) => {
+      const tb = el("table"), tr = el("tr");
+      head.forEach((h) => tr.appendChild(el("th", "", h))); tb.appendChild(tr);
+      body_.forEach((row) => { const x = el("tr"); row.forEach((c) => x.appendChild(el("td", "", c))); tb.appendChild(x); });
+      return tb;
+    };
+    const yn = (v) => t(v ? "sig.yes" : "sig.no");
+    if (mode === "regression") {
+      box.appendChild(el("p", "", t("doe.reg_summary", { r2: sig(r.r2, 4), r2a: sig(r.r2_adjusted, 4), f: sig(r.f, 4), p: sig(r.p_model, 3), s: sig(r.sigma, 4), df: r.df_error })));
+      const all = [Object.assign({ factor: t("doe.intercept"), t: r.intercept.t, p_value: r.intercept.p_value, se: r.intercept.se, coefficient: r.intercept.coefficient, ci: r.intercept.ci })].concat(r.terms);
+      box.appendChild(table([t("doe.factor"), t("doe.coefficient"), t("doe.se"), t("doe.t"), t("doe.p"), t("doe.ci"), t("doe.std"), t("doe.vif"), t("doe.rank")],
+        all.map((x) => [x.factor, sig(x.coefficient, 5), sig(x.se, 4), sig(x.t, 4), sig(x.p_value, 3), `${sig(x.ci[0], 4)} … ${sig(x.ci[1], 4)}`,
+          x.standardised == null ? "" : sig(x.standardised, 3), x.vif == null ? "" : sig(x.vif, 3), x.rank ?? ""])));
+    } else {
+      box.appendChild(el("p", "", t(r.method === "anova" ? "doe.fac_anova" : "doe.fac_lenth", { runs: r.n, reps: r.replicates, df: r.df_error ?? "", pse: r.pse == null ? "" : sig(r.pse, 4), me: r.me == null ? "" : sig(r.me, 4), sme: r.sme == null ? "" : sig(r.sme, 4) })));
+      box.appendChild(table(r.method === "anova" ? [t("doe.term"), t("doe.effect"), t("doe.coefficient"), t("doe.ss"), t("doe.contribution"), t("doe.f"), t("doe.p"), t("doe.active")]
+        : [t("doe.term"), t("doe.effect"), t("doe.coefficient"), t("doe.contribution"), t("doe.active")],
+        r.terms.map((x) => r.method === "anova"
+          ? [x.term, sig(x.effect, 5), sig(x.coefficient, 5), sig(x.ss, 5), `${sig(100 * x.contribution, 3)} %`, sig(x.f, 4), sig(x.p_value, 3), yn(x.significant)]
+          : [x.term, sig(x.effect, 5), sig(x.coefficient, 5), `${sig(100 * x.contribution, 3)} %`, x.strongly_significant ? t("doe.strong") : yn(x.significant)])));
+    }
+    r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("doe.warn_" + w.code, { ...w, vif: w.vif == null ? "∞" : sig(w.vif, 3) }))));
+  }
+  $("#doe-run").addEventListener("click", runDoe);
   $("#sc-kind").addEventListener("change", syncSpecialChartForm);
   $("#sc-run").addEventListener("click", runSpecialChart);
   syncSpecialChartForm();
@@ -3223,7 +3315,7 @@
     if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); refreshImportForm(); }
     if (state.dataset) renderData();
     if (state.result) renderResult();
-    if (state.user) { fillMsaSelect($("#rp-msa"), $("#rp-msa").value); fillReportPlanSelect(); }
+    if (state.user) { fillMsaSelect($("#rp-msa"), $("#rp-msa").value); fillReportPlanSelect(); fillReportStudySelect(); }
     renderModelSuggestion(); renderStateTests(); renderMultistate();
     renderTargets(); renderArl(); renderReportOut(); renderArchiveOut(); renderUserBox();
     if (state.user && M.view && !$("#mon-detail").hidden) renderMonitor();

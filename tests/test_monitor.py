@@ -1325,3 +1325,20 @@ def test_a_laney_u_monitor_and_the_rules_of_the_option(env):
     cfg = {k: view[k] for k in ("name", "characteristic", "kind", "n", "alpha", "warn_alpha", "rules", "specs", "ocap", "require_ack", "active", "process", "unit", "line")}
     assert c["eng"].put(f"/api/monitors/{mid}", json={"config": {**cfg, "laney": False}}).status_code == 409
     assert c["eng"].put(f"/api/monitors/{mid}", json={"config": {**cfg, "laney": True}}).status_code == 200
+
+
+def test_an_ar_monitor_gives_the_correction_in_the_unit_of_the_characteristic(env):
+    """The draft (10.3.2.6): the correction found on a chart of residuals is transformed back before it is applied."""
+    app, c = env
+    mid = make_monitor(c["eng"], {"name": "Oven", "characteristic": "temperature", "kind": "ar"}, {"type": "parameters", "mu": 100.0, "sigma": 0.5, "phi": [0.8]})
+    ack(c["oper"], mid)
+    first = enter(c["oper"], mid, [100.4])["point"]
+    # the first value is predicted by the mean: expected 100.0, residual 0.4; a lasting shift of the mean by d gives the residual d (1 - 0.8) in the long run
+    assert first["ar"]["predicted"] == pytest.approx(100.0) and first["ar"]["residual"] == pytest.approx(0.4) and first["ar"]["level_shift"] == pytest.approx(0.4 / 0.2)
+    second = enter(c["oper"], mid, [101.0])["point"]  # predicted 100 + 0.8 * 0.4 = 100.32, residual 0.68
+    assert second["ar"]["predicted"] == pytest.approx(100.32) and second["ar"]["residual"] == pytest.approx(0.68) and second["ar"]["level_shift"] == pytest.approx(3.4)
+    listed = c["view"].get(f"/api/monitors/{mid}").json()["points"]
+    assert sorted(p["ar"]["residual"] for p in listed) == pytest.approx([0.4, 0.68])
+    plain = make_monitor(c["eng"], {"name": "Plain", "characteristic": "t", "kind": "imr"}, PARAMS)
+    ack(c["oper"], plain)
+    assert "ar" not in enter(c["oper"], plain, [10.0])["point"]

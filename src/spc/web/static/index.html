@@ -347,6 +347,7 @@
             <option value="weibull" data-i18n="dist.weibull"></option>
             <option value="weibull2" data-i18n="dist.weibull2"></option>
             <option value="rayleigh" data-i18n="dist.rayleigh"></option>
+            <option value="folded_normal" data-i18n="dist.folded_normal"></option>
             <option value="gamma" data-i18n="dist.gamma"></option>
             <option value="johnson_su" data-i18n="dist.johnson_su"></option>
             <option value="box_cox" data-i18n="dist.box_cox"></option>
@@ -362,7 +363,13 @@
           <input id="a-boot" type="number" min="0" max="2000" step="1" value="200"></label>
         <label id="a-seed-wrap"><span data-i18n="analysis.seed"></span>
           <input id="a-seed" type="number" min="0" max="4294967295" step="1" value="20260701"></label>
+        <label class="check wide"><input id="a-fitcheck" type="checkbox"><span data-i18n="analysis.fit_check"></span></label>
       </div>
+    </fieldset>
+    <fieldset id="a-pmk-wrap" hidden>
+      <legend data-i18n="analysis.pmk_title"></legend>
+      <p class="note" data-i18n="analysis.pmk_hint"></p>
+      <label class="wide"><span data-i18n="analysis.pmk_agreement"></span><input id="a-pmk-excluded" type="text" maxlength="500"></label>
     </fieldset>
     <p><button id="run-btn" class="primary" type="submit" data-i18n="analysis.run"></button></p>
   </form>
@@ -372,7 +379,7 @@
     <ul id="r-warnings" class="warnings"></ul>
     <p id="r-counts" class="strong"></p>
     <div class="cards">
-      <div class="card"><h3 data-i18n="result.names_title"></h3><p id="r-names" class="big"></p><p id="r-names-reason" class="muted"></p></div>
+      <div class="card"><h3 data-i18n="result.names_title"></h3><p id="r-names" class="big"></p><p id="r-names-reason" class="muted"></p><p id="r-pmk-excluded" class="status-warning" hidden></p><p id="r-fitcheck" class="muted" hidden></p></div>
       <div class="card"><h3 data-i18n="result.stability_title"></h3><p id="r-stability" class="strong"></p><p id="r-alarm-points" class="muted"></p></div>
     </div>
     <h3 id="r-loc-title"></h3>
@@ -426,6 +433,7 @@
           <select id="rp-language"><option value="zh-TW">繁體中文</option><option value="en">English</option></select></label>
         <label><span data-i18n="msa.link"></span><select id="rp-msa"></select></label>
         <label><span data-i18n="report.plan"></span><select id="rp-plan"></select></label>
+        <label><span data-i18n="report.study"></span><select id="rp-study"></select></label>
         <label class="check wide"><input id="rp-ms" type="checkbox"><span data-i18n="report.multistate"></span></label>
         <fieldset class="wide" id="rp-special-wrap" hidden><legend data-i18n="report.special"></legend><div id="rp-special" class="row"></div></fieldset>
         <label><span data-i18n="report.process"></span><input id="rp-process" type="text" maxlength="2000"></label>
@@ -494,6 +502,19 @@
     </div>
     <p><button id="sc-run" class="primary" data-i18n="sc.run"></button></p>
     <div id="sc-out" role="status"></div>
+  </div>
+  <div class="card" id="doe-card">
+    <h3 data-i18n="doe.title"></h3>
+    <p class="note" data-i18n="doe.intro"></p>
+    <div class="form-grid">
+      <label><span data-i18n="doe.mode"></span>
+        <select id="doe-mode"><option value="regression" data-i18n="doe.mode_regression"></option><option value="factorial" data-i18n="doe.mode_factorial"></option></select></label>
+      <label><span data-i18n="sc.alpha"></span>
+        <select id="doe-alpha"><option value="0.05" selected>5 %</option><option value="0.01">1 %</option><option value="0.10">10 %</option></select></label>
+      <label class="wide"><span data-i18n="doe.data"></span><textarea id="doe-data" rows="10" spellcheck="false" placeholder="y A B&#10;28 -1 -1&#10;36 1 -1&#10;18 -1 1&#10;31 1 1"></textarea></label>
+    </div>
+    <p><button id="doe-run" class="primary" data-i18n="doe.run"></button></p>
+    <div id="doe-out" role="status"></div>
   </div>
   <div class="card" id="guide-card">
     <h3 data-i18n="guide.title"></h3>
@@ -1195,6 +1216,20 @@
     </div>
     <p><button id="gd-run" class="primary" data-i18n="sp.gdt_run"></button></p>
     <div id="gd-out" role="status"></div>
+  </div>
+  <div class="card">
+    <h3 data-i18n="sp.cav_title"></h3>
+    <p class="note" data-i18n="sp.cav_note"></p>
+    <p id="sp-cav-none" class="muted" data-i18n="sp.comb_no_data"></p>
+    <div id="sp-cav-form" hidden>
+      <div class="form-grid">
+        <label><span data-i18n="sp.cav_factor"></span><select id="cv-factor"></select></label>
+        <label><span data-i18n="sp.lsl"></span><input id="cv-lsl" type="number" step="any"></label>
+        <label><span data-i18n="sp.usl"></span><input id="cv-usl" type="number" step="any"></label>
+      </div>
+      <p><button id="cv-run" class="primary" data-i18n="sp.cav_run"></button></p>
+    </div>
+    <div id="cv-out" role="status"></div>
   </div>
   <div class="card">
     <h3 data-i18n="sp.mv_title"></h3>

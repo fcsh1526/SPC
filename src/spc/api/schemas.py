@@ -109,6 +109,24 @@ class MultistageBody(Strict):
     minimum_total: int = Field(default=50, ge=1, le=100_000)
 
 
+class CavityBody(Strict):
+    """Equipment with several cavities, stations or clamping devices (draft 8.2.6): the factor is a tag name or "subgroup"."""
+
+    factor: str = Field(max_length=100)
+    lsl: float | None = None
+    usl: float | None = None
+    alpha: float = Field(default=0.05, gt=0, lt=0.5)
+
+
+class DoeBody(Strict):
+    """Process characterization (draft 6.4): the response of each run and one column per factor."""
+
+    y: list[float] = Field(min_length=4, max_length=5000)
+    factors: dict[str, list[float | str]] = Field(min_length=1, max_length=12)
+    alpha: float = Field(default=0.05, gt=0, lt=0.5)
+    max_order: int | None = Field(default=None, ge=1, le=12)
+
+
 class MultivariateBody(Strict):
     """Pm and Pmk of a multidimensional characteristic (draft 8.5.2): one row per part, one column per characteristic."""
 
@@ -218,12 +236,14 @@ class AnalyzeBody(Strict):
     target_confidence: float = Field(default=0.9999, gt=0, lt=1)
     incomplete: Literal["error", "drop"] = "drop"
     customer: str | None = Field(default=None, max_length=200)
-    distribution: Literal["normal", "auto", "lognormal", "weibull", "gamma", "johnson_su", "box_cox", "mixture", "empirical", "weibull2", "rayleigh"] = "normal"
+    distribution: Literal["normal", "auto", "lognormal", "weibull", "gamma", "johnson_su", "box_cox", "mixture", "empirical", "weibull2", "rayleigh", "folded_normal"] = "normal"
     method: Literal["G", "Z"] = "G"
     bootstrap_n: int = Field(default=200, ge=0, le=2000)
     seed: int = Field(default=20260701, ge=0, le=2**32 - 1)
     moving_n: int = Field(default=1, ge=1, le=10)
     limit_method: Literal["draft", "iso7870"] = "draft"  # draft: exact limits of the draft; iso7870: the factors of ISO 7870-2
+    fit_check: bool = False  # draft 9.4: correlation of the probability plot, overall and in the 25 % nearest to the limit
+    pmk_excluded: str = Field(default="", max_length=500)  # draft 8.2.4: the agreement with the customer to leave Pmk out (machine studies)
     profile_id: int | None = Field(default=None, ge=1)  # customer profile: fills what is not set here, see spc.profile
     target_table: dict | None = None
 
@@ -301,6 +321,7 @@ class ReportSpecialBody(Strict):
     trend: TrendBody | None = None
     gdt: GdtBody | None = None
     multivariate: MultivariateBody | None = None
+    cavities: CavityBody | None = None
 
 
 class ReportBody(Strict):
@@ -312,6 +333,7 @@ class ReportBody(Strict):
     special: ReportSpecialBody | None = None  # annex E: multi-stage, nested, trend, GD&T, multivariate results
     control_plan_id: int | None = Field(default=None, ge=1)  # a released plan: its snapshot goes into the report and the archive
     measurement_system_id: int | None = Field(default=None, ge=1)  # the MSA gate applies, and U and the guard band come from its studies
+    machine_study_id: int | None = Field(default=None, ge=1)  # draft 9.3: the machine performance study of the equipment must be closed; it is named in the report
 
 
 class ProfileBody(Strict):

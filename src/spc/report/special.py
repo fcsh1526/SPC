@@ -14,7 +14,7 @@ def _p(x) -> str:
 def special_view(special: dict, L) -> list[dict]:
     """A list of sections {title, lines, heads, rows, tail}; empty parts are empty lists."""
     out = []
-    for name in ("scope", "multistage", "nested", "trend", "gdt", "multivariate"):
+    for name in ("scope", "multistage", "nested", "trend", "gdt", "multivariate", "cavities"):
         item = special.get(name)
         if item:
             out.append({"title": L(f"sx.{name}"), **_VIEWS[name](item["request"], item["result"], L)})
@@ -104,4 +104,18 @@ def _multivariate(req, r, L):
     return {"lines": lines, "heads": heads, "rows": rows, "tail": [L("sx.mv_normality", sp=_p(nm["skewness_p"]), kp=_p(nm["kurtosis_p"])), L("sx.mv_reading")]}
 
 
-_VIEWS = {"scope": _scope, "multistage": _multistage, "nested": _nested, "trend": _trend, "gdt": _gdt, "multivariate": _multivariate}
+def _cavities(req, r, L):
+    lines = [L("sx.cav_setup", factor=r["factor"], n=len(r["cavities"]))]
+    if r["whole"]:
+        lines.append(L("sx.cav_whole", pm=_g(r["whole"]["pm"], 3), pmk=_g(r["whole"]["pmk"], 3), n=r["whole"]["n"]))
+    if r["variance"]:
+        by = {t["level"]: t for t in r["variance"]["table"]}
+        t = by[r["factor"]]
+        lines.append(L("sx.cav_variance", between=_g(100 * t["share"], 3) if t["share"] is not None else "–", within=_g(100 * r["variance"]["error"]["share"], 3) if r["variance"]["error"]["share"] is not None else "–",
+                       p=_p(t["p_value"]), result=L("sx.differ" if t["significant"] else "sx.same")))
+    heads = [L(k) for k in ("sx.col_cavity", "sx.col_n", "sx.col_mean", "sx.col_sd", "sx.col_pm", "sx.col_pmk")]
+    rows = [[c["label"], str(c["n"]), _g(c["mean"], 6), _g(c["sd"]), _g(c["pm"], 3), _g(c["pmk"], 3)] for c in r["cavities"]]
+    return {"lines": lines, "heads": heads, "rows": rows, "tail": [L("sx.cav_note")]}
+
+
+_VIEWS = {"scope": _scope, "multistage": _multistage, "nested": _nested, "trend": _trend, "gdt": _gdt, "multivariate": _multivariate, "cavities": _cavities}

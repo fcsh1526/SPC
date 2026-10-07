@@ -221,6 +221,12 @@ def build_report(
         stage, "v.reason_stable" if stability["class"] in ("statistical_control", "in_control") else "v.reason_not_proven"
     )
     conclusions.append(L("c.names", p=name_p, pk=name_pk, reason=L(reason_key)))
+    if r.get("pmk_excluded"):
+        conclusions.append(L("c.pmk_excluded", agreement=r["pmk_excluded"]["agreement"]))
+    fc = r.get("fit_check")
+    if fc:
+        f2 = lambda v: "–" if v is None else f"{v:.4f}"
+        conclusions.append(L("c.fit_check", name=L("v.dist_" + fc["distribution"]), all=f2(fc["all"]), tail=f2(fc["tail"]), share=f"{100 * fc['tail_share']:.0f}", side=L("v.side_" + fc["side"])))
     if blk:
         conclusions.append(L("c.fitted", name=L("v.dist_" + blk["name"]), method=request.method,
                              how=L("v.how_auto" if blk["requested"] == "auto" else "v.how_manual")))

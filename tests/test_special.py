@@ -595,3 +595,86 @@ def test_special_report_input_is_checked(client):
     bad = client.post(f"/api/datasets/{ds['id']}/reports", json={**REPORT_BODY, "special": {"multistage": {"factors": ["nope"]}}})
     assert bad.status_code == 400 and bad.json()["error"]["code"] == "invalid_input"
     assert client.post(f"/api/datasets/{ds['id']}/reports", json={**REPORT_BODY, "special": {"gdt": {"xd": [1, 2]}}}).status_code == 422
+
+
+# ------------------------------------------------------------------ several cavities, stations or clamping devices (draft 8.2.6)
+from spc.service.special import cavity_study  # noqa: E402
+from spc.core.capability.indices import overall_indices  # noqa: E402
+from spc.data import Dataset  # noqa: E402
+
+
+def cavity_dataset(shift=0.0, seed=61, per=40):
+    rng = np.random.default_rng(seed)
+    labels = np.repeat(["C1", "C2", "C3", "C4"], per)
+    x = rng.normal(10, 0.05, labels.size)
+    x[labels == "C3"] += shift
+    return Dataset.from_values(x, tags={"cavity": labels})
+
+
+def test_each_cavity_is_a_machine_of_its_own_and_the_variation_is_split():
+    ds = cavity_dataset(shift=0.15)
+    r = cavity_study(ds, "cavity", 9.7, 10.3)
+    x, labels = ds.values, ds.tags["cavity"]
+    for c in r["cavities"]:
+        v = x[labels == c["label"]]
+        idx = overall_indices(v, 9.7, 10.3)
+        assert c["n"] == 40 and c["pm"] == pytest.approx(idx.p) and c["pmk"] == pytest.approx(idx.pk) and c["mean"] == pytest.approx(v.mean())
+    assert r["whole"]["pmk"] == pytest.approx(overall_indices(x, 9.7, 10.3).pk) and r["whole"]["n"] == 160
+    shifted = next(c for c in r["cavities"] if c["label"] == "C3")
+    assert shifted["pmk"] < min(c["pmk"] for c in r["cavities"] if c["label"] != "C3")  # the shifted cavity has the lowest Pmk
+    t = r["variance"]["table"][0]
+    assert t["level"] == "cavity" and t["significant"] and t["share"] > 0.5 and t["share"] + r["variance"]["error"]["share"] == pytest.approx(1.0)
+    assert "C3" in [c["labels"]["cavity"] for c in r["combinations"]["combinations"] if c["different"]]
+    even = cavity_study(cavity_dataset(), "cavity", 9.7, 10.3)
+    assert not even["variance"]["table"][0]["significant"] and not any(c["different"] for c in even["combinations"]["combinations"])
+
+
+def test_the_cavity_study_without_limits_and_with_a_small_cavity():
+    ds = cavity_dataset()
+    r = cavity_study(ds, "cavity", None, None)
+    assert r["whole"] is None and all(c["pm"] is None and c["pmk"] is None for c in r["cavities"])
+    tiny = Dataset.from_values([10.0, 10.1, 9.9, 10.05] + [10.0 + 0.01 * i for i in range(40)], tags={"cavity": ["A"] * 4 + ["B"] * 40})
+    out = cavity_study(tiny, "cavity", 9.5, 10.5)
+    assert out["cavities"][0]["pmk"] is None and out["cavities"][1]["pmk"] is not None  # four values are too few for an index
+    with pytest.raises(ValueError):
+        cavity_study(ds, "nope", 9.5, 10.5)
+
+
+def test_cavities_api_report_annex_and_archive(client):
+    rng = np.random.default_rng(62)
+    lines = ["lot,value,cavity"] + [f"S{i // 4},{10 + rng.normal(0, 0.05) + (0.2 if i % 3 == 2 else 0):.4f},K{i % 3 + 1}" for i in range(120)]
+    ds = upload(client, "\n".join(lines).encode(), value="value", subgroup="", tags=["cavity"]).json()
+    r = client.post(f"/api/datasets/{ds['id']}/cavities", json={"factor": "cavity", "lsl": 9.7, "usl": 10.4})
+    assert r.status_code == 200, r.text
+    assert [c["label"] for c in r.json()["cavities"]] == ["K1", "K2", "K3"] and r.json()["variance"]["table"][0]["significant"]
+    assert client.post(f"/api/datasets/{ds['id']}/cavities", json={"factor": "nope"}).status_code == 400
+    out = client.post(f"/api/datasets/{ds['id']}/reports", json={**REPORT_BODY, "special": {"cavities": {"factor": "cavity", "lsl": 9.7, "usl": 10.4}}})
+    assert out.status_code == 200, out.text
+    html = client.get(out.json()["urls"]["html"]).text
+    assert "several cavities, stations or clamping devices (draft 8.2.6)" in html and "K3" in html
+    check = client.post("/api/archive/check", content=client.get(out.json()["urls"]["archive"]).content).json()
+    assert check == {"integrity_ok": True, "reproduced": True, "same_engine_version": True, "differences": []}
+
+
+# ------------------------------------------------------------------ the machine performance study named in a report (draft 9.3)
+
+def test_a_report_can_name_a_closed_machine_study_and_refuses_an_open_one():
+    from tests.test_study import RECORD, add_dataset, confirm_all, proven
+
+    app = make_app()
+    c = {u: logged_in_client(app, u) for u in ("admin", "eng", "view")}
+    eng = c["eng"]
+    sid = eng.post("/api/studies", json={"record": proven(c, {**RECORD, "dataset_id": add_dataset(app)})}).json()["study"]["id"]
+    ds = upload(eng, csv_text(k=20, n=5)).json()
+    body = {**REPORT_BODY, "machine_study_id": sid}
+    refused = eng.post(f"/api/datasets/{ds['id']}/reports", json=body)
+    assert refused.status_code == 409 and refused.json()["error"]["code"] == "machine_study_open"
+    confirm_all(eng, sid)
+    eng.post(f"/api/studies/{sid}/close", json={"reason": "all conditions met"})
+    out = eng.post(f"/api/datasets/{ds['id']}/reports", json=body)
+    assert out.status_code == 200, out.text
+    html = eng.get(out.json()["urls"]["html"]).text
+    assert "Machine performance study" in html and "closed" in html
+    assert eng.post(f"/api/datasets/{ds['id']}/reports", json={**REPORT_BODY, "machine_study_id": 9999}).status_code == 404
+    entry = [e for e in c["admin"].get("/api/audit?limit=20").json()["entries"] if e["action"] == "report_created"][0]
+    assert entry["detail"]["machine_study"]["id"] == sid

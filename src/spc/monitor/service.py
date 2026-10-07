@@ -611,6 +611,8 @@ class MonitorService:
                 self.store.add_event(monitor_id, incident_id, "system", "alarm", "",
                                      f"point {seq}: " + ", ".join(f"{a['chart']}:{a['rule']}" for a in alarms))
             point = self.store.point(monitor_id, seq)
+            if monitor["kind"] == AR_KIND:
+                point["ar"] = self._ar_info(limits, point)
             incident_now = self.store.incident(incident_id) if incident_id else None
         if opened:
             self._notify({"type": "incident_opened", "at": now_iso(), "monitor": {"id": monitor_id, "name": monitor["name"], "line": monitor["line"],
@@ -745,8 +747,25 @@ class MonitorService:
                 greens += 1
         return {"needed": PRE_QUALIFY, "greens": greens, "qualified": greens >= PRE_QUALIFY}
 
+    @staticmethod
+    def _ar_info(limits: dict | None, point: dict) -> dict | None:
+        """A residual chart plots what the autoregressive model could not predict. The draft (10.3.2.6) says the correction found on such a chart must be transformed back
+        before it is applied: `predicted` is the value the model expected, `residual` the part of the value that is new (both in the unit of the characteristic) and
+        `level_shift` the lasting change of the mean that would give this residual in the long run: residual / (1 - sum of phi)."""
+        if not limits or "phi" not in limits or point.get("loc") is None:
+            return None
+        gain = 1.0 - sum(limits["phi"])
+        return {"predicted": point["values"][0] - point["loc"], "residual": point["loc"], "level_shift": point["loc"] / gain if gain > 1e-9 else None}
+
     def _with_bands(self, monitor: dict, pts: list[dict]) -> list[dict]:
         """Count charts: limits follow the sample size, so each point carries the band that applied to it."""
+        if monitor["kind"] == AR_KIND:
+            revs: dict[int, dict | None] = {}
+            for p in pts:
+                if p["limits_rev"] not in revs:
+                    revs[p["limits_rev"]] = self.store.limits(monitor["id"], p["limits_rev"])
+                p["ar"] = self._ar_info(revs[p["limits_rev"]], p)
+            return pts
         if monitor["kind"] == "ewma":  # the width of the limits grows with the position in the run
             revs: dict[int, dict | None] = {}
             for p in pts:

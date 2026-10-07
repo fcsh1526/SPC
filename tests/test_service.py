@@ -154,3 +154,63 @@ def test_stable_processes_are_not_flagged_unstable_by_chance():
         r = analyze(labelled(k=60, seed=1000 + seed), AnalysisRequest(lsl=9, usl=11, model="A1"))
         flagged += r["stability"]["chart_stable"] is False
     assert flagged / runs < 0.04  # strict mode would flag about 30 % of these runs
+
+
+# ------------------------------------------------------------------ the fit check (draft 9.4) and Pmk left out by agreement (draft 8.2.4)
+
+def test_the_fit_check_is_only_in_the_result_when_asked_for_and_looks_at_the_limit_that_matters():
+    import numpy as np
+
+    from spc.data import Dataset
+    from spc.service import AnalysisRequest, analyze
+
+    rng = np.random.default_rng(51)
+    ds = Dataset.from_values(rng.lognormal(0, 0.3, 200) + 5)
+    plain = analyze(ds, AnalysisRequest(stage="machine", lsl=4.0, usl=9.0))
+    assert "fit_check" not in plain  # nothing changes for the archives made before
+    r = analyze(ds, AnalysisRequest(stage="machine", lsl=4.0, usl=7.5, fit_check=True))
+    assert r["fit_check"]["distribution"] == "normal" and r["fit_check"]["n_tail"] == 50 and 0.9 < r["fit_check"]["all"] < 1
+    # the upper limit is the nearer one (1.5 against 2.0 from the mean), so Pmk belongs to the upper tail and the tail is judged there
+    assert r["fit_check"]["side"] == "upper"
+    assert analyze(ds, AnalysisRequest(stage="machine", lsl=4.0, usl=9.0, fit_check=True))["fit_check"]["side"] == "lower"  # here the lower limit is the nearer
+    low = analyze(ds, AnalysisRequest(stage="machine", lsl=4.0, fit_check=True))
+    assert low["fit_check"]["side"] == "lower"
+    fitted = analyze(ds, AnalysisRequest(stage="machine", lsl=4.0, usl=7.5, distribution="lognormal", fit_check=True, bootstrap_n=0))
+    assert fitted["fit_check"]["distribution"] == "lognormal" and 0.9 < fitted["fit_check"]["tail"] <= 1 and fitted["fit_check"]["side"] == "upper"
+
+
+def test_pmk_can_be_left_out_by_agreement_in_a_machine_study_only():
+    import numpy as np
+
+    from spc.data import Dataset
+    from spc.service import AnalysisRequest, analyze
+
+    rng = np.random.default_rng(52)
+    ds = Dataset.from_values(rng.normal(10, 0.05, 50))
+    base = dict(stage="machine", lsl=9.5, usl=10.5, characteristic_class="major")
+    normal = analyze(ds, AnalysisRequest(**base))
+    left_out = analyze(ds, AnalysisRequest(**base, pmk_excluded="Customer agreed on 2026-03-02: the tool lasts 4 parts"))
+    assert normal["targets"]["verdict_pk"] is not None and normal["targets"]["verdict_p"] is not None and "pmk_excluded" not in normal
+    assert left_out["targets"]["verdict_pk"] is None and left_out["targets"]["verdict_p"] == normal["targets"]["verdict_p"]
+    assert left_out["indices"]["pk"] == normal["indices"]["pk"]  # still calculated, shown for information
+    assert left_out["pmk_excluded"]["agreement"].startswith("Customer agreed")
+    for bad in (dict(stage="production", pmk_excluded="agreed"), dict(stage="machine", pmk_excluded="x"), dict(stage="machine", pmk_excluded="y" * 501)):
+        with pytest.raises(ValueError):
+            analyze(ds, AnalysisRequest(**{**base, **bad}))
+
+
+def test_the_report_and_the_archive_carry_the_fit_check_and_the_agreement(tmp_path):
+    from tests.conftest import logged_in_client, make_app
+    from tests.test_api import REPORT_BODY, csv_text, upload
+
+    client = logged_in_client(make_app())
+    ds = upload(client, csv_text(k=25, n=5)).json()
+    analysis = {**REPORT_BODY["analysis"], "stage": "machine", "characteristic_class": "major", "fit_check": True, "distribution": "folded_normal",
+                "bootstrap_n": 0, "pmk_excluded": "Agreed with the customer: the tool is replaced every 3 parts"}
+    out = client.post(f"/api/datasets/{ds['id']}/reports", json={**REPORT_BODY, "analysis": analysis})
+    assert out.status_code == 200, out.text
+    html = client.get(out.json()["urls"]["html"]).text
+    assert "Pmk is left out of the evaluation by agreement with the customer" in html and "the tool is replaced every 3 parts" in html
+    assert "Fit of the distribution Folded normal" in html
+    check = client.post("/api/archive/check", content=client.get(out.json()["urls"]["archive"]).content).json()
+    assert check == {"integrity_ok": True, "reproduced": True, "same_engine_version": True, "differences": []}

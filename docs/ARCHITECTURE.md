@@ -610,6 +610,15 @@
 - 報告建立時可帶 `special`：`scope`、`multistage`、`nested`、`trend`、`gdt`、`multivariate`，每項就是各自路由的請求。伺服器在報告的資料集上算出結果，連同請求一起放進封存本體（在摘要值之內）；GD&T 的逐件陣列不存（由請求重算）。
 - `reproduce` 對每一項用儲存的請求在儲存的資料上重算並與儲存的結果比對（`special.<名稱>` 的差異會列出）：即使有人改了結果並重算摘要值，仍會因重算不同而被抓到（測試）。HTML 與 Excel 的附錄 E 由同一個 `special_view` 產生，中英文各有完整文字。
 
+## 10.14 圖 10-5 的特殊圖、Laney、配適檢查、模穴、製程特性化（已實作）
+
+- **特殊圖**（`spc.core.charts.special`，`POST /api/charts/special`）：Laney p′／u′（σ_z＝z 的平均移動全距／d2(2)，界限＝p̄ ± u·σ_z·σ_i）、z 化的 p／u 圖、G 圖（幾何分布）、T 圖（韋伯，由 MLE 與分位數界限）、百分位數圖（經驗分位數，參考資料須夠大，約 round(5.4/α) 筆）、UWMA、與目標的差、Levey-Jennings。以公式與模擬驗證（二項計數時 σ_z≈1；過度離散時 Laney 不再誤報）。
+- **Laney 監控選項**：p、u 監控器的 `laney` 設定，界限來自參考計數、界限字典帶 `sigma_z`；改變選項視為改變形狀，須重新鎖定界限。
+- **分布**：折疊常態（最大概似；須明示選用，`auto` 不會選）；`fit_check`：整體與靠近所算指標那一側規格限 25 % 資料的機率圖相關係數；`pmk_excluded`：機台績效研究中經客戶同意免評 Pmk（須填說明，只限機台階段，結果與報告註明）。
+- **模穴**（`spc.service.special.cavity_study`）：以標籤或子組為因子，各模穴 Pm、Pmk，並分出模穴之間與之內的變異；進入報告附錄 E 與封存（`special.cavities`）。報告可帶 `machine_study_id`，該研究未結案則回 409 `machine_study_open`。
+- **AR 殘差圖**：殘差圖的修正量以 殘差/(1−Σφ) 轉回原單位（水準位移）。
+- **製程特性化**（`spc.core.doe`，`POST /api/doe/regression`、`/api/doe/factorial`）：多元線性迴歸（係數、標準誤、t、p、信賴區間、標準化係數、偏 R²、VIF、排名；共線性與試驗過少警告）；二水準完全因子設計（效應＝高低水準平均差，係數為其一半；有重複用 ANOVA 與純誤差，無重複用 Lenth 法：PSE、ME、SME）。驗證：Montgomery 例 6.1（效應 8.333、−5、1.667；SS 208.33、75、8.33；SSE 31.33，自由度 8）、與 `scipy.stats.linregress` 及正規方程式逐項相等、Lenth 以獨立公式重算。**不含**部分因子、反應曲面與混合設計。
+
 ## 10.1 資料庫與登入（已實作第一版）
 
 **儲存**：SQLite 單檔（`--db` 或環境變數 `SPC_DB`，預設 `spc.sqlite3`，建立時權限 0600）。一條連線加一把鎖，所有存取走 `spc.db`，日後換 PostgreSQL 只改 `database.py` 與 `stores.py`。結構版本（目前 8）放在 `PRAGMA user_version`，版本不符時拒絕啟動。

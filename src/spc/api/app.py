@@ -30,8 +30,8 @@ from spc.api.equipment import add_equipment_routes
 from spc.api.signing import add_signing_routes
 from spc.signing.core import SigningError
 from spc.signing.service import SigningService
-from spc.core import gdt, multistage as mstage, multivariate_perf as mvperf
-from spc.service.special import multistage_for_dataset, nested_for_dataset, special_snapshot, trend_for_dataset
+from spc.core import doe, gdt, multistage as mstage, multivariate_perf as mvperf
+from spc.service.special import cavity_study, multistage_for_dataset, nested_for_dataset, special_snapshot, trend_for_dataset
 from spc.service.state_tests import multistate_for_dataset, state_tests_for_dataset
 from spc.equipment.model import EquipmentError
 from spc.equipment.service import EquipmentService
@@ -49,6 +49,8 @@ from spc.api.schemas import (
     MultistageBody,
     MultistageScopeBody,
     GdtBody,
+    CavityBody,
+    DoeBody,
     ChartGuideBody,
     SpecialChartBody,
     MultivariateBody,
@@ -567,6 +569,18 @@ def create_app(
         meta = body.meta.to_meta()
         if body.measurement_system_id:
             meta = _apply_msa_gate(meta, body.measurement_system_id, "report")
+        study_note = None
+        if body.machine_study_id:  # draft 9.3: the machine performance of the equipment has been analysed and the study is closed
+            from dataclasses import replace as _replace
+
+            study = studies.get(body.machine_study_id)
+            if not study["closed"]:
+                raise ApiError(409, "machine_study_open", f"the machine performance study {study['name']!r} is not closed", study=study["name"])
+            c = study["closed"]
+            study_note = {"id": study["id"], "name": study["name"], "machine": study["machine"], "closed_at": c["at"], "closed_by": c["by"], "flagged": c["flagged"]}
+            line = (f"Machine performance study {study['name']} ({study['machine'] or '–'}) closed {c['at']} by {c['by']}"
+                    + (f"; agreed deviations and remarks: {', '.join(c['flagged'])}" if c["flagged"] else "") + ".")
+            meta = _replace(meta, technical_conditions=(meta.technical_conditions + "\n" + line).strip())
         language, snap = body.language, None
         if profile:
             template = ReportTemplate.from_dict(profile["report"])
@@ -610,6 +624,7 @@ def create_app(
                          detail={"dataset": key, "digest": g.archive["integrity"]["digest"],
                                  **({"multistate": {"type": ms_snap["result"]["type"], "pm": ms_snap["result"]["pm"], "pmk": ms_snap["result"]["pmk"]}} if ms_snap else {}),
                                  **({"special": sorted(special_snap)} if special_snap else {}),
+                                 **({"machine_study": study_note} if study_note else {}),
                                  **({"control_plan": plan_snap["name"], "control_plan_revision": plan_snap["revision"]} if plan_snap else {}),
                                  **({"profile": profile["name"], "profile_revision": profile["revision"],
                                      "deviations": sorted(deviations)} if profile else {})})
@@ -804,6 +819,30 @@ def create_app(
         """Variance components of nested data (sources of variation study, draft 10.3.1)."""
         try:
             return nested_for_dataset(store.get(key), body.levels, body.alpha)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/datasets/{key}/cavities")
+    def cavities(key: str, body: CavityBody):
+        """Equipment with several cavities, stations or clamping devices (draft 8.2.6): Pm and Pmk of each, and the variation between and within them."""
+        try:
+            return cavity_study(store.get(key), body.factor, body.lsl, body.usl, body.alpha)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/doe/regression")
+    def doe_regression(body: DoeBody):
+        """Multiple linear regression of a response on measured factors (draft 6.4)."""
+        try:
+            return doe.regression(body.y, {k: [float(x) for x in v] for k, v in body.factors.items()}, body.alpha)
+        except (ValueError, TypeError) as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/doe/factorial")
+    def doe_factorial(body: DoeBody):
+        """Two-level full factorial experiment: effects, ANOVA or Lenth's method (draft 6.4)."""
+        try:
+            return doe.factorial(body.y, body.factors, body.alpha, body.max_order)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 

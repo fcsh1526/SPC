@@ -38,7 +38,7 @@ from spc.core.charts.variable import MAX_MOVING_N, MovingChart, SubgroupChart, i
 from spc.core.constants import cn
 from spc.core.constants import ALPHA_3SIGMA
 from spc.core.distributions import (
-    EXPLICIT_ONLY, FAMILIES, FitError, GaussianMixture, bootstrap_interval, choose_automatically, fit, fit_candidates, quantiles,
+    EXPLICIT_ONLY, FAMILIES, FitError, GaussianMixture, bootstrap_interval, choose_automatically, fit, fit_candidates, probability_plot_correlation, quantiles,
 )
 from spc.core.rules import RuleResult, RuleSet, Violation, evaluate
 from spc.core.stability import Stability, assess_analysis_chart, classify_stability
@@ -76,6 +76,8 @@ class AnalysisRequest:
     seed: int = 20260701
     target_table: dict | None = None  # complete table stage -> class -> [p, pk] of a customer profile; None = draft values
     moving_n: int = 1  # I-MR only: size of the moving sample (1 = plain individuals chart). Restarts come from the data
+    fit_check: bool = False  # draft 9.4: how well the distribution describes the data, overall and in the 25 % of the values nearest to the limit of the index
+    pmk_excluded: str = ""  # draft 8.2.4: Pmk may be left out of the evaluation when it has been agreed with the customer; the agreement (who, why) as a text. Machine studies only
     limit_method: str = "draft"  # "draft": exact limits of the draft (chi-square, w distribution); "iso7870": factors A3, B3, B4, D3, D4 of ISO 7870-2
 
 
@@ -284,6 +286,11 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
     if req.lsl is not None and req.usl is not None and not req.lsl < req.usl:
         raise ValueError("lsl must be below usl")
     _check_distribution_request(req)
+    if req.pmk_excluded:
+        if req.stage != "machine":
+            raise ValueError("Pmk can be left out only in a machine performance study (draft 8.2.4)")
+        if len(req.pmk_excluded.strip()) < 3 or len(req.pmk_excluded) > 500:
+            raise ValueError("say what was agreed with the customer and why Pmk is left out (3 to 500 characters)")
     params = AnalysisParams(
         alpha=req.alpha,
         estimate_confidence=req.estimate_confidence,
@@ -468,6 +475,13 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
     }
     if idx.p is None:
         _warn(warnings, "one_sided_no_p")
+    if req.fit_check:
+        side = "upper" if (req.lsl is None or (req.usl is not None and idx.pu is not None and idx.pl is not None and idx.pu <= idx.pl)) else "lower"
+        try:
+            result["fit_check"] = {"distribution": block["name"] if block else "normal", **probability_plot_correlation(dist, x, side)}
+        except (FitError, ValueError):
+            result["fit_check"] = None
+            _warn(warnings, "fit_check_failed")
 
     if req.stage != "machine" and n_sub >= 2:
         cw = within_indices(matrix, req.lsl, req.usl)
@@ -490,4 +504,8 @@ def analyze_detailed(dataset: Dataset, req: AnalysisRequest) -> Outcome:
             result["targets"] = {"class": req.characteristic_class.lower(), "blocked": True, "n": idx.n,
                                  "n_base": base}
             _warn(warnings, "target_not_allowed", n=idx.n, base=base)
+    if req.pmk_excluded:  # agreed with the customer (draft 8.2.4): the index stays in the result for information, but it is not judged against a target
+        result["pmk_excluded"] = {"agreement": req.pmk_excluded.strip()}
+        if result["targets"] and not result["targets"].get("blocked"):
+            result["targets"]["verdict_pk"] = None
     return Outcome(result, x, np.asarray(positions), fitted)

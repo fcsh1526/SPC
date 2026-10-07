@@ -840,8 +840,9 @@ def test_acceptance_and_pre_control_monitors_in_the_browser(server, browser, app
     page.click("#md-ack-btn")
     for a, b in ([10.0, 10.1], [10.0, 10.05], [10.1, 9.95]):
         page.fill("#md-v0", str(a)); page.fill("#md-v1", str(b)); page.click("#md-submit")
+        expect(page.locator("#md-v0")).to_have_value("", timeout=20000)  # the form is cleared when the answer is in: the next values must not be typed before
         expect(page.locator("#md-result .ok-box")).to_be_visible()
-    expect(page.locator("#md-qual")).to_contain_text("Released")
+    expect(page.locator("#md-qual")).to_contain_text("Released", timeout=20000)
     page.fill("#md-v0", "10.4"); page.fill("#md-v1", "10.45"); page.click("#md-submit")
     expect(page.locator("#md-result .alarm-box")).to_contain_text("yellow zone on the same side")
     expect(page.locator("#md-qual")).to_contain_text("Not yet released")
@@ -1867,5 +1868,33 @@ def test_charts_for_special_situations_and_the_laney_option_in_the_browser(serve
     page.check("#me-laney")
     expect(page.locator("#me-src-type option[value=rate]")).to_be_hidden()
     assert page.locator("#me-src-type").input_value() == "counts"
+    assert problems == []
+    ctx.close()
+
+
+def test_process_characterization_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=tools]")
+    page.select_option("#doe-mode", "factorial")
+    A = [-1] * 3 + [1] * 3 + [-1] * 3 + [1] * 3
+    B = [-1] * 6 + [1] * 6
+    y = [28, 25, 27, 36, 32, 32, 18, 19, 23, 31, 30, 29]
+    page.fill("#doe-data", "y A B\n" + "\n".join(f"{v} {a} {b}" for v, a, b in zip(y, A, B)))
+    page.click("#doe-run")
+    expect(page.locator("#doe-out")).to_contain_text("8 degrees of freedom", timeout=20000)
+    expect(page.locator("#doe-out table")).to_contain_text("A:B")
+    page.select_option("#doe-mode", "regression")
+    page.fill("#doe-data", "y x\n1 1\n2 2\nx 3\n4 4\n5 5")
+    page.click("#doe-run")
+    expect(page.locator("#errors")).to_contain_text("Give a header row", timeout=20000)
+    page.fill("#doe-data", "y x\n1.1 1\n1.9 2\n3.2 3\n3.8 4\n5.1 5")
+    page.click("#doe-run")
+    expect(page.locator("#doe-out")).to_contain_text("adjusted R²", timeout=20000)
     assert problems == []
     ctx.close()

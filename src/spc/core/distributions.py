@@ -23,7 +23,8 @@ from scipy.special import logsumexp
 
 FAMILIES = ("normal", "lognormal", "weibull", "gamma", "johnson_su", "box_cox", "mixture", "empirical")
 # chosen on purpose only, never by the automatic choice: ISO/TR 11462-3 fixes the lower limit at 0 for characteristics with a natural boundary
-EXPLICIT_ONLY = ("weibull2", "rayleigh")
+# folded_normal: the theoretical distribution of form and position deviations (draft 7.8.1); chosen on purpose as well
+EXPLICIT_ONLY = ("weibull2", "rayleigh", "folded_normal")
 SELECTABLE = FAMILIES + EXPLICIT_ONLY
 EMPIRICAL_MIN_N = 2000
 MAX_COMPONENTS = 5
@@ -58,7 +59,7 @@ class ScipyDistribution:
     def describe(self) -> dict:
         names = {"normal": ("mean", "sd"), "lognormal": ("shape", "location", "scale"),
                  "weibull": ("shape", "location", "scale"), "gamma": ("shape", "location", "scale"),
-                 "weibull2": ("shape", "location", "scale"), "rayleigh": ("location", "scale"),
+                 "weibull2": ("shape", "location", "scale"), "rayleigh": ("location", "scale"), "folded_normal": ("mean_over_sd", "location", "sd"),
                  "johnson_su": ("a", "b", "location", "scale")}[self.family]
         return dict(zip(names, self.params))
 
@@ -274,9 +275,39 @@ def fit(x, family: str, *, start=None, components: int | None = None):
             raise FitError("rayleigh needs values of 0 and above")
         sigma = float(np.sqrt(np.sum(x ** 2) / (2.0 * x.size)))
         return ScipyDistribution("rayleigh", stats.rayleigh(0.0, sigma), (0.0, sigma), 1)
+    if family == "folded_normal":  # |N(mu, sd^2)|: the location fixed at 0; scipy's foldnorm has the shape c = mu / sd (the draft's folded distribution for form and position)
+        if float(x.min()) < 0:
+            raise FitError("folded_normal needs values of 0 and above")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            c, _, scale = stats.foldnorm.fit(x, floc=0.0)
+        if not (math.isfinite(c) and math.isfinite(scale) and scale > 0):
+            raise FitError("folded_normal could not be fitted")
+        return ScipyDistribution("folded_normal", stats.foldnorm(c, 0.0, scale), (c, 0.0, scale), 2)
     if family in ("normal", "lognormal", "weibull", "gamma", "johnson_su"):
         return _fit_scipy(family, x, start)
     raise ValueError(f"unknown distribution {family!r}; choose from {SELECTABLE}")
+
+
+def probability_plot_correlation(dist, x, side: str = "upper", tail_share: float = 0.25) -> dict:
+    """How well a distribution describes the data, as the draft asks in 9.4 ("net correlation" of the probability plot): the correlation between the ordered values and the
+    quantiles of the distribution at the plotting positions (i - 0.3) / (n + 0.4), for all the data and for the `tail_share` of the values that lie closest to the specification
+    limit the index is calculated for ("upper" or "lower"). It describes the fit; it is not a test."""
+    xs = np.sort(np.asarray(x, dtype=float).ravel())
+    n = xs.size
+    pp = (np.arange(1, n + 1) - 0.3) / (n + 0.4)
+    q = np.asarray(dist.ppf(pp), dtype=float)
+    ok = np.isfinite(q)
+    m = max(3, int(round(tail_share * n)))
+    sl = slice(n - m, n) if side == "upper" else slice(0, m)
+
+    def corr(a, b):
+        keep = np.isfinite(b)
+        if keep.sum() < 3 or np.ptp(a[keep]) == 0 or np.ptp(b[keep]) == 0:
+            return None
+        return float(np.corrcoef(a[keep], b[keep])[0, 1])
+
+    return {"all": corr(xs, q), "tail": corr(xs[sl], q[sl]), "side": side, "n": int(n), "n_tail": int(m), "tail_share": tail_share}
 
 
 def quantiles(dist) -> tuple[float, float, float]:
