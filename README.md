@@ -44,6 +44,8 @@ The server listens on 127.0.0.1 only. To serve a team, put it behind an https pr
 | `spc.data.dfq` | Reads the descriptive data (parts, characteristics, limits) of ISO/TR 11462-5 files (*.DFD, *.DFQ); values are not read |
 | `spc.core.arl_oc` | OC curve and ARL |
 | `spc.params` | All analysis parameters in one record, for archiving |
+| `spc.data.xlsx_io` | Excel (*.xlsx) import: choose the sheet and the line of the column names; same rules as the CSV import, stored values only (no formulas) |
+| `spc.data.templates` | Import templates: the column map of a customer's file, saved once and used again (columns found by name) |
 | `spc.data.csv_io` | CSV import and export: Big5 / UTF-8, delimiter and decimal comma, all errors reported with line numbers, SHA-256 of the source file |
 | `spc.data.dataset` | `Dataset` with traceable invalid marks, subgroup building (`subgroups()`), counts for the report |
 | `spc.data.outliers` | Hints for suspect values (MAD, Tukey, Grubbs). Hints never mark anything |

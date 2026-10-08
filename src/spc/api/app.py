@@ -23,6 +23,7 @@ from spc import __version__
 from spc.api.accounts import add_account_routes
 from spc.api.monitors import add_monitor_routes
 from spc.api.studies import add_study_routes
+from spc.api.import_templates import add_import_template_routes
 from spc.api.improvements import add_improvement_routes
 from spc.api.lots import add_lot_routes
 from spc.api.msa import add_msa_routes
@@ -89,6 +90,8 @@ from spc.db import (
     Database, DatasetNotFound, DatasetStore, ProfileNameTaken, ProfileNotFound, ProfileStore, ReportNotFound, ReportStore,
 )
 from spc.data import ColumnMap, DataImportError, Dataset, IncompleteSubgroupsError, load_csv, preview_csv, suspects, to_csv
+from spc.data import templates as import_templates
+from spc.data.xlsx_io import is_xlsx, load_xlsx, preview_xlsx
 from spc.profile import ReportTemplate, default_target_table, missing_fields, snapshot, validate_analysis
 from spc.report import ReportError, generate, report_xlsx, reproduce
 from spc.service import analyze
@@ -194,6 +197,8 @@ def create_app(
     app.state.monitors = monitors
     lot_service = LotService(db, audit, monitors, msa_systems)
     improvement_service = ImprovementService(db, audit, monitors)
+    template_service = import_templates.ImportTemplates(db, audit)
+    app.state.import_templates = template_service
     app.state.improvements = improvement_service
     app.state.lots = lot_service
     studies = StudyService(db, audit, store, msa_systems)
@@ -302,6 +307,18 @@ def create_app(
     async def _improvement_missing(_: Request, exc: ImprovementNotFound):
         return _error(404, "improvement_not_found", "improvement cycle not found")
 
+    @app.exception_handler(import_templates.TemplateProblem)
+    async def _template_problem(_: Request, exc: import_templates.TemplateProblem):
+        return _error(exc.status, exc.code, str(exc), exc.params)
+
+    @app.exception_handler(import_templates.TemplateNotFound)
+    async def _template_missing(_: Request, exc: import_templates.TemplateNotFound):
+        return _error(404, "import_template_not_found", "import template not found")
+
+    @app.exception_handler(import_templates.TemplateNameTaken)
+    async def _template_taken(_: Request, exc: import_templates.TemplateNameTaken):
+        return _error(409, "import_template_name_taken", "an import template with this name exists already")
+
     @app.exception_handler(LotProblem)
     async def _lot_problem(_: Request, exc: LotProblem):
         return _error(exc.status, exc.code, str(exc), exc.params)
@@ -376,6 +393,7 @@ def create_app(
     add_monitor_routes(app, monitors, store, reports, audit, db, reader, operator, writer, admin)
     add_lot_routes(app, lot_service, reader, operator, writer, admin)
     add_improvement_routes(app, improvement_service, reader, writer, admin)
+    add_import_template_routes(app, template_service, reader, writer)
     add_study_routes(app, studies, reader, writer, admin)
     add_msa_routes(app, msa_systems, reader, writer, admin)
     add_plan_routes(app, plan_service, people, reader, writer, admin)
@@ -386,8 +404,18 @@ def create_app(
     # ------------------------------------------------------------------ import
 
     @app.post("/api/preview")
-    async def preview(request: Request, encoding: str = "auto", delimiter: str | None = None, _: User = Depends(writer)):
-        return preview_csv(await read_body(request), delimiter=delimiter or None, encoding=encoding)
+    async def preview(
+        request: Request, encoding: str = "auto", delimiter: str | None = None, sheet: str | None = None,
+        header_row: int = Query(1, ge=1, le=1000), _: User = Depends(writer),
+    ):
+        """Header and first rows of a CSV or Excel file, and the import templates that fit it."""
+        raw = await read_body(request)
+        if is_xlsx(raw):
+            out = {**preview_xlsx(raw, sheet=sheet or None, header_row=header_row), "kind": "xlsx"}
+        else:
+            out = {**preview_csv(raw, delimiter=delimiter or None, encoding=encoding, header_row=header_row), "kind": "csv", "sheets": [], "sheet": None}
+        out["templates"] = template_service.matching(out["header"], out["kind"])
+        return out
 
     @app.post("/api/interchange/dfd")
     async def read_dfd(request: Request, _: User = Depends(writer)):
@@ -400,29 +428,49 @@ def create_app(
     @app.post("/api/datasets")
     async def create_dataset(
         request: Request,
-        value: str,
+        value: str | None = None,
         subgroup: str | None = None,
         timestamp: str | None = None,
-        tags: list[str] = Query(default=[]),
+        tags: list[str] | None = Query(default=None),
         source_row: str | None = None,
         valid: str | None = None,
         invalid_reason: str | None = None,
         invalid_by: str | None = None,
         invalid_at: str | None = None,
-        decimal: str = ".",
+        decimal: str | None = None,
         delimiter: str | None = None,
-        encoding: str = "auto",
-        missing: str = "error",
+        encoding: str | None = None,
+        missing: str | None = None,
+        sheet: str | None = None,
+        header_row: int | None = Query(None, ge=1, le=1000),
+        template: int | None = None,
         filename: str | None = None,
         user: User = Depends(writer),
     ):
+        """Import a CSV or Excel file. With `template` the settings come from the saved template; a query parameter given as well wins."""
         raw = await read_body(request)
-        columns = ColumnMap(
-            value=value, subgroup=subgroup or None, timestamp=timestamp or None, tags=tuple(tags),
-            source_row=source_row or None, valid=valid or None, invalid_reason=invalid_reason or None,
-            invalid_by=invalid_by or None, invalid_at=invalid_at or None,
-        )
-        ds = load_csv(raw, columns, delimiter=delimiter or None, decimal=decimal, encoding=encoding, missing=missing)
+        kind = "xlsx" if is_xlsx(raw) else "csv"
+        base = {"decimal": ".", "delimiter": "", "encoding": "auto", "missing": "error", "sheet": "", "header_row": 1, "columns": {}, "tags": []}
+        if template is not None:
+            t = template_service.get(template)
+            if t["format"] not in ("any", kind):
+                raise ApiError(400, "invalid_input", f"the template is for {t['format']} files, the file is {kind}")
+            base = t
+        cols = base["columns"]
+        given = {"value": value, "subgroup": subgroup, "timestamp": timestamp, "source_row": source_row, "valid": valid,
+                 "invalid_reason": invalid_reason, "invalid_by": invalid_by, "invalid_at": invalid_at}
+        pick = {r: (given[r] if given[r] is not None else cols.get(r, "")) or None for r in given}
+        if not pick["value"]:
+            raise ApiError(400, "invalid_input", "the column of the values is required (value=..., or a template)")
+        columns = ColumnMap(tags=tuple(tags) if tags is not None else tuple(base["tags"]), **pick)
+        opts = {
+            "decimal": decimal or base["decimal"], "missing": missing or base["missing"],
+        }
+        if kind == "xlsx":
+            ds = load_xlsx(raw, columns, sheet=sheet or base["sheet"] or None, header_row=header_row or base["header_row"], **opts)
+        else:
+            ds = load_csv(raw, columns, delimiter=delimiter or base["delimiter"] or None, encoding=encoding or base["encoding"],
+                          header_row=header_row or base["header_row"], **opts)
         if filename and ds.source is not None:
             from dataclasses import replace
 
@@ -430,7 +478,7 @@ def create_app(
         with db.tx():
             key = store.add(ds, user.id)
             audit.append("dataset_created", user_id=user.id, username=user.username, target=key,
-                         detail={"name": ds.source.name if ds.source else "", "n": ds.n_total})
+                         detail={"name": ds.source.name if ds.source else "", "n": ds.n_total, **({"template": template} if template is not None else {})})
         return _dataset_json(key, ds)
 
     # ------------------------------------------------------------------ data

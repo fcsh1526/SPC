@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 SCHEMA = """
 CREATE TABLE users (
@@ -246,6 +246,14 @@ CREATE TABLE improvements (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
+);
+CREATE TABLE import_templates (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
 )
 """
 
@@ -273,6 +281,18 @@ MIGRATION_10_TO_11 = """
 CREATE TABLE improvements (
     id         INTEGER PRIMARY KEY,
     status     TEXT NOT NULL,
+    data       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER REFERENCES users(id)
+)
+"""
+
+
+MIGRATION_11_TO_12 = """
+CREATE TABLE import_templates (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
     data       TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -410,7 +430,7 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
+        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
@@ -459,9 +479,14 @@ class Database:
                 self._conn.execute(MIGRATION_9_TO_10)
                 self._conn.execute("PRAGMA user_version = 10")
                 self._conn.execute("COMMIT")
-            self._conn.execute("BEGIN IMMEDIATE")  # version 11 adds the improvement cycles (PDCA of control loop 3)
-            self._conn.execute(MIGRATION_10_TO_11)
-            self._conn.execute("PRAGMA user_version = 11")
+            if version <= 10:
+                self._conn.execute("BEGIN IMMEDIATE")  # version 11 adds the improvement cycles (PDCA of control loop 3)
+                self._conn.execute(MIGRATION_10_TO_11)
+                self._conn.execute("PRAGMA user_version = 11")
+                self._conn.execute("COMMIT")
+            self._conn.execute("BEGIN IMMEDIATE")  # version 12 adds the import templates (column maps of customers' files)
+            self._conn.execute(MIGRATION_11_TO_12)
+            self._conn.execute("PRAGMA user_version = 12")
             self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")

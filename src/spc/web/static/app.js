@@ -9,7 +9,7 @@
 
   const state = {
     lang: "zh-TW", msgs: {}, fallback: {},
-    file: null, preview: null,
+    file: null, preview: null, imp: null,
     dataset: null, offset: 0, pageSize: 100, pageRows: [], total: 0,
     selected: new Set(), suspects: new Set(),
     result: null, toolsTargets: null, toolsArl: null,
@@ -114,11 +114,16 @@
     box.scrollIntoView({ block: "nearest" });
   }
   function clearError() { const b = $("#errors"); b.hidden = true; b.replaceChildren(); }
+  let busyDepth = 0;  // requests can overlap (a menu changed while a file is read): the buttons are taken and given back once
+  let busyButtons = [];
   async function guarded(fn) {
     clearError();
     $("#busy").hidden = false;
-    const buttons = $$("button");
-    buttons.forEach((b) => { b.dataset.wasDisabled = b.disabled ? "1" : ""; b.disabled = true; });
+    if (busyDepth === 0) {
+      busyButtons = $$("button");
+      busyButtons.forEach((b) => { b.dataset.wasDisabled = b.disabled ? "1" : ""; b.disabled = true; });
+    }
+    busyDepth++;
     try { return await fn(); }
     catch (e) {
       if (e && e.code === "not_authenticated" && state.user) { showLogin("login.session_ended"); return; }
@@ -126,8 +131,12 @@
       showError(e && e.code ? e : { code: "network", message: String(e), params: {} });
     }
     finally {
-      $("#busy").hidden = true;
-      buttons.forEach((b) => { b.disabled = b.dataset.wasDisabled === "1"; });
+      busyDepth--;
+      if (busyDepth === 0) {
+        $("#busy").hidden = true;
+        busyButtons.forEach((b) => { b.disabled = b.dataset.wasDisabled === "1"; });
+        busyButtons = [];
+      }
     }
   }
   async function api(path, opts) {
@@ -228,6 +237,7 @@
     });
   }
   function renderDetected() {
+    if (state.preview.kind === "xlsx") { $("#detected").textContent = t("import.detected_xlsx", { sheet: state.preview.sheet }); return; }
     $("#detected").textContent = t("import.detected", {
       encoding: state.preview.encoding,
       delimiter: state.preview.delimiter === "\t" ? "Tab" : state.preview.delimiter,
@@ -235,31 +245,147 @@
   }
   function refreshImportForm() { renderTagChecks(); renderPreview(); }
 
+  const IMP_DEFAULT = () => ({ sheet: "", headerRow: 1, encoding: "auto", delimiter: "", template: null });
+  let importChain = Promise.resolve();
+  const importSerial = (fn) => { importChain = importChain.then(fn, fn); return importChain; };  // the choices can change faster than the file is read; one request at a time
+  let previewSeq = 0;
+  async function loadPreview() {  // false when a newer request was started meanwhile: its answer is the one that counts
+    const q = new URLSearchParams({ header_row: String(state.imp.headerRow), encoding: state.imp.encoding });
+    if (state.imp.delimiter) q.set("delimiter", state.imp.delimiter);
+    if (state.imp.sheet) q.set("sheet", state.imp.sheet);
+    const seq = ++previewSeq;
+    const pv = await api("/api/preview?" + q.toString(), { method: "POST", body: state.file });
+    if (seq !== previewSeq) return false;
+    state.preview = pv;
+    return true;
+  }
+  function renderImportSource() {
+    const pv = state.preview;
+    $("#sheet-wrap").hidden = pv.kind !== "xlsx";
+    const sheet = $("#import-sheet");
+    sheet.replaceChildren();
+    (pv.sheets || []).forEach((n) => sheet.appendChild(new Option(n, n)));
+    if (pv.sheet) sheet.value = pv.sheet;
+    const hr = $("#import-header-row");
+    if (document.activeElement !== hr) hr.value = String(state.imp.headerRow);  // do not overwrite what the person is typing
+    const sel = $("#import-template");
+    sel.replaceChildren();
+    sel.appendChild(new Option(t("import.template_none"), ""));
+    pv.templates.forEach((x) => sel.appendChild(new Option(x.name, String(x.id))));
+    const chosen = state.imp.template && pv.templates.some((x) => x.id === state.imp.template) ? String(state.imp.template) : "";
+    sel.value = chosen;
+    $("#template-note").textContent = pv.templates.length ? t("import.template_fit", { n: pv.templates.length }) : t("import.template_nofit");
+    $("#tpl-delete").hidden = !chosen;
+    const current = pv.templates.find((x) => String(x.id) === chosen);
+    if (current && !$("#tpl-name").value) $("#tpl-name").value = current.name;
+  }
+  function renderAllImport() { renderDetected(); renderImportSource(); refreshImportForm(); }
   async function onFileChosen(file) {
     clearError();
     if (!file) return;
     state.file = file;
+    state.imp = IMP_DEFAULT();
+    $("#tpl-name").value = "";
     $("#file-name").textContent = file.name;
     await guarded(async () => {
-      state.preview = await api("/api/preview", { method: "POST", body: file });
+      if (!(await loadPreview())) return;
       const g = guessColumns();
       fillSelects({ "#col-value": g.value, "#col-subgroup": g.subgroup, "#col-timestamp": g.timestamp });
-      renderDetected();
-      refreshImportForm();
+      renderAllImport();
       $("#import-form").hidden = false;
+    });
+  }
+  async function repreview() {  // another sheet or header line: the columns change, the choices are made again
+    clearError();
+    await guarded(async () => {
+      if (!(await loadPreview())) return;
+      const g = guessColumns();
+      fillSelects({ "#col-value": g.value, "#col-subgroup": g.subgroup, "#col-timestamp": g.timestamp });
+      renderAllImport();
+    });
+  }
+  function setTagChecks(list) {
+    const want = new Set(list);
+    $$("#col-tags input").forEach((i) => { i.checked = want.has(i.value); });
+  }
+  async function applyTemplate(id) {
+    if (!state.preview) return;
+    if (!id) { state.imp.template = null; renderImportSource(); return; }
+    const tpl = state.preview.templates.find((x) => x.id === id);
+    if (!tpl) return;
+    clearError();
+    await guarded(async () => {
+      const same = state.imp.sheet === (tpl.sheet || "") && state.imp.headerRow === tpl.header_row && state.imp.encoding === tpl.encoding && state.imp.delimiter === tpl.delimiter;
+      state.imp = { sheet: tpl.sheet || "", headerRow: tpl.header_row, encoding: tpl.encoding, delimiter: tpl.delimiter, template: id };
+      if (!same && !(await loadPreview())) return;
+      $("#decimal").value = tpl.decimal;
+      $("#missing").value = tpl.missing;
+      const c = tpl.columns;
+      fillSelects({ "#col-value": c.value, "#col-subgroup": c.subgroup, "#col-timestamp": c.timestamp, "#col-valid": c.valid,
+        "#col-reason": c.invalid_reason, "#col-by": c.invalid_by, "#col-at": c.invalid_at, "#col-source-row": c.source_row });
+      state.imp.template = id;
+      $("#tpl-name").value = tpl.name;
+      renderTagChecks();
+      setTagChecks(tpl.tags);
+      renderAllImport();
+    });
+  }
+  function importColumns() {
+    const map = { value: "#col-value", subgroup: "#col-subgroup", timestamp: "#col-timestamp", valid: "#col-valid",
+      invalid_reason: "#col-reason", invalid_by: "#col-by", invalid_at: "#col-at", source_row: "#col-source-row" };
+    const out = {};
+    for (const [k, sel] of Object.entries(map)) out[k] = $(sel).value;
+    return out;
+  }
+  async function saveTemplate() {
+    if (!state.preview) return;
+    const name = $("#tpl-name").value.trim();
+    if (!name) return showError({ code: "no_template_name", params: {} });
+    if (!$("#col-value").value) return showError({ code: "no_value_column", params: {} });
+    const pv = state.preview;
+    const record = {
+      name, format: pv.kind, sheet: pv.kind === "xlsx" ? (pv.sheet || "") : "", header_row: state.imp.headerRow,
+      delimiter: pv.kind === "csv" ? state.imp.delimiter : "", decimal: $("#decimal").value,
+      encoding: pv.kind === "csv" ? state.imp.encoding : "auto", missing: $("#missing").value,
+      columns: importColumns(), tags: $$("#col-tags input").filter((i) => i.checked).map((i) => i.value),
+    };
+    const known = pv.templates.find((x) => x.id === state.imp.template);
+    clearError();
+    await guarded(async () => {
+      const saved = known && known.name.toLowerCase() === name.toLowerCase()
+        ? await api(`/api/import-templates/${known.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record }) })
+        : await post("/api/import-templates", { record });
+      state.imp.template = saved.id;
+      if (!(await loadPreview())) return;
+      renderImportSource();
+      $("#template-note").textContent = t("import.template_saved", { name: saved.name });
+    });
+  }
+  async function deleteTemplate() {
+    const known = state.preview && state.preview.templates.find((x) => x.id === state.imp.template);
+    if (!known || !window.confirm(t("import.template_confirm_delete", { name: known.name }))) return;
+    clearError();
+    await guarded(async () => {
+      await api(`/api/import-templates/${known.id}`, { method: "DELETE" });
+      state.imp.template = null;
+      $("#tpl-name").value = "";
+      if (!(await loadPreview())) return;
+      renderImportSource();
     });
   }
   async function doImport() {
     if (!state.file) return showError({ code: "no_file", params: {} });
     if (!$("#col-value").value) return showError({ code: "no_value_column", params: {} });
     const q = new URLSearchParams();
-    const map = { value: "#col-value", subgroup: "#col-subgroup", timestamp: "#col-timestamp", valid: "#col-valid",
-      invalid_reason: "#col-reason", invalid_by: "#col-by", invalid_at: "#col-at", source_row: "#col-source-row" };
-    for (const [k, sel] of Object.entries(map)) { const v = $(sel).value; if (v) q.set(k, v); }
+    for (const [k, v] of Object.entries(importColumns())) if (v) q.set(k, v);
     $$("#col-tags input").filter((i) => i.checked).forEach((i) => q.append("tags", i.value));
     q.set("decimal", $("#decimal").value);
     q.set("missing", $("#missing").value);
     q.set("filename", state.file.name);
+    q.set("header_row", String(state.imp.headerRow));
+    q.set("encoding", state.imp.encoding);
+    if (state.imp.delimiter) q.set("delimiter", state.imp.delimiter);
+    if (state.preview.kind === "xlsx" && state.preview.sheet) q.set("sheet", state.preview.sheet);
     await guarded(async () => {
       const ds = await api("/api/datasets?" + q.toString(), { method: "POST", body: state.file });
       $("#file-name").textContent = t("import.done", { n: ds.summary.n_total, name: state.file.name });
@@ -3788,7 +3914,7 @@
   function rerender() {
     setExcelLink();
     applyStatic();
-    if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); refreshImportForm(); }
+    if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); renderImportSource(); refreshImportForm(); }
     if (state.dataset) renderData();
     if (state.result) renderResult();
     if (state.user) { fillMsaSelect($("#rp-msa"), $("#rp-msa").value); fillReportPlanSelect(); fillReportStudySelect(); }
@@ -3820,10 +3946,15 @@
   function wire() {
     $("#lang").addEventListener("change", (e) => setLanguage(e.target.value));
     $$("nav.tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
-    $("#file").addEventListener("change", (e) => onFileChosen(e.target.files[0]));
+    $("#file").addEventListener("change", (e) => importSerial(() => onFileChosen(e.target.files[0])));
     ROLE_SELECTS.forEach((s) => $(s).addEventListener("change", refreshImportForm));
     $("#decimal").addEventListener("change", () => { if (state.preview) { const g = guessColumns(); if (!$("#col-value").value && g.value) { $("#col-value").value = g.value; refreshImportForm(); } } });
     $("#import-btn").addEventListener("click", doImport);
+    $("#import-sheet").addEventListener("change", (e) => { state.imp.sheet = e.target.value; state.imp.template = null; importSerial(repreview); });
+    $("#import-header-row").addEventListener("change", (e) => { const n = parseInt(e.target.value, 10); state.imp.headerRow = n >= 1 && n <= 1000 ? n : 1; state.imp.template = null; importSerial(repreview); });
+    $("#import-template").addEventListener("change", (e) => importSerial(() => applyTemplate(e.target.value ? parseInt(e.target.value, 10) : null)));
+    $("#tpl-save").addEventListener("click", saveTemplate);
+    $("#tpl-delete").addEventListener("click", deleteTemplate);
     $("#prev").addEventListener("click", () => gotoPage(-1));
     $("#next").addEventListener("click", () => gotoPage(1));
     $("#suspect-btn").addEventListener("click", findSuspects);

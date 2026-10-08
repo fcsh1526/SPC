@@ -75,7 +75,7 @@ def _decode(raw: bytes, encoding: str) -> tuple[str, str]:
     if encoding != "auto":
         try:
             return raw.decode(encoding), encoding
-        except UnicodeDecodeError as exc:
+        except (UnicodeDecodeError, LookupError) as exc:
             raise DataImportError([ImportIssue(None, None, "encoding", f"cannot decode the file as {encoding}: {exc}")])
     for enc in ("utf-8-sig", "cp950"):
         try:
@@ -85,13 +85,26 @@ def _decode(raw: bytes, encoding: str) -> tuple[str, str]:
     raise DataImportError([ImportIssue(None, None, "encoding", "cannot decode the file as UTF-8 or Big5 (cp950)")])
 
 
-def _sniff_delimiter(text: str) -> str:
+def _sniff_delimiter(text: str, header_row: int = 1) -> str:
     """Pick the delimiter that occurs most often in the header line. Data rows are not used,
     because a decimal comma would mislead the choice."""
-    first = text.splitlines()[0] if text else ""
+    lines = text.splitlines()
+    first = lines[header_row - 1] if 0 < header_row <= len(lines) else ""
     counts = {d: first.count(d) for d in DELIMITERS}
     best = max(counts, key=counts.get)
     return best if counts[best] else ","
+
+
+def _read_header(reader, header_row: int) -> list[str]:
+    """Skip the lines above the header (titles, notes of an export) and return the header."""
+    if header_row < 1:
+        raise ValueError("header_row must be 1 or more")
+    try:
+        while reader.line_num < header_row - 1:
+            next(reader)
+        return [h.strip() for h in next(reader)]
+    except StopIteration:
+        raise DataImportError([ImportIssue(None, None, "empty", "the file is empty" if header_row == 1 else f"the file has no header at line {header_row}")])
 
 
 def _parse_number(text: str, decimal: str) -> float | None:
@@ -131,6 +144,7 @@ def load_csv(
     encoding: str = "auto",
     missing: str = "error",
     timestamp_formats: Sequence[str] = DEFAULT_TIMESTAMP_FORMATS,
+    header_row: int = 1,
 ) -> Dataset:
     """Read a CSV file (path or bytes) into a Dataset.
 
@@ -140,6 +154,9 @@ def load_csv(
     A `valid` column (1/0, yes/no, 是/否 ...) re-creates invalid marks. An invalid row needs a
     reason in `invalid_reason`. The mark's author and time come from `invalid_by` and
     `invalid_at` if present, otherwise "import" and the import time.
+
+    `header_row` is the line of the header; lines above it are left out. Row numbers stay the line
+    numbers of the file.
     """
     if decimal not in (".", ","):
         raise ValueError("decimal must be '.' or ','")
@@ -151,13 +168,10 @@ def load_csv(
         path = Path(source)
         raw, name = path.read_bytes(), path.name
     text, used_encoding = _decode(raw, encoding)
-    delim = delimiter or _sniff_delimiter(text)
+    delim = delimiter or _sniff_delimiter(text, header_row)
 
     reader = csv.reader(io.StringIO(text), delimiter=delim)
-    try:
-        header = [h.strip() for h in next(reader)]
-    except StopIteration:
-        raise DataImportError([ImportIssue(None, None, "empty", "the file is empty")])
+    header = _read_header(reader, header_row)
     issues: list[ImportIssue] = []
     if len(set(header)) != len(header):
         dup = sorted({h for h in header if header.count(h) > 1})
@@ -292,16 +306,14 @@ def preview_csv(
     delimiter: str | None = None,
     encoding: str = "auto",
     n_rows: int = 8,
+    header_row: int = 1,
 ) -> dict:
     """Header and first rows of a file, so the user can choose the columns before importing."""
     raw = bytes(source) if isinstance(source, (bytes, bytearray)) else Path(source).read_bytes()
     text, used_encoding = _decode(raw, encoding)
-    delim = delimiter or _sniff_delimiter(text)
+    delim = delimiter or _sniff_delimiter(text, header_row)
     reader = csv.reader(io.StringIO(text), delimiter=delim)
-    try:
-        header = [h.strip() for h in next(reader)]
-    except StopIteration:
-        raise DataImportError([ImportIssue(None, None, "empty", "the file is empty")])
+    header = _read_header(reader, header_row)
     rows = []
     for row in reader:
         if not any(c.strip() for c in row):

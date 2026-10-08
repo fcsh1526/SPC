@@ -108,7 +108,9 @@ def test_every_backend_code_has_a_text(messages):
     csv_src = (ROOT / "data" / "csv_io.py").read_text(encoding="utf-8")
     issue_codes = set(re.findall(r'ImportIssue\([^"\n]*"(\w+)",\s*[f]?"', csv_src))
     issue_codes |= set(re.findall(r'ImportIssue\([^\n]*?,\s*"([a-z_]+)",\s*f?"', csv_src))
-    assert {"bad_number", "missing_value", "missing_column", "encoding"} <= issue_codes
+    xlsx_src = (ROOT / "data" / "xlsx_io.py").read_text(encoding="utf-8")
+    issue_codes |= set(re.findall(r'_fail\(\s*"(\w+)"', xlsx_src))
+    assert {"bad_number", "missing_value", "missing_column", "encoding", "sheet_not_found", "xlsx_unreadable"} <= issue_codes
     for code in issue_codes:
         assert f"issue.{code}" in en, f"issue.{code}"
 

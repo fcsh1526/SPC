@@ -2232,3 +2232,76 @@ def test_an_improvement_cycle_in_the_browser(server, browser):
     expect(page.locator("#imp-list")).to_contain_text("Fewer rejects of the bore", timeout=20000)
     assert problems == []
     ctx.close()
+
+
+def test_excel_import_saves_a_template_and_uses_it_for_the_next_file(server, browser, tmp_path):
+    """An Excel file with notes above the column names: choose the sheet and line, save the template, and the
+    next file (columns in another order) is filled in by choosing the template."""
+    from openpyxl import Workbook
+
+    expect = playwright_sync.expect
+
+    def book(path, order):
+        rng = np.random.default_rng(7)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Notes"
+        ws.append(["nothing here"])
+        data = wb.create_sheet("CMM")
+        data.append(["Line 4 report"])
+        data.append([])
+        cols = {"批號": lambda g: f"B{g // 5 + 1:02d}", "直徑": lambda g: round(10 + float(rng.normal(0, 0.1)), 4), "機台": lambda g: f"M{g % 2 + 1}"}
+        data.append(order)
+        for g in range(50):
+            data.append([cols[c](g) for c in order])
+        wb.save(path)
+        return path
+
+    first = book(tmp_path / "first.xlsx", ["批號", "直徑", "機台"])
+    second = book(tmp_path / "second.xlsx", ["機台", "直徑", "批號"])
+
+    ctx = browser.new_context(viewport={"width": 1200, "height": 900}, locale="zh-TW")
+    page = ctx.new_page()
+    problems = []
+    page.on("console", lambda m: problems.append(m.text) if m.type == "error" else None)
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+
+    page.set_input_files("#file", str(first))
+    expect(page.locator("#detected")).to_contain_text("Excel")
+    expect(page.locator("#sheet-wrap")).to_be_visible()
+    page.select_option("#import-sheet", "CMM")
+    expect(page.locator("#detected")).to_contain_text("CMM")
+    page.fill("#import-header-row", "3")
+    page.press("#import-header-row", "Tab")
+    expect(page.locator("#col-value")).to_have_value("直徑")  # the columns are read again from the new header line
+    expect(page.locator("#col-subgroup")).to_have_value("批號")
+    expect(page.locator("#template-note")).to_contain_text("沒有符合")
+    page.locator("#tab-import details summary", has_text="存成匯入範本").click()
+    page.fill("#tpl-name", "第四線三次元")
+    page.locator("#col-tags input[value=機台]").check()
+    page.click("#tpl-save")
+    expect(page.locator("#template-note")).to_contain_text("已儲存範本")
+    expect(page.locator("#import-template")).to_have_value(page.locator("#import-template option").nth(1).get_attribute("value"))
+    page.click("#import-btn")
+    expect(page.locator("#data-counts")).to_contain_text("共 50 筆")
+
+    # the next file: choose the template, nothing else
+    page.click("nav.tabs button[data-tab=import]")
+    page.set_input_files("#file", str(second))
+    expect(page.locator("#detected")).to_contain_text("Excel")
+    page.select_option("#import-sheet", "CMM")
+    expect(page.locator("#detected")).to_contain_text("CMM")
+    page.fill("#import-header-row", "3")
+    page.press("#import-header-row", "Tab")
+    expect(page.locator("#col-value")).to_have_value("直徑")  # the file is read again from line 3
+    expect(page.locator("#template-note")).to_contain_text("1 個已存的範本符合")
+    page.select_option("#import-template", label="第四線三次元")
+    expect(page.locator("#col-value")).to_have_value("直徑")
+    expect(page.locator("#col-subgroup")).to_have_value("批號")
+    expect(page.locator("#col-tags input[value=機台]")).to_be_checked()
+    page.click("#import-btn")
+    expect(page.locator("#data-counts")).to_contain_text("共 50 筆")
+    assert problems == []
+    ctx.close()

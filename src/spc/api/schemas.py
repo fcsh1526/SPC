@@ -401,6 +401,12 @@ class ImprovementBody(Strict):
     record: dict
 
 
+class ImportTemplateBody(Strict):
+    """An import template (checked in spc.data.templates.validate_template)."""
+
+    record: dict
+
+
 class ImprovementTextBody(Strict):
     text: str = Field(max_length=2000)
 

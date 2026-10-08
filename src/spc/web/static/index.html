@@ -76,13 +76,19 @@
   <p data-i18n="import.intro"></p>
   <p>
     <label class="filebtn">
-      <input type="file" id="file" accept=".csv,.txt,text/csv">
+      <input type="file" id="file" accept=".csv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
       <span data-i18n="import.choose"></span>
     </label>
     <span id="file-name" class="muted" data-i18n="import.no_file"></span>
   </p>
   <div id="import-form" hidden>
     <p id="detected" class="muted"></p>
+    <div class="form-grid">
+      <label id="sheet-wrap" hidden><span data-i18n="import.sheet"></span><select id="import-sheet"></select></label>
+      <label><span data-i18n="import.header_row"></span><input type="number" id="import-header-row" min="1" max="1000" value="1"></label>
+      <label><span data-i18n="import.template"></span><select id="import-template"></select></label>
+    </div>
+    <p id="template-note" class="muted"></p>
     <h3 data-i18n="import.preview"></h3>
     <div class="scroll"><table id="preview" class="grid"></table></div>
     <div class="form-grid">
@@ -113,6 +119,17 @@
         <label><span data-i18n="import.col_at"></span><select id="col-at"></select></label>
         <label><span data-i18n="import.col_source_row"></span><select id="col-source-row"></select></label>
       </div>
+    </details>
+    <details>
+      <summary data-i18n="import.template_save"></summary>
+      <p class="muted" data-i18n="import.template_hint"></p>
+      <div class="form-grid">
+        <label><span data-i18n="import.template_name"></span><input type="text" id="tpl-name" maxlength="80"></label>
+      </div>
+      <p>
+        <button id="tpl-save" data-i18n="import.template_save_btn"></button>
+        <button id="tpl-delete" data-i18n="import.template_delete" hidden></button>
+      </p>
     </details>
     <p><button id="import-btn" class="primary" data-i18n="import.submit"></button></p>
   </div>
