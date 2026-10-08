@@ -2092,6 +2092,66 @@ def test_aiag_bias_range_signal_detection_and_analytic_studies_in_the_browser(se
     ctx.close()
 
 
+def test_d_optimal_and_mixture_designs_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=tools]")
+    page.locator("#doe-card details summary").click()
+    # D-optimal: 8 runs for 3 factors is orthogonal; a limit removes points
+    page.select_option("#dp-kind", "d_optimal")
+    expect(page.locator("#dp-model-wrap")).to_be_visible()
+    expect(page.locator("#dp-limits-wrap")).to_be_visible()
+    expect(page.locator("#dp-gen-wrap")).to_be_hidden()
+    page.fill("#dp-k", "3")
+    page.fill("#dp-runs", "8")
+    page.click("#dp-run")
+    expect(page.locator("#dp-out")).to_contain_text("D-efficiency 100 %", timeout=20000)
+    expect(page.locator("#dp-out table tr")).to_have_count(9)
+    page.fill("#dp-k", "2")
+    page.select_option("#dp-levels", "3")
+    page.fill("#dp-runs", "5")
+    page.fill("#dp-limits", "1 1 <= 1")
+    page.click("#dp-run")
+    expect(page.locator("#dp-out")).to_contain_text("chosen from 8 allowed points", timeout=20000)
+    page.fill("#dp-limits", "1 <= 1")
+    page.click("#dp-run")
+    expect(page.locator("#errors")).to_contain_text("needs 2 coefficients", timeout=20000)
+    page.fill("#dp-limits", "")
+    # mixture plans
+    page.select_option("#dp-kind", "mixture_lattice")
+    expect(page.locator("#dp-degree-wrap")).to_be_visible()
+    expect(page.locator("#dp-model-wrap")).to_be_hidden()
+    page.fill("#dp-k", "3")
+    page.fill("#dp-degree", "2")
+    page.fill("#dp-center", "0")
+    page.click("#dp-run")
+    expect(page.locator("#dp-out")).to_contain_text("Mixture, simplex lattice, 3 factors, 6 runs", timeout=20000)
+    page.select_option("#dp-kind", "mixture_d_optimal")
+    expect(page.locator("#dp-upper-wrap")).to_be_visible()
+    page.fill("#dp-runs", "6")
+    page.click("#dp-run")
+    expect(page.locator("#dp-out")).to_contain_text("Mixture, D-optimal blends, 3 factors, 6 runs", timeout=20000)
+    # the analysis of a mixture experiment (yarn elongation)
+    page.select_option("#doe-mode", "mixture")
+    expect(page.locator("#doe-mmodel-wrap")).to_be_visible()
+    rows = ["y A B C"]
+    for pt, vals in ((((1, 0, 0)), [11.0, 12.4]), ((0, 1, 0), [8.8, 10.0]), ((0, 0, 1), [16.8, 16.0]), ((.5, .5, 0), [15.0, 14.8, 16.1]), ((.5, 0, .5), [17.7, 16.4, 16.6]), ((0, .5, .5), [10.0, 9.7, 11.8])):
+        for v in vals:
+            rows.append(f"{v} " + " ".join(str(x) for x in pt))
+    page.fill("#doe-data", "\n".join(rows))
+    page.click("#doe-run")
+    expect(page.locator("#doe-out table tr:has(td:text-is('A:B'))")).to_contain_text("19", timeout=20000)
+    expect(page.locator("#doe-out table tr:has(td:text-is('B:C'))")).to_contain_text("antagonistic")
+    expect(page.locator("#doe-out")).to_contain_text("Highest predicted response")
+    assert problems == []
+    ctx.close()
+
+
 def test_pooled_grr_gage_r_and_the_msa_calculators_in_the_browser(server, browser):
     import numpy as np
 

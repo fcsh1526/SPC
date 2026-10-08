@@ -3776,6 +3776,7 @@
     r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("sc.warn_" + w.code, w))));
     box.appendChild(el("p", "muted", t("sc.note_" + body.kind)));
   }
+  $("#doe-mode").addEventListener("change", () => { $("#doe-mmodel-wrap").hidden = $("#doe-mode").value !== "mixture"; });
   async function runDoe() {
     const mode = $("#doe-mode").value;
     const rows = numRows($("#doe-data").value);
@@ -3788,7 +3789,8 @@
       body.y.push(y);
       names.slice(1).forEach((n, i) => body.factors[n].push(mode === "regression" || mode === "surface" || r[i + 1] === "" || !Number.isNaN(Number(r[i + 1])) ? Number(r[i + 1]) : r[i + 1]));
     }
-    if ((mode === "regression" || mode === "surface") && Object.values(body.factors).some((c) => c.some((v) => !Number.isFinite(v)))) return bad(t("doe.bad"));
+    if ((mode === "regression" || mode === "surface" || mode === "mixture") && Object.values(body.factors).some((c) => c.some((v) => !Number.isFinite(v)))) return bad(t("doe.bad"));
+    if (mode === "mixture") { body.components = body.factors; delete body.factors; body.model = $("#doe-mmodel").value; }
     let r = null;
     await guarded(async () => { r = await post("/api/doe/" + mode, body); });
     const box = $("#doe-out"); box.replaceChildren();
@@ -3806,6 +3808,20 @@
       box.appendChild(table([t("doe.factor"), t("doe.coefficient"), t("doe.se"), t("doe.t"), t("doe.p"), t("doe.ci"), t("doe.std"), t("doe.vif"), t("doe.rank")],
         all.map((x) => [x.factor, sig(x.coefficient, 5), sig(x.se, 4), sig(x.t, 4), sig(x.p_value, 3), `${sig(x.ci[0], 4)} … ${sig(x.ci[1], 4)}`,
           x.standardised == null ? "" : sig(x.standardised, 3), x.vif == null ? "" : sig(x.vif, 3), x.rank ?? ""])));
+    } else if (mode === "mixture") {
+      box.appendChild(el("p", "", t("doe.reg_summary", { r2: sig(r.r2, 4), r2a: sig(r.r2_adjusted, 4), f: sig(r.anova[0].f, 4), p: sig(r.anova[0].p_value, 3), s: sig(r.sigma, 4), df: r.df_error })));
+      if (r.r2_predicted != null) box.appendChild(el("p", "", t("doe.sr_pred", { r2p: sig(r.r2_predicted, 4) })));
+      box.appendChild(table([t("doe.term"), t("doe.coefficient"), t("doe.se"), t("doe.t"), t("doe.p"), t("doe.ci"), t("doe.mix_blending")],
+        r.terms.map((x) => [x.term, sig(x.coefficient, 5), sig(x.se, 4), sig(x.t, 4), sig(x.p_value, 3), `${sig(x.ci[0], 4)} … ${sig(x.ci[1], 4)}`, x.blending ? t("doe.mix_" + x.blending) : ""])));
+      box.appendChild(table([t("doe.sr_source"), t("doe.sr_df"), t("doe.ss"), t("doe.sr_ms"), t("doe.f"), t("doe.p")],
+        r.anova.map((x) => [t("doe.msrc_" + x.source), x.df, sig(x.ss, 5), x.ms == null ? "" : sig(x.ms, 5), x.f == null ? "" : sig(x.f, 4), x.p_value == null ? "" : sig(x.p_value, 3)])));
+      if (r.lack_of_fit) box.appendChild(el("p", "", t("doe.sr_lack", { df1: r.lack_of_fit.df_lack, df2: r.lack_of_fit.df_pure, f: sig(r.lack_of_fit.f, 4), p: sig(r.lack_of_fit.p_value, 3) })));
+      const blend = (b) => Object.entries(b).map(([k, v]) => `${k} = ${sig(v, 4)}`).join(", ");
+      if (r.best) {
+        box.appendChild(el("p", "strong", t("doe.mix_max", { blend: blend(r.best.maximum.blend), y: sig(r.best.maximum.response, 5) })));
+        box.appendChild(el("p", "strong", t("doe.mix_min", { blend: blend(r.best.minimum.blend), y: sig(r.best.minimum.response, 5) })));
+        box.appendChild(el("p", "muted", t("doe.mix_best_note")));
+      }
     } else if (mode === "surface") {
       box.appendChild(el("p", "", t("doe.reg_summary", { r2: sig(r.r2, 4), r2a: sig(r.r2_adjusted, 4), f: sig(r.anova[0].f, 4), p: sig(r.anova[0].p_value, 3), s: sig(r.sigma, 4), df: r.df_error })));
       if (r.r2_predicted != null) box.appendChild(el("p", "", t("doe.sr_pred", { r2p: sig(r.r2_predicted, 4) })));
@@ -3897,11 +3913,57 @@
     const kind = $("#dp-kind").value;
     $("#dp-gen-wrap").hidden = kind !== "fractional";
     $("#dp-axial-wrap").hidden = kind !== "central_composite";
-    $("#dp-center-wrap").hidden = kind !== "central_composite" && kind !== "box_behnken";
+    $("#dp-center-wrap").hidden = !["central_composite", "box_behnken", "mixture_lattice", "mixture_centroid"].includes(kind);
+    $("#dp-model-wrap").hidden = kind !== "d_optimal";
+    $("#dp-mmodel-wrap").hidden = kind !== "mixture_d_optimal";
+    $("#dp-runs-wrap").hidden = kind !== "d_optimal" && kind !== "mixture_d_optimal";
+    $("#dp-levels-wrap").hidden = kind !== "d_optimal";
+    $("#dp-limits-wrap").hidden = kind !== "d_optimal";
+    $("#dp-degree-wrap").hidden = kind !== "mixture_lattice";
+    $("#dp-axial-check-wrap").hidden = kind !== "mixture_centroid";
+    $("#dp-lower-wrap").hidden = !kind.startsWith("mixture");
+    $("#dp-upper-wrap").hidden = kind !== "mixture_d_optimal";
+  }
+  function readDoeLimits(k) {  // one limit per line: a coefficient for each factor, then <= or >=, then the limit
+    return $("#dp-limits").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+      const m = l.match(/^(.*?)\s*(<=|>=)\s*(\S+)$/);
+      const coef = m ? m[1].split(/[\s,;]+/).filter(Boolean).map(Number) : [];
+      const limit = m ? Number(m[3]) : NaN;
+      if (!m || coef.length !== k || coef.some((v) => !Number.isFinite(v)) || !Number.isFinite(limit)) throw new Error(t("doe.plan_bad_limit", { line: l, k }));
+      return { coefficients: coef, op: m[2], limit };
+    });
   }
   async function runDoePlan() {
     const kind = $("#dp-kind").value;
+    const bad = (m) => showError({ code: "invalid_input", message: m, params: { message: m } });
     const body = { kind, k: Number($("#dp-k").value) };
+    let path = "/api/doe/design";
+    const seed0 = $("#dp-seed").value.trim();
+    const nums = (id) => $(id).value.trim().split(/[\s,;]+/).filter(Boolean).map(Number);
+    if (kind === "d_optimal") {
+      path = "/api/doe/optimal";
+      body.model = $("#dp-model").value;
+      delete body.kind;
+      const runs = $("#dp-runs").value.trim(); if (runs) body.n_runs = Number(runs);
+      const lv = $("#dp-levels").value; if (lv) body.levels = Number(lv);
+      try { body.constraints = readDoeLimits(body.k); } catch (e) { return bad(e.message); }
+      if (seed0 !== "") body.seed = Number(seed0);
+    } else if (kind.startsWith("mixture")) {
+      path = "/api/doe/mixture-design";
+      delete body.k;
+      body.q = Number($("#dp-k").value);
+      body.kind = kind.slice(8);
+      const lower = nums("#dp-lower"); if (lower.length) body.lower = lower;
+      if (kind === "mixture_lattice") body.degree = Number($("#dp-degree").value);
+      if (kind === "mixture_centroid") body.axial = $("#dp-axial-check").checked;
+      if (kind !== "mixture_d_optimal") body.center = Number($("#dp-center").value);
+      if (kind === "mixture_d_optimal") {
+        body.model = $("#dp-mmodel").value;
+        const runs = $("#dp-runs").value.trim(); if (runs) body.n_runs = Number(runs);
+        const upper = nums("#dp-upper"); if (upper.length) body.upper = upper;
+      }
+      if (seed0 !== "") body.seed = Number(seed0);
+    }
     const gen = $("#dp-gen").value.trim();
     if (kind === "fractional" && gen) body.generators = gen.split(/[\s,;]+/).filter(Boolean);
     if (kind === "central_composite") body.axial = $("#dp-axial").value;
@@ -3909,12 +3971,18 @@
     const seed = $("#dp-seed").value.trim();
     if (seed !== "") body.seed = Number(seed);
     let r = null;
-    await guarded(async () => { r = await post("/api/doe/design", body); });
+    await guarded(async () => { r = await post(path, body); });
     const box = $("#dp-out"); box.replaceChildren();
     if (!r) return;
-    const lines = [t("doe.plan_summary", { kind: t("doe.plan_kind_" + r.kind), k: r.k, n: r.n_runs })];
+    if (r.components) r.factors = r.components;
+    const lines = [t("doe.plan_summary", { kind: t("doe.plan_kind_" + r.kind), k: r.k ?? r.q, n: r.n_runs })];
     if (r.kind === "fractional") lines.push(t("doe.plan_fraction", { generators: r.generators.join(", "), relation: "I = " + r.defining_relation.join(" = "), res: r.resolution }));
     if (r.kind === "central_composite") lines.push(t("doe.plan_ccd", { alpha: sig(r.alpha, 5), cube: r.n_cube, axial: r.n_axial, center: r.n_center }));
+    if (r.kind === "d_optimal" || r.kind === "mixture_d_optimal") {
+      lines.push(t("doe.plan_dopt", { model: t("doe.plan_model_" + r.model), p: r.n_terms, cand: r.n_candidates, deff: sig(100 * r.d_efficiency, 4), geff: sig(100 * r.g_efficiency, 4), maxv: sig(r.max_prediction_variance, 4), best: r.starts_best, starts: r.starts_valid, distinct: r.distinct_points }));
+      if (r.max_abs_correlation != null) lines.push(t("doe.plan_corr", { r: sig(r.max_abs_correlation, 3) }));
+    }
+    if (r.kind === "mixture_lattice" || r.kind === "mixture_centroid") lines.push(t("doe.plan_mixture_terms", { lin: r.max_terms.linear, quad: r.max_terms.quadratic, cubic: r.max_terms.special_cubic }));
     lines.forEach((l) => box.appendChild(el("p", "", l)));
     if (r.kind === "fractional") box.appendChild(el("p", "muted", t("doe.plan_aliases") + " " + r.aliases.map((c) => c.terms.join(" = ")).join(";  ")));
     const tb = el("table"), head = el("tr");

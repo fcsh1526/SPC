@@ -33,7 +33,7 @@ from spc.api.equipment import add_equipment_routes
 from spc.api.signing import add_signing_routes
 from spc.signing.core import SigningError
 from spc.signing.service import SigningService
-from spc.core import doe, gdt, sampling_plan, multistage as mstage, multivariate_perf as mvperf
+from spc.core import doe, doe_optimal, gdt, sampling_plan, multistage as mstage, multivariate_perf as mvperf
 from spc.service.special import cavity_study, coverage_for_dataset, multistage_for_dataset, nested_for_dataset, special_snapshot, trend_for_dataset
 from spc.service.state_tests import multistate_for_dataset, state_tests_for_dataset
 from spc.equipment.model import EquipmentError
@@ -60,6 +60,9 @@ from spc.api.schemas import (
     RandomPlanBody,
     DoeBody,
     DoeDesignBody,
+    DoeOptimalBody,
+    MixtureBody,
+    MixtureDesignBody,
     ChartGuideBody,
     SpecialChartBody,
     MultivariateBody,
@@ -987,6 +990,32 @@ def create_app(
             if body.kind == "central_composite":
                 return doe.central_composite(body.k, body.axial, 5 if body.center is None else body.center, body.seed)
             return doe.box_behnken(body.k, 3 if body.center is None else body.center, body.seed)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/doe/optimal")
+    def doe_optimal_design(body: DoeOptimalBody):
+        """A D-optimal design (Fedorov exchange): n runs of the allowed points that estimate the model best; optional linear limits on the coded factors."""
+        try:
+            return doe_optimal.d_optimal(body.k, body.model, body.n_runs, body.levels, [c.model_dump() for c in body.constraints], body.seed, body.starts)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/doe/mixture-design")
+    def doe_mixture_design(body: MixtureDesignBody):
+        """The plan of a mixture experiment: simplex lattice, simplex centroid (with axial and centre runs), or D-optimal blends inside component limits."""
+        try:
+            if body.kind == "d_optimal":
+                return doe_optimal.mixture_d_optimal(body.q, body.model, body.n_runs, body.lower, body.upper, body.m, body.seed, body.starts)
+            return doe_optimal.mixture_design(body.q, body.kind, body.degree, body.lower, body.center, body.axial, body.seed)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/doe/mixture")
+    def doe_mixture(body: MixtureBody):
+        """Scheffé polynomial of a mixture experiment: coefficients, analysis of variance, lack of fit and the best blends in the range that was run."""
+        try:
+            return doe_optimal.mixture(body.y, body.components, body.model, body.alpha)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 

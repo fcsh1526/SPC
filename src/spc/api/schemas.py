@@ -139,6 +139,50 @@ class DoeDesignBody(Strict):
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
 
+class DoeLimitBody(Strict):
+    """A linear limit on coded factors: sum(coefficient_i * x_i) <= (or >=) limit."""
+
+    coefficients: list[float] = Field(min_length=2, max_length=8)
+    op: Literal["<=", ">="] = "<="
+    limit: float
+
+
+class DoeOptimalBody(Strict):
+    """A D-optimal design of n runs for a model, chosen from the allowed points of coded factors."""
+
+    k: int = Field(ge=2, le=8)
+    model: Literal["main", "interaction", "quadratic"] = "main"
+    n_runs: int | None = Field(default=None, ge=2, le=200)
+    levels: Literal[2, 3, 5] | None = None
+    constraints: list[DoeLimitBody] = Field(default_factory=list, max_length=10)
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 2)
+    starts: int = Field(default=30, ge=1, le=100)
+
+
+class MixtureDesignBody(Strict):
+    """A plan for a mixture experiment: components are proportions that add up to 1."""
+
+    kind: Literal["lattice", "centroid", "d_optimal"]
+    q: int = Field(ge=2, le=8)
+    degree: int = Field(default=2, ge=1, le=6)
+    model: Literal["linear", "quadratic", "special_cubic"] = "quadratic"
+    n_runs: int | None = Field(default=None, ge=2, le=200)
+    lower: list[float] | None = Field(default=None, max_length=8)
+    upper: list[float] | None = Field(default=None, max_length=8)
+    center: int = Field(default=0, ge=0, le=30)
+    axial: bool = False
+    m: int | None = Field(default=None, ge=2, le=40)
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 2)
+    starts: int = Field(default=30, ge=1, le=100)
+
+
+class MixtureBody(Strict):
+    y: list[float] = Field(min_length=4, max_length=5000)
+    components: dict[str, list[float]] = Field(min_length=2, max_length=8)
+    model: Literal["linear", "quadratic", "special_cubic"] = "quadratic"
+    alpha: float = Field(default=0.05, gt=0, lt=0.5)
+
+
 class AnchorBody(Strict):
     entries: int = Field(ge=0, le=10**9)
     last_hash: str = Field(pattern="^[0-9a-f]{64}$")

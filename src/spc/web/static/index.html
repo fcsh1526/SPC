@@ -528,7 +528,9 @@
     <p class="note" data-i18n="doe.intro"></p>
     <div class="form-grid">
       <label><span data-i18n="doe.mode"></span>
-        <select id="doe-mode"><option value="regression" data-i18n="doe.mode_regression"></option><option value="factorial" data-i18n="doe.mode_factorial"></option><option value="fractional" data-i18n="doe.mode_fractional"></option><option value="surface" data-i18n="doe.mode_surface"></option></select></label>
+        <select id="doe-mode"><option value="regression" data-i18n="doe.mode_regression"></option><option value="factorial" data-i18n="doe.mode_factorial"></option><option value="fractional" data-i18n="doe.mode_fractional"></option><option value="surface" data-i18n="doe.mode_surface"></option><option value="mixture" data-i18n="doe.mode_mixture"></option></select></label>
+      <label id="doe-mmodel-wrap" hidden><span data-i18n="doe.mix_model"></span>
+        <select id="doe-mmodel"><option value="linear" data-i18n="doe.mix_model_linear"></option><option value="quadratic" selected data-i18n="doe.mix_model_quadratic"></option><option value="special_cubic" data-i18n="doe.mix_model_special_cubic"></option></select></label>
       <label><span data-i18n="sc.alpha"></span>
         <select id="doe-alpha"><option value="0.05" selected>5 %</option><option value="0.01">1 %</option><option value="0.10">10 %</option></select></label>
       <label class="wide"><span data-i18n="doe.data"></span><textarea id="doe-data" rows="10" spellcheck="false" placeholder="y A B&#10;28 -1 -1&#10;36 1 -1&#10;18 -1 1&#10;31 1 1"></textarea></label>
@@ -540,12 +542,24 @@
       <p class="note" data-i18n="doe.plan_intro"></p>
       <div class="form-grid">
         <label><span data-i18n="doe.plan_kind"></span>
-          <select id="dp-kind"><option value="fractional" data-i18n="doe.plan_kind_fractional"></option><option value="full" data-i18n="doe.plan_kind_full"></option><option value="central_composite" data-i18n="doe.plan_kind_central_composite"></option><option value="box_behnken" data-i18n="doe.plan_kind_box_behnken"></option></select></label>
-        <label><span data-i18n="doe.plan_k"></span><input type="number" id="dp-k" min="2" max="8" value="4"></label>
+          <select id="dp-kind"><option value="fractional" data-i18n="doe.plan_kind_fractional"></option><option value="full" data-i18n="doe.plan_kind_full"></option><option value="central_composite" data-i18n="doe.plan_kind_central_composite"></option><option value="box_behnken" data-i18n="doe.plan_kind_box_behnken"></option><option value="d_optimal" data-i18n="doe.plan_kind_d_optimal"></option><option value="mixture_lattice" data-i18n="doe.plan_kind_mixture_lattice"></option><option value="mixture_centroid" data-i18n="doe.plan_kind_mixture_centroid"></option><option value="mixture_d_optimal" data-i18n="doe.plan_kind_mixture_d_optimal"></option></select></label>
+        <label><span data-i18n="doe.plan_k2"></span><input type="number" id="dp-k" min="2" max="8" value="4"></label>
         <label id="dp-gen-wrap"><span data-i18n="doe.plan_generators"></span><input type="text" id="dp-gen" maxlength="80" placeholder="D=ABC"></label>
         <label id="dp-axial-wrap" hidden><span data-i18n="doe.plan_axial"></span>
           <select id="dp-axial"><option value="rotatable" data-i18n="doe.plan_axial_rotatable"></option><option value="face" data-i18n="doe.plan_axial_face"></option><option value="spherical" data-i18n="doe.plan_axial_spherical"></option></select></label>
-        <label id="dp-center-wrap" hidden><span data-i18n="doe.plan_center"></span><input type="number" id="dp-center" min="1" max="30" value="5"></label>
+        <label id="dp-center-wrap" hidden><span data-i18n="doe.plan_center"></span><input type="number" id="dp-center" min="0" max="30" value="5"></label>
+        <label id="dp-model-wrap" hidden><span data-i18n="doe.plan_model"></span>
+          <select id="dp-model"><option value="main" data-i18n="doe.plan_model_main"></option><option value="interaction" data-i18n="doe.plan_model_interaction"></option><option value="quadratic" data-i18n="doe.plan_model_quadratic"></option></select></label>
+        <label id="dp-mmodel-wrap" hidden><span data-i18n="doe.plan_model"></span>
+          <select id="dp-mmodel"><option value="linear" data-i18n="doe.mix_model_linear"></option><option value="quadratic" selected data-i18n="doe.mix_model_quadratic"></option><option value="special_cubic" data-i18n="doe.mix_model_special_cubic"></option></select></label>
+        <label id="dp-runs-wrap" hidden><span data-i18n="doe.plan_runs"></span><input type="number" id="dp-runs" min="2" max="200" placeholder="–"></label>
+        <label id="dp-levels-wrap" hidden><span data-i18n="doe.plan_levels"></span>
+          <select id="dp-levels"><option value="" data-i18n="doe.plan_levels_auto"></option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label>
+        <label id="dp-degree-wrap" hidden><span data-i18n="doe.plan_degree"></span><input type="number" id="dp-degree" min="1" max="6" value="2"></label>
+        <label id="dp-axial-check-wrap" class="check" hidden><input type="checkbox" id="dp-axial-check"><span data-i18n="doe.plan_axial_check"></span></label>
+        <label id="dp-lower-wrap" hidden><span data-i18n="doe.plan_lower"></span><input type="text" id="dp-lower" maxlength="120" placeholder="0.1 0 0"></label>
+        <label id="dp-upper-wrap" hidden><span data-i18n="doe.plan_upper"></span><input type="text" id="dp-upper" maxlength="120" placeholder="0.7 0.6 1"></label>
+        <label id="dp-limits-wrap" class="wide" hidden><span data-i18n="doe.plan_limits"></span><textarea id="dp-limits" rows="3" spellcheck="false" placeholder="1 1 &lt;= 1.5"></textarea></label>
         <label><span data-i18n="doe.plan_seed"></span><input type="number" id="dp-seed" min="0" max="2147483647" placeholder="–"></label>
       </div>
       <p><button id="dp-run" data-i18n="doe.plan_run"></button></p>

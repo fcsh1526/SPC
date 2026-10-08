@@ -228,6 +228,48 @@ def doe() -> list[Check]:
             Check("V11-surf-x2", "doe", "req.doe", ref11 + ": stationary point x2", 0.306, float(st["stationary"]["x2"]), None).with_abs(1e-3),
             Check("V11-surf-y", "doe", "req.doe", ref11 + ": fitted response at the stationary point", 80.21, float(st["response"]), None).with_abs(6e-3),
             Check("V11-surf-nature", "doe", "req.doe", ref11 + ": the stationary point is a maximum", "maximum", st["nature"])]
+    out += _doe_optimal_checks()
+    return out
+
+
+def _doe_optimal_checks() -> list[Check]:
+    """D-optimal and mixture designs: the yarn elongation mixture experiment (Cornell, as in Montgomery, chapter 11), designs whose optimum is known, and a brute-force search."""
+    import math
+    from itertools import combinations_with_replacement
+
+    import numpy as np
+
+    from spc.core import doe_optimal as O
+
+    out: list[Check] = []
+    runs = [((1, 0, 0), [11.0, 12.4]), ((0, 1, 0), [8.8, 10.0]), ((0, 0, 1), [16.8, 16.0]), ((.5, .5, 0), [15.0, 14.8, 16.1]), ((.5, 0, .5), [17.7, 16.4, 16.6]), ((0, .5, .5), [10.0, 9.7, 11.8])]
+    y, comp = [], {"A": [], "B": [], "C": []}
+    for pt, vals in runs:
+        for v in vals:
+            y.append(v)
+            for nm, x in zip("ABC", pt):
+                comp[nm].append(float(x))
+    r = O.mixture(y, comp, "quadratic")
+    coef = {t["term"]: t["coefficient"] for t in r["terms"]}
+    ref = "Cornell, Experiments with Mixtures (yarn elongation, simplex lattice {3,2}), fitted quadratic Scheffé model as given in Montgomery, Design and Analysis of Experiments, chapter 11"
+    out += [Check(f"V11-mix-{k}", "doe", "req.doe", ref + ": coefficient", v, float(coef[k]), None, "the data are typed in from the book; they give all six printed coefficients").with_abs(0.05)
+            for k, v in (("A", 11.7), ("B", 9.4), ("C", 16.4), ("A:B", 19.0), ("A:C", 11.4), ("B:C", -9.6))]
+    for k, n in ((3, 8), (7, 8), (5, 12)):  # a Hadamard matrix exists: the first-order D-optimal design is orthogonal, D-efficiency 100 %
+        d = O.d_optimal(k, "main", n)
+        out.append(Check(f"V11-dopt-hadamard-{k}-{n}", "doe", "req.doe", f"D-optimal design, first-order model of {k} factors in {n} runs: an orthogonal design (Plackett and Burman) has D-efficiency 100 %",
+                         1.0, float(d["d_efficiency"]), None).with_abs(1e-9))
+    # a brute-force search over all multisets of 6 of the 9 points of the 3² grid, second-order model
+    grid = O.candidate_grid(2, 3)
+    F, _ = O.model_matrix(grid, "quadratic")
+    best = max(np.linalg.slogdet(F[list(c)].T @ F[list(c)])[1] for c in combinations_with_replacement(range(len(grid)), 6))
+    d = O.d_optimal(2, "quadratic", 6)
+    out.append(Check("V11-dopt-brute", "doe", "req.doe", "D-optimal design (2 factors, second order, 6 runs of the 3² grid): the exchange search finds the optimum of a complete enumeration (log det)",
+                     float(best), float(d["log_det"]), None).with_abs(1e-9))
+    lat = np.array(O.mixture_design(3, "lattice", 2)["runs"])
+    ld_lat = float(np.linalg.slogdet(O.scheffe_matrix(lat, "quadratic")[0].T @ O.scheffe_matrix(lat, "quadratic")[0])[1])
+    dm = O.mixture_d_optimal(3, "quadratic", 6)
+    out.append(Check("V11-dopt-mixture-lattice", "doe", "req.doe", "D-optimal blends (3 components, quadratic Scheffé model, 6 runs) are as good as the simplex lattice {3,2} (Kiefer; Cornell): log det",
+                     ld_lat, float(dm["log_det"]), None, "the search is never worse than the lattice and, here, equal").with_abs(1e-9))
     return out
 
 
