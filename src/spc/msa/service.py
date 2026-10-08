@@ -12,7 +12,7 @@ from spc.core import msa_more
 from spc.core import iso22514_7 as iso_core
 from spc.msa import iso
 from spc.core import msa
-from spc.core import msa_attribute
+from spc.core import msa_aiag, msa_attribute
 from spc.db.database import Database
 from spc.db.stores import now_iso
 from spc.msa import gate
@@ -125,6 +125,16 @@ class MsaService:
             r = iso.evaluate_attribute_iso(study["kind"], inp, pol)
         elif study["kind"] == "attribute":
             r = msa_attribute.evaluate(inp["ratings"], inp["reference"], gate.attribute_policy(pol))
+        elif study["kind"] == "bias":
+            r = msa_aiag.bias_independent(inp["values"], inp["reference"], inp.get("process_sd"), tol, 0.05, pol["grr_pass"], pol["grr_conditional"])
+        elif study["kind"] == "bias_chart":
+            r = msa_aiag.bias_control_chart(inp["subgroups"], inp["reference"], inp.get("process_sd"), tol, 0.05, pol["grr_pass"], pol["grr_conditional"])
+        elif study["kind"] == "grr_range":
+            r = msa_aiag.range_method(inp["a"], inp["b"], inp.get("process_sd"), tol, pol["grr_pass"], pol["grr_conditional"])
+        elif study["kind"] == "signal_detection":
+            r = msa_aiag.signal_detection(inp["reference"], msa_aiag.codes_from_ratings(inp["results"]), inp["lower"], inp["upper"], inp.get("process_sd"), pol["grr_pass"], pol["grr_conditional"])
+        elif study["kind"] == "analytic":
+            r = msa_aiag.analytic_method(inp["reference"], inp["accepts"], inp["limit"], inp.get("side", "lower"), tolerance=tol)
         else:
             r = msa.stability(inp["values"])
         return {**study, "result": r, "verdict": r["verdict"]}
@@ -217,8 +227,11 @@ class MsaService:
             raise MsaProblem("invalid_input", "input must be an object")
         need = {"type1": {"values", "reference"}, "grr": {"data"}, "grr_nested": {"data"}, "stability": {"values"}, "attribute": {"ratings", "reference"},
                 "linearity": {"values", "reference"}, "budget": {"components"}, "iso_study": set(), "bowker": {"results"},
-                "uncertainty_range": {"reference", "results", "lower", "upper"}, "attribute_review": {"reference", "results", "lower", "upper"}}[kind]
-        optional = {"linearity": {"process_variation"}, "budget": {"lsl", "usl"}, "iso_study": set(iso.ISO_KEYS), "bowker": {"alpha"}, "attribute_review": {"q_mp"}}.get(kind, set())
+                "uncertainty_range": {"reference", "results", "lower", "upper"}, "attribute_review": {"reference", "results", "lower", "upper"},
+                "bias": {"values", "reference"}, "bias_chart": {"subgroups", "reference"}, "grr_range": {"a", "b"}, "signal_detection": {"reference", "results", "lower", "upper"},
+                "analytic": {"reference", "accepts", "limit"}}[kind]
+        optional = {"linearity": {"process_variation"}, "budget": {"lsl", "usl"}, "iso_study": set(iso.ISO_KEYS), "bowker": {"alpha"}, "attribute_review": {"q_mp"},
+                "bias": {"process_sd"}, "bias_chart": {"process_sd"}, "grr_range": {"process_sd"}, "signal_detection": {"process_sd"}, "analytic": {"side"}}.get(kind, set())
         if not need <= set(input_) <= need | optional:
             raise MsaProblem("invalid_input", f"the input of a {kind} study holds {sorted(need)}" + (f" and may hold {sorted(optional)}" if optional else ""))
         study = {"id": system["next_study"], "kind": kind, "date": day, "by": _label(user), "at": now_iso(), "note": note.strip(), "input": input_}

@@ -2012,6 +2012,86 @@ def test_fraction_surface_and_plan_in_the_browser(server, browser):
     ctx.close()
 
 
+def test_aiag_bias_range_signal_detection_and_analytic_studies_in_the_browser(server, browser):
+    from spc.validation import aiag_msa as manual
+
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=msa]")
+    page.click("#ms-new")
+    page.fill("#mse-name", "Bore gauge")
+    page.fill("#mse-resolution", "0.01")
+    page.fill("#mse-tolerance", "15")
+    page.click("#mse-save")
+    expect(page.locator("#ms-title")).to_have_text("Bore gauge", timeout=20000)
+    expect(page.locator("#ms-checks")).to_contain_text("Bias (AIAG)")
+
+    # bias, independent sample method: the example of the manual (reference 6.00, 15 readings, process standard deviation 2.5)
+    page.select_option("#mss-kind", "bias")
+    expect(page.locator("#mss-ref-label")).to_be_visible()
+    expect(page.locator("#mss-psd-label")).to_be_visible()
+    page.fill("#mss-reference", "6")
+    page.fill("#mss-psd", "2.5")
+    page.fill("#mss-data", " ".join(str(v) for v in manual.BIAS))
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("Bias, study 1 (independent sample method)", timeout=20000)
+    expect(page.locator("#ms-more-detail")).to_contain_text("-0.1107")
+    expect(page.locator("#ms-more-detail")).to_contain_text("statistically zero")
+    expect(page.locator("#ms-checks")).to_contain_text("zero lies inside the confidence interval")
+
+    # the range method: a quick check, not the proof of the gauge R&R
+    page.select_option("#mss-kind", "grr_range")
+    expect(page.locator("#mss-ref-label")).to_be_hidden()
+    page.fill("#mss-psd", "0.0777")
+    page.fill("#mss-data", "0.85 0.80\n0.75 0.70\n1.00 0.95\n0.45 0.55\n0.50 0.60")
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("range method, study 2", timeout=20000)
+    expect(page.locator("#ms-more-detail")).to_contain_text("GRR = average range / d2* = 0.05877, 75.6 % of the process standard deviation")
+    expect(page.locator("#ms-checks")).to_contain_text("no gauge R&R study")  # the gauge R&R is still missing: the range method is no proof
+
+    # an attribute system: signal detection (the 50 parts of the manual) and the analytic method
+    page.click("#ms-back")
+    page.click("#ms-new")
+    page.fill("#mse-name", "Go / no-go gauge")
+    page.select_option("#mse-kind", "attribute")
+    page.click("#mse-save")
+    expect(page.locator("#ms-title")).to_have_text("Go / no-go gauge", timeout=20000)
+    ratings, _ = manual._study()
+    header = "ref " + " ".join(f"{x}:{t + 1}" for x in "ABC" for t in range(3))
+    rows = [f"{manual.REF_VALUES[i]} " + " ".join(str(ratings[x][t][i]) for x in "ABC" for t in range(3)) for i in range(50)]
+    page.select_option("#mss-kind", "signal_detection")
+    expect(page.locator("#mss-lower-label")).to_be_visible()
+    page.fill("#mss-lower", "0.45")
+    page.fill("#mss-upper", "0.55")
+    page.fill("#mss-data", header + "\n" + "\n".join(rows))
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("Signal detection approach, study 1", timeout=20000)
+    expect(page.locator("#ms-more-detail")).to_contain_text("d = 0.02379")
+    page.select_option("#mss-kind", "analytic")
+    expect(page.locator("#mss-limit-label")).to_be_visible()
+    expect(page.locator("#mss-lower-label")).to_be_hidden()
+    page.fill("#mss-limit", "-0.010")
+    xt = [-0.016, -0.015, -0.014, -0.013, -0.012, -0.011, -0.0105, -0.010, -0.008, -0.006, -0.004, -0.002]
+    acc = [0, 1, 3, 5, 8, 16, 18, 20, 20, 20, 20, 20]
+    page.fill("#mss-data", "\n".join(f"{x} {a}" for x, a in zip(xt, acc)))
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("Analytic method, study 2 (Lower limit)", timeout=20000)
+    expect(page.locator("#ms-more-detail")).to_contain_text("differs significantly from zero")
+    expect(page.locator("#ms-checks")).to_contain_text("analytic method finds a bias")
+    page.fill("#mss-data", "1 2 3")
+    page.click("#mss-save")
+    expect(page.locator("#errors")).to_contain_text("two numbers", timeout=20000)
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#ms-more-detail")).to_contain_text("分析法")
+    assert problems == []
+    ctx.close()
+
+
 def test_linearity_nested_grr_and_budget_in_the_browser(server, browser):
     expect = playwright_sync.expect
     ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")

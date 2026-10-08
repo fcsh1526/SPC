@@ -67,6 +67,8 @@ ROWS = """
 111 111 111 1
 000 000 000 0
 """
+# Table III-C 1, column "Ref Value": the reference value of each part measured by a variable system (signal detection approach, Table III-C 8)
+REF_VALUES = [0.476901, 0.509015, 0.576459, 0.566152, 0.570360, 0.544951, 0.465454, 0.502295, 0.437817, 0.515573, 0.488905, 0.559918, 0.542704, 0.454518, 0.517377, 0.531939, 0.519694, 0.484167, 0.520496, 0.477236, 0.452310, 0.545604, 0.529065, 0.514192, 0.599581, 0.547204, 0.502436, 0.521642, 0.523754, 0.561457, 0.503091, 0.505850, 0.487613, 0.449696, 0.498698, 0.543077, 0.409238, 0.488184, 0.427687, 0.501132, 0.513779, 0.566575, 0.462410, 0.470832, 0.412453, 0.493441, 0.486379, 0.587893, 0.483803, 0.446697]
 BIAS = [5.8, 5.7, 5.9, 5.9, 6.0, 6.1, 6.0, 6.1, 6.4, 6.3, 6.0, 6.1, 6.2, 5.6, 6.0]  # Table III-B 1, reference value 6.00
 
 
@@ -118,4 +120,42 @@ def scenarios() -> list[Check]:
             _c("bias-se", "Table III-B 2, standard error of the average", 0.0547, se, 5e-5), _c("bias-t", "Table III-B 2, t statistic", 0.12, bias / se, 5e-3),
             _c("bias-q", "Table III-B 2, significant t value (2-tailed)", 2.14479, q, 5e-6),
             _c("bias-lo", "Table III-B 2, lower bound of the bias", -0.1107, bias - q * se, 5e-5), _c("bias-hi", "Table III-B 2, upper bound of the bias", 0.1241, bias + q * se, 5e-5)]
+    out += _new_methods(ratings)
+    return out
+
+
+def _new_methods(ratings) -> list[Check]:
+    from spc.core import msa_aiag as AI
+
+    out: list[Check] = []
+    # signal detection approach: the codes come from the ratings (+ all accepted in all trials, - all rejected, x they did not agree)
+    codes = []
+    for i in range(50):
+        votes = [ratings[x][t][i] for x in "ABC" for t in range(3)]
+        codes.append("+" if all(votes) else "-" if not any(votes) else "x")
+    sd = AI.signal_detection(REF_VALUES, codes, 0.450, 0.550)
+    out += [_c("sd-lsl", "chapter III-C, signal detection: d_LSL", 0.024135, sd["d_lsl"], 5e-7), _c("sd-usl", "chapter III-C, signal detection: d_USL", 0.023448, sd["d_usl"], 5e-7),
+            _c("sd-d", "chapter III-C, signal detection: d = average of d_LSL and d_USL", 0.0237915, sd["d"], 5e-8),
+            _c("sd-pct", "chapter III-C, signal detection: %GRR against the tolerance 0.100 (printed as 24 %)", 24, sd["pct"], 0.5)]
+    # bias, control chart method (Table III-B 3): the example gives g = 20, m = 5, reference 6.01, grand average 6.021, repeatability 0.2048 (= average range / d2*)
+    d2s, df = AI.d2_star(5, 20)
+    b = AI.bias_from_chart(6.021, 0.2048 * d2s, 5, 20, 6.01, process_sd=2.5)
+    out += [_c("bc-d2", "Appendix C, d2* for m = 5 and g = 20", 2.33394, d2s, 5e-6), _c("bc-df", "Appendix C, degrees of freedom for m = 5 and g = 20", 72.7, df, 0.05),
+            _c("bc-t", "Table III-B 3, t statistic", 0.5371, b["t"], 5e-5), _c("bc-q", "Table III-B 3, significant t value", 1.993, b["t_critical"], 5e-4),
+            _c("bc-lo", "Table III-B 3, lower bound of the bias", -0.0299, b["ci"][0], 2e-4, "the manual rounds the bias and the standard error before the interval"),
+            _c("bc-hi", "Table III-B 3, upper bound of the bias", 0.0519, b["ci"][1], 2e-4, "the manual rounds the bias and the standard error before the interval")]
+    # range method (Table III-B 6)
+    r = AI.range_method([0.85, 0.75, 1.00, 0.45, 0.50], [0.80, 0.70, 0.95, 0.55, 0.60], process_sd=0.0777)
+    out += [_c("rm-rbar", "Table III-B 6, average range", 0.07, r["average_range"], 5e-6), _c("rm-d2", "Table III-B 6 and Appendix C, d2* for m = 2 and g = 5", 1.19105, r["d2_star"], 5e-6),
+            _c("rm-grr", "Table III-B 6, GRR = average range / d2*", 0.0588, r["grr"], 5e-5), _c("rm-pct", "Table III-B 6, %GRR against the process standard deviation 0.0777", 75.7, r["pct_process"], 0.1, "the manual divides the rounded GRR 0.0588")]
+    # analytic method (chapter III-C, example with eight parts and the three added): the probabilities of acceptance and the results read from the manual's normal probability plot
+    xs = [-0.016, -0.015, -0.014, -0.013, -0.012, -0.011, -0.0105, -0.010, -0.008, -0.006, -0.004, -0.002]
+    acc = [0, 1, 3, 5, 8, 16, 18, 20, 20, 20, 20, 20]
+    an = AI.analytic_method(xs, acc, -0.010, "lower")
+    out += [_c(f"an-pac-{i}", f"chapter III-C, analytic method, probability of acceptance of the part {x}", p, an["points"][i]["pac"], 5e-4) for i, (x, p) in enumerate(zip(xs[:9], [0.025, 0.075, 0.175, 0.275, 0.425, 0.775, 0.875, 0.975, 1.0]))]
+    plot = "read from a line drawn by eye on normal probability paper: the least squares line gives a close but not an equal value"
+    out += [_c("an-x50", "chapter III-C, analytic method, reference value at Pac = 0.5 (Figure III-C 4)", -0.0123, an["x_at_0_5"], 3e-4, plot),
+            _c("an-bias", "chapter III-C, analytic method, bias", 0.0023, an["bias"], 3e-4, plot),
+            _c("an-sigma", "chapter III-C, analytic method, repeatability", 0.00142, an["repeatability"], 2e-4, plot),
+            Check("aiag-an-sig", "aiag_msa", "req.agreement", REF + "chapter III-C, analytic method: the bias differs significantly from zero (t = 9.84 against 2.093)", True, an["bias_significant"])]
     return out

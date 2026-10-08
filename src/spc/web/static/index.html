@@ -1173,13 +1173,16 @@
       <h4 data-i18n="msa.add_study"></h4>
       <div class="form-grid">
         <label><span data-i18n="msa.s_kind"></span>
-          <select id="mss-kind"><option value="grr" data-i18n="msa.kind_grr"></option><option value="grr_nested" data-i18n="msa.kind_grr_nested"></option><option value="linearity" data-i18n="msa.kind_linearity"></option><option value="budget" data-i18n="msa.kind_budget"></option><option value="iso_study" data-i18n="msa.kind_iso_study"></option><option value="type1" data-i18n="msa.kind_type1"></option><option value="stability" data-i18n="msa.kind_stability"></option><option value="attribute" data-i18n="msa.kind_attribute"></option><option value="uncertainty_range" data-i18n="msa.kind_uncertainty_range"></option><option value="bowker" data-i18n="msa.kind_bowker"></option><option value="attribute_review" data-i18n="msa.kind_attribute_review"></option></select></label>
+          <select id="mss-kind"><option value="grr" data-i18n="msa.kind_grr"></option><option value="grr_nested" data-i18n="msa.kind_grr_nested"></option><option value="linearity" data-i18n="msa.kind_linearity"></option><option value="budget" data-i18n="msa.kind_budget"></option><option value="iso_study" data-i18n="msa.kind_iso_study"></option><option value="type1" data-i18n="msa.kind_type1"></option><option value="stability" data-i18n="msa.kind_stability"></option><option value="attribute" data-i18n="msa.kind_attribute"></option><option value="uncertainty_range" data-i18n="msa.kind_uncertainty_range"></option><option value="bowker" data-i18n="msa.kind_bowker"></option><option value="attribute_review" data-i18n="msa.kind_attribute_review"></option><option value="bias" data-i18n="msa.kind_bias"></option><option value="bias_chart" data-i18n="msa.kind_bias_chart"></option><option value="grr_range" data-i18n="msa.kind_grr_range"></option><option value="signal_detection" data-i18n="msa.kind_signal_detection"></option><option value="analytic" data-i18n="msa.kind_analytic"></option></select></label>
         <label><span data-i18n="msa.s_date"></span><input id="mss-date" type="date"></label>
         <label id="mss-ref-label" hidden><span data-i18n="msa.s_reference"></span><input id="mss-reference" type="number" step="any"></label>
         <label id="mss-lower-label" hidden><span data-i18n="msa.s_lower"></span><input id="mss-lower" type="number" step="any"></label>
         <label id="mss-upper-label" hidden><span data-i18n="msa.s_upper"></span><input id="mss-upper" type="number" step="any"></label>
         <label id="mss-qmp-label" hidden><span data-i18n="msa.s_qmp"></span><input id="mss-qmp" type="number" min="1" max="100" step="any"></label>
         <label id="mss-pv-label" hidden><span data-i18n="msa.s_pv"></span><input id="mss-pv" type="number" step="any" min="0"></label>
+        <label id="mss-psd-label" hidden><span data-i18n="msa.s_psd"></span><input id="mss-psd" type="number" step="any" min="0"></label>
+        <label id="mss-limit-label" hidden><span data-i18n="msa.s_limit"></span><input id="mss-limit" type="number" step="any"></label>
+        <label id="mss-side-label" hidden><span data-i18n="msa.s_side"></span><select id="mss-side"><option value="lower" data-i18n="msa.side_lower"></option><option value="upper" data-i18n="msa.side_upper"></option></select></label>
         <label class="wide"><span id="mss-data-label"></span><textarea id="mss-data" rows="6"></textarea></label>
       <div id="mss-iso" class="wide" hidden>
         <p class="note" data-i18n="msa.iso_note"></p>

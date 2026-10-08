@@ -2132,6 +2132,7 @@
     if (c.q_ms !== undefined) { p.qms = sig(c.q_ms, 3); p.cms = sig(c.c_ms, 3); p.qmp = c.q_mp == null ? "–" : sig(c.q_mp, 3); p.cmp = c.c_mp == null ? "–" : sig(c.c_mp, 3); }
     if (c.cg !== undefined) p.cg = sig(c.cg, 3), p.cgk = sig(c.cgk, 3);
     if (c.pct_linearity !== undefined) p.lin = sig(c.pct_linearity, 3), p.bias = sig(c.bias, 3);
+    if (c.t !== undefined && c.ev_pct !== undefined) p.bias = sig(c.bias, 3), p.ev = c.ev_pct === null ? "–" : sig(c.ev_pct, 3);
     if (c.q !== undefined && !c.iso && c.U !== undefined) p.q = sig(c.q, 3), p.U = sig(c.U, 4);
     if (c.worst) { p.eff = sig(c.worst.effectiveness, 3); p.miss = sig(c.worst.miss, 3); p.fa = sig(c.worst.false_alarm, 3); p.kappa = c.worst.kappa === null ? "–" : sig(c.worst.kappa, 3); }
     const reason = c.reason ? `.${c.reason}` : "";
@@ -2272,6 +2273,40 @@
       box.appendChild(el("p", r.accepted ? "status-ok" : "status-alarm", t(r.accepted ? "msa.revd_accepted" : "msa.revd_rejected", { k: r.agreeing, n: r.results, lo: sig(100 * r.agreement_ci[0], 3), hi: sig(100 * r.agreement_ci[1], 3) })));
       if (!(r.has_below && r.has_inside && r.has_above)) box.appendChild(el("p", "status-warning", t("msa.revd_zones")));
     }
+    const biasStudies = MS.view.system.studies.filter((s) => (s.kind === "bias" || s.kind === "bias_chart") && !s.voided && s.result).slice(-1)[0];
+    if (biasStudies) {
+      const r = biasStudies.result;
+      box.appendChild(el("h4", "", t("msa.bias_detail", { id: biasStudies.id, method: t("msa.bias_method_" + r.method) })));
+      box.appendChild(el("p", "", t("msa.bias_summary", { n: r.n, bias: sig(r.bias, 4), sr: sig(r.repeatability, 4), se: sig(r.se, 4), t: sig(r.t, 3), df: sig(r.df, 4), tc: sig(r.t_critical, 4), p: sig(r.p_value, 3), lo: sig(r.ci[0], 4), hi: sig(r.ci[1], 4) })));
+      box.appendChild(el("p", r.bias_acceptable ? "status-ok" : "status-alarm", t(r.bias_acceptable ? "msa.bias_zero_inside" : "msa.bias_zero_outside")));
+      if (r.ev_pct !== null) box.appendChild(el("p", r.ev_verdict === "pass" ? "" : "status-warning", t("msa.bias_ev", { ev: sig(r.ev_pct, 3), basis: t("msa.bias_tv_" + r.tv_basis), tv: sig(r.tv, 4) })));
+      else box.appendChild(el("p", "muted", t("msa.bias_no_tv")));
+      if (r.stable === false) box.appendChild(el("p", "status-alarm", t("msa.bias_unstable", { x: r.points_outside.xbar, r: r.points_outside.range })));
+      box.appendChild(el("p", "muted", t("msa.bias_note")));
+    }
+    const rm = newest("grr_range");
+    if (rm) {
+      const r = rm.result;
+      box.appendChild(el("h4", "", t("msa.range_detail", { id: rm.id })));
+      box.appendChild(el("p", "", t("msa.range_summary", { parts: r.parts, rbar: sig(r.average_range, 4), d2: sig(r.d2_star, 5), grr: sig(r.grr, 4), pct: sig(r.pct, 3), basis: t("msa.range_basis_" + r.basis) })));
+      box.appendChild(el("p", "muted", t("msa.range_note")));
+    }
+    const sdt = newest("signal_detection");
+    if (sdt) {
+      const r = sdt.result;
+      box.appendChild(el("h4", "", t("msa.signal_detail", { id: sdt.id })));
+      box.appendChild(el("p", "", t("msa.signal_summary", { lsl: sig(r.d_lsl, 5), usl: sig(r.d_usl, 5), d: sig(r.d, 5), pct: sig(r.pct, 3), basis: t("msa.signal_basis_" + r.basis), plus: r.counts.accepted_by_all, minus: r.counts.rejected_by_all, x: r.counts.disagreement })));
+      box.appendChild(el("p", "muted", t("msa.signal_note")));
+    }
+    const ana = newest("analytic");
+    if (ana) {
+      const r = ana.result;
+      box.appendChild(el("h4", "", t("msa.analytic_detail", { id: ana.id, side: t("msa.side_" + r.side) })));
+      box.appendChild(table([t("msa.analytic_ref"), t("msa.analytic_accepts"), t("msa.analytic_pac")], r.points.map((p) => [sig(p.reference, 5), p.accepts, sig(p.pac, 4)])));
+      box.appendChild(el("p", "", t("msa.analytic_summary", { x50: sig(r.x_at_0_5, 4), bias: sig(r.bias, 3), sigma: sig(r.repeatability, 3), grr: sig(r.grr_range, 3), t: sig(r.t, 3), tc: r.t_critical })));
+      box.appendChild(el("p", r.bias_significant ? "status-alarm" : "status-ok", t(r.bias_significant ? "msa.analytic_bias_yes" : "msa.analytic_bias_no")));
+      box.appendChild(el("p", "muted", t("msa.analytic_note")));
+    }
     const lin = newest("linearity");
     if (lin) {
       const r = lin.result;
@@ -2315,6 +2350,10 @@
     if (x.kind === "bowker") return t("msa.sum_bowker", { parts: r.parts, pairs: r.pairs.length, result: t(r.symmetric ? "msa.bowd_symmetric" : "msa.bowd_asymmetric") });
     if (x.kind === "attribute_review") return t("msa.sum_review", { k: r.agreeing, n: r.results });
     if (x.kind === "grr_nested") return t("msa.sum_grr_nested", { pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis), ndc: sig(r.ndc, 3), ev: sig(r.sigma.ev, 3), av: sig(r.sigma.av, 3), n: `${r.operators}×${r.parts_per_operator}×${r.trials}` });
+    if (x.kind === "bias" || x.kind === "bias_chart") return t("msa.sum_bias", { n: r.n, bias: sig(r.bias, 3), lo: sig(r.ci[0], 3), hi: sig(r.ci[1], 3), ev: r.ev_pct === null ? "–" : sig(r.ev_pct, 3) });
+    if (x.kind === "grr_range") return t("msa.sum_grr_range", { parts: r.parts, grr: sig(r.grr, 4), pct: sig(r.pct, 3), basis: t("msa.range_basis_" + r.basis) });
+    if (x.kind === "signal_detection") return t("msa.sum_signal", { parts: r.parts, d: sig(r.d, 4), pct: sig(r.pct, 3) });
+    if (x.kind === "analytic") return t("msa.sum_analytic", { parts: r.parts, bias: sig(r.bias, 3), sigma: sig(r.repeatability, 3), t: sig(r.t, 3) });
     if (x.kind === "linearity") return t("msa.sum_linearity", { parts: r.parts, readings: r.readings, lin: sig(r.pct_linearity, 3), bias: sig(r.average_bias, 3) });
     if (x.kind === "budget") return t("msa.sum_budget", { n: r.components.length, U: sig(r.U, 4), q: sig(r.q_ms, 3) });
     if (x.kind === "grr") return t("msa.sum_grr", { pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis), ndc: sig(r.ndc, 3), ev: sig(r.sigma.ev, 3), av: sig(r.sigma.av, 3), n: `${r.parts}×${r.operators}×${r.trials}` });
@@ -2323,13 +2362,15 @@
   }
   function syncStudyForm() {
     const attrSystem = MS.view && MS.view.system.kind === "attribute";
-    const ATTR_KINDS = ["attribute", "uncertainty_range", "bowker", "attribute_review"];
+    const ATTR_KINDS = ["attribute", "uncertainty_range", "bowker", "attribute_review", "signal_detection", "analytic"];
     $$("#mss-kind option").forEach((o) => { const attr = ATTR_KINDS.includes(o.value); o.hidden = o.disabled = attr !== attrSystem; });
     if ($("#mss-kind").selectedOptions[0].disabled) $("#mss-kind").value = attrSystem ? "attribute" : "grr";
     const kind = $("#mss-kind").value;
-    $("#mss-ref-label").hidden = kind !== "type1";
+    $("#mss-ref-label").hidden = !["type1", "bias", "bias_chart"].includes(kind);
+    $("#mss-psd-label").hidden = !["bias", "bias_chart", "grr_range", "signal_detection"].includes(kind);
+    $("#mss-limit-label").hidden = $("#mss-side-label").hidden = kind !== "analytic";
     $("#mss-pv-label").hidden = kind !== "linearity";
-    const withLimits = kind === "iso_study" || kind === "uncertainty_range" || kind === "attribute_review";
+    const withLimits = kind === "iso_study" || kind === "uncertainty_range" || kind === "attribute_review" || kind === "signal_detection";
     $("#mss-lower-label").hidden = $("#mss-upper-label").hidden = !withLimits;
     $("#mss-qmp-label").hidden = kind !== "attribute_review";
     $("#mss-iso").hidden = kind !== "iso_study";
@@ -2413,6 +2454,27 @@
       const qmp = $("#mss-qmp").value.trim();
       return { ...base, results: t_.ratings[names[0]], ...(qmp ? { q_mp: Number(qmp) } : {}) };
     }
+    const psdField = () => { const v = $("#mss-psd").value.trim(); return v === "" ? {} : { process_sd: Number(v) }; };
+    if (kind === "bias") return { reference: Number($("#mss-reference").value), values: numbers(text), ...psdField() };
+    if (kind === "bias_chart") return { reference: Number($("#mss-reference").value), subgroups: lines(text).map(numbers), ...psdField() };
+    if (kind === "grr_range") {  // one part per line: the reading of appraiser A, then the reading of appraiser B
+      const rows = lines(text).map(numbers);
+      if (rows.some((r) => r.length !== 2)) throw new Error(t("msa.range_bad"));
+      return { a: rows.map((r) => r[0]), b: rows.map((r) => r[1]), ...psdField() };
+    }
+    if (kind === "signal_detection") {
+      const t_ = readAttributeTable(text, "number");
+      const lo = $("#mss-lower").value.trim(), hi = $("#mss-upper").value.trim();
+      if (lo === "" || hi === "") throw new Error(t("msa.s_limits_needed"));
+      return { reference: t_.reference, results: t_.ratings, lower: Number(lo), upper: Number(hi), ...psdField() };
+    }
+    if (kind === "analytic") {  // one part per line: the reference value, then the number of accepts
+      const rows = lines(text).map(numbers);
+      if (rows.some((r) => r.length !== 2)) throw new Error(t("msa.analytic_bad"));
+      const limit = $("#mss-limit").value.trim();
+      if (limit === "") throw new Error(t("msa.analytic_limit_needed"));
+      return { reference: rows.map((r) => r[0]), accepts: rows.map((r) => r[1]), limit: Number(limit), side: $("#mss-side").value };
+    }
     if (kind === "grr_nested") return { data: lines(text).map((row) => row.split(";").map(numbers)) };
     if (kind === "linearity") {  // one part per line: the reference value, then its readings
       const rows = lines(text).map(numbers);
@@ -2443,7 +2505,7 @@
     await guarded(async () => {
       MS.view = await post(`/api/msa/${MS.view.system.id}/studies`, { kind: $("#mss-kind").value, date: $("#mss-date").value, note: $("#mss-note").value, input });
       $("#mss-data").value = ""; $("#mss-note").value = "";
-      ["#mss-lower", "#mss-upper", "#mss-qmp", "#mss-pv", "#isof-cal-u", "#isof-mpe", "#isof-re", "#isof-rep-ref", "#isof-rep-values", "#isof-lin-a", "#isof-lin-data", "#isof-proc-data", "#isof-stab", "#isof-obj", "#isof-rest", "#isof-ms-rest", "#isof-temp", "#isof-observed"].forEach((id) => { $(id).value = ""; });
+      ["#mss-lower", "#mss-upper", "#mss-qmp", "#mss-pv", "#mss-psd", "#mss-limit", "#isof-cal-u", "#isof-mpe", "#isof-re", "#isof-rep-ref", "#isof-rep-values", "#isof-lin-a", "#isof-lin-data", "#isof-proc-data", "#isof-stab", "#isof-obj", "#isof-rest", "#isof-ms-rest", "#isof-temp", "#isof-observed"].forEach((id) => { $(id).value = ""; });
     });
     renderMsa();
   }
