@@ -1900,6 +1900,59 @@ def test_process_characterization_in_the_browser(server, browser):
     ctx.close()
 
 
+def test_fraction_surface_and_plan_in_the_browser(server, browser):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=tools]")
+    # the plan of a 2^(4-1): defining relation, resolution and the table of runs
+    page.locator("#doe-card details summary").click()
+    page.select_option("#dp-kind", "fractional")
+    page.fill("#dp-k", "4")
+    page.click("#dp-run")
+    expect(page.locator("#dp-out")).to_contain_text("I = ABCD", timeout=20000)
+    expect(page.locator("#dp-out")).to_contain_text("resolution IV")
+    expect(page.locator("#dp-out table tr")).to_have_count(9)
+    page.select_option("#dp-kind", "central_composite")
+    expect(page.locator("#dp-axial-wrap")).to_be_visible()
+    expect(page.locator("#dp-gen-wrap")).to_be_hidden()
+    page.fill("#dp-k", "2")
+    page.fill("#dp-seed", "5")
+    page.click("#dp-run")
+    expect(page.locator("#dp-out")).to_contain_text("13 runs", timeout=20000)
+    expect(page.locator("#dp-out")).to_contain_text("random (seed 5)")
+    # the half fraction of the filtration example (Montgomery 8.1): the aliased effects
+    page.select_option("#doe-mode", "fractional")
+    runs = {"": 45, "ab": 65, "ac": 60, "bc": 80, "ad": 100, "bd": 45, "cd": 75, "abcd": 96}
+    rows = ["y A B C D"]
+    for key, v in runs.items():
+        rows.append(f"{v} " + " ".join("1" if c in key else "-1" for c in "abcd"))
+    page.fill("#doe-data", "\n".join(rows))
+    page.click("#doe-run")
+    expect(page.locator("#doe-out")).to_contain_text("I = A:B:C:D", timeout=20000)
+    expect(page.locator("#doe-out")).to_contain_text("resolution IV")
+    ac = page.locator("#doe-out table tr:has(td:text-is('A:C'))")
+    expect(ac).to_contain_text("-18.5")
+    expect(ac).to_contain_text("+ B:D")
+    # the response surface of the process yield (Montgomery 11.2)
+    page.select_option("#doe-mode", "surface")
+    x1 = [-1, 1, -1, 1, -1.414, 1.414, 0, 0, 0, 0, 0, 0, 0]
+    x2 = [-1, -1, 1, 1, 0, 0, -1.414, 1.414, 0, 0, 0, 0, 0]
+    y = [76.5, 78.0, 77.0, 79.5, 75.6, 78.4, 77.0, 78.5, 79.9, 80.3, 80.0, 79.7, 79.8]
+    page.fill("#doe-data", "y x1 x2\n" + "\n".join(f"{v} {a} {b}" for v, a, b in zip(y, x1, x2)))
+    page.click("#doe-run")
+    expect(page.locator("#doe-out")).to_contain_text("has a maximum", timeout=20000)
+    expect(page.locator("#doe-out")).to_contain_text("x1 = 0.3892")
+    expect(page.locator("#doe-out")).to_contain_text("80.212")
+    expect(page.locator("#doe-out")).to_contain_text("Lack of fit")
+    assert problems == []
+    ctx.close()
+
+
 def test_linearity_nested_grr_and_budget_in_the_browser(server, browser):
     expect = playwright_sync.expect
     ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")

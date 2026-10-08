@@ -127,6 +127,18 @@ class DoeBody(Strict):
     max_order: int | None = Field(default=None, ge=1, le=12)
 
 
+class DoeDesignBody(Strict):
+    """A plan of an experiment (draft 6.4): the factors are the letters A, B, ... and the levels are coded."""
+
+    kind: Literal["full", "fractional", "central_composite", "box_behnken"]
+    k: int = Field(ge=2, le=8)
+    p: int | None = Field(default=None, ge=0, le=6)
+    generators: list[str] | None = Field(default=None, max_length=6)
+    axial: Literal["rotatable", "face", "spherical"] = "rotatable"
+    center: int | None = Field(default=None, ge=1, le=30)
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
+
+
 class AnchorBody(Strict):
     entries: int = Field(ge=0, le=10**9)
     last_hash: str = Field(pattern="^[0-9a-f]{64}$")

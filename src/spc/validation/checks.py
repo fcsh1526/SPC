@@ -200,6 +200,34 @@ def doe() -> list[Check]:
     out = [Check(f"V11-effect-{k}", "doe", "req.doe", ref + ": effect", v, float(t[k]["effect"]), None).with_abs(5e-3) for k, v in (("A", 8.33), ("B", -5.00), ("A:B", 1.67))]
     out += [Check(f"V11-ss-{k}", "doe", "req.doe", ref + ": sum of squares", v, float(t[k]["ss"]), None).with_abs(5e-3) for k, v in (("A", 208.33), ("B", 75.00), ("A:B", 8.33))]
     out.append(Check("V11-sse", "doe", "req.doe", ref + ": error sum of squares", 31.33, float(r["sse"]), None).with_abs(5e-3))
+    # the half fraction 2^(4-1) with I = ABCD of the filtration example (Montgomery example 8.1, runs taken from the 16 of example 6.2)
+    full = {"": 45, "a": 71, "b": 48, "ab": 65, "c": 68, "ac": 60, "bc": 80, "abc": 65, "d": 43, "ad": 100, "bd": 45, "abd": 104, "cd": 75, "acd": 86, "bcd": 70, "abcd": 96}
+    plan = D.fractional_design(4)
+    fy, fac = [], {c: [] for c in "ABCD"}
+    for run in plan["runs"]:
+        fy.append(full["".join(c.lower() for c, v in zip("ABCD", run) if v > 0)])
+        for c, v in zip("ABCD", run):
+            fac[c].append(v)
+    fr = D.fractional(fy, fac)
+    by = {x["term"]: x for x in fr["terms"]}
+    ref8 = "Montgomery, Design and Analysis of Experiments, example 8.1 (2^(4-1), I = ABCD)"
+    out += [Check(f"V11-frac-{k}", "doe", "req.doe", ref8 + ": aliased effect", v, float(by[k]["effect"]), None).with_abs(5e-3)
+            for k, v in (("A", 19.00), ("B", 1.50), ("C", 14.00), ("D", 16.50), ("A:B", -1.00), ("A:C", -18.50), ("A:D", 19.00))]
+    out.append(Check("V11-frac-res", "doe", "req.doe", ref8 + ": resolution found from the data", "IV", fr["resolution"]))
+    # the central composite design of the process yield (Montgomery example 11.2): the second-order model and its stationary point
+    x1 = [-1, 1, -1, 1, -1.414, 1.414, 0, 0, 0, 0, 0, 0, 0]
+    x2 = [-1, -1, 1, 1, 0, 0, -1.414, 1.414, 0, 0, 0, 0, 0]
+    yy = [76.5, 78.0, 77.0, 79.5, 75.6, 78.4, 77.0, 78.5, 79.9, 80.3, 80.0, 79.7, 79.8]
+    sr = D.response_surface(yy, {"x1": x1, "x2": x2})
+    coef = {x["term"]: x["coefficient"] for x in sr["terms"]}
+    ref11 = "Montgomery, Design and Analysis of Experiments, example 11.2 (central composite design, 13 runs)"
+    out += [Check(f"V11-surf-{k}", "doe", "req.doe", ref11 + ": coefficient", v, float(coef[k]), None).with_abs(6e-4)
+            for k, v in (("1", 79.94), ("x1", 0.995), ("x2", 0.515), ("x1²", -1.376), ("x2²", -1.001), ("x1:x2", 0.25))]
+    st = sr["canonical"]
+    out += [Check("V11-surf-x1", "doe", "req.doe", ref11 + ": stationary point x1", 0.389, float(st["stationary"]["x1"]), None).with_abs(1e-3),
+            Check("V11-surf-x2", "doe", "req.doe", ref11 + ": stationary point x2", 0.306, float(st["stationary"]["x2"]), None).with_abs(1e-3),
+            Check("V11-surf-y", "doe", "req.doe", ref11 + ": fitted response at the stationary point", 80.21, float(st["response"]), None).with_abs(6e-3),
+            Check("V11-surf-nature", "doe", "req.doe", ref11 + ": the stationary point is a maximum", "maximum", st["nature"])]
     return out
 
 

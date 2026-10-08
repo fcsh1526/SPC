@@ -59,6 +59,7 @@ from spc.api.schemas import (
     CoverageBody,
     RandomPlanBody,
     DoeBody,
+    DoeDesignBody,
     ChartGuideBody,
     SpecialChartBody,
     MultivariateBody,
@@ -956,6 +957,36 @@ def create_app(
         """Two-level full factorial experiment: effects, ANOVA or Lenth's method (draft 6.4)."""
         try:
             return doe.factorial(body.y, body.factors, body.alpha, body.max_order)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/doe/fractional")
+    def doe_fractional(body: DoeBody):
+        """Regular two-level fraction: aliased effects, defining relation and resolution read from the data (draft 6.4)."""
+        try:
+            return doe.fractional(body.y, body.factors, body.alpha, body.max_order or 3)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/doe/surface")
+    def doe_surface(body: DoeBody):
+        """Second-order response surface: model, analysis of variance with lack of fit, stationary point (draft 6.4)."""
+        try:
+            return doe.response_surface(body.y, {k: [float(x) for x in v] for k, v in body.factors.items()}, body.alpha)
+        except (ValueError, TypeError) as exc:
+            raise ApiError(400, "invalid_input", str(exc)) from None
+
+    @app.post("/api/doe/design")
+    def doe_design(body: DoeDesignBody):
+        """The plan of a full or fractional two-level design, a central composite or a Box-Behnken design, in coded units; the run order can be randomised with a seed."""
+        try:
+            if body.kind == "full":
+                return doe.fractional_design(body.k, generators=[], seed=body.seed)
+            if body.kind == "fractional":
+                return doe.fractional_design(body.k, body.generators, body.p, seed=body.seed)
+            if body.kind == "central_composite":
+                return doe.central_composite(body.k, body.axial, 5 if body.center is None else body.center, body.seed)
+            return doe.box_behnken(body.k, 3 if body.center is None else body.center, body.seed)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 
