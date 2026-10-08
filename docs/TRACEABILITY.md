@@ -89,7 +89,7 @@
 | 8.4、表 8-1 | 目標值隨樣本數調整（信賴水準 99.99 %）；Critical 在 n < 50 為 n.a. | ✅ | `src/spc/core/capability/target.py` | `tests/test_targets.py::test_machine_targets_match_table_8_1`、`tests/test_targets.py::test_critical_machine_study_cannot_use_a_reduced_sample` | 逐格核對 |
 | 8.5.1 | 多段加工：組合數、每組合 ≥ 5 件、每工序 ≥ 50 件、相同組合可省略；合併評估、找出偏離的組合；形位類 50 件平均分配主軸；只量部分治具的潛力 | 🔶 | `src/spc/core/multistage.py`、`src/spc/service/special.py`、介面「特殊情形」 | `tests/test_special.py::test_scope_reproduces_the_draft_example_2`、`tests/test_special.py::test_a_deviating_pallet_is_found_and_the_numbers_match_independent_formulas` | 草案沒有指定判定偏離的檢定（用 Welch、變異數分析、Brown-Forsythe 作輔助）；「只量部分治具」的件數是我們的解讀 |
 | 8.5.2 | 多維特性 Pm、Pmk：超橢球、機率 p、u_p／3 | 🔶 | `src/spc/core/multivariate_perf.py` | `tests/test_special.py::test_the_one_dimensional_case_gives_the_univariate_indices`、`tests/test_special.py::test_distance_to_the_tolerance_border_matches_a_brute_force_search` | 指標取雙側分位數 Φ⁻¹((1+p)/2)，是我們的解讀（一維等於一般 Pm、Pmk）；ISO 22514-6 未取得，未對照 |
-| 8.5.3 | GD&T 與 MMC／LMC：組裝間隙 C、C50 %、C0.135 %、C99.865 %，對 L_C = 0 的指標 | 🔶 | `src/spc/core/gdt.py` | `tests/test_special.py::test_clearance_is_zero_exactly_at_the_bonus_boundary`、`tests/test_special.py::test_the_sign_printed_in_the_draft_would_reward_a_position_error` | **草案孔的式子印成 C＝+xD＋xP−MMVS，與其自己的極限例矛盾，程式採負號並標明**；互換性要求與多特徵未做；ISO 22514-6、-9 未取得 |
+| 8.5.3 | GD&T 與 MMC／LMC：組裝間隙 C、C50 %、C0.135 %、C99.865 %，對 L_C = 0 的指標 | 🔶 | `src/spc/core/gdt.py` | `tests/test_special.py::test_clearance_is_zero_exactly_at_the_bonus_boundary`、`tests/test_special.py::test_the_sign_printed_in_the_draft_would_reward_a_position_error` | **草案孔的式子印成 C＝+xD＋xP−MMVS，與其自己的極限例矛盾，程式採負號並標明**；ISO 22514-6、-9 未取得 |
 
 ## 第 9 章　製程績效與能力
 
