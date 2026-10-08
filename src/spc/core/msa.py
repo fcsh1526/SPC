@@ -4,8 +4,10 @@ The draft assumes "the measurement process is capable, stable and does not signi
 asks for proof "in accordance with AIAG MSA and VDA 5" (the report element names ISO 22514-3 and 22514-7 as references for a supporting study). It gives no criteria of its own. The usual ones are used here
 and are parameters of the policy of a measurement system:
 
-  Type 1 study (VDA 5; the formulas are the usual ones of that guideline; ISO 22514-7 has no Cg/Cgk, its index is C_MS, see spc.core.iso22514_7), repeated measurements of one reference standard:
-      Cg = 0.2 T / (6 s),   Cgk = (0.1 T - |mean - reference|) / (3 s),   both >= 1.33.
+  Type 1 study (VDA 5, 5.2.2.1; ISO 22514-7 has no Cg/Cgk, its index is C_MS, see spc.core.iso22514_7), repeated measurements of one reference standard:
+      VDA 5 itself spreads 4 s (95.45 %):  Cg = 0.2 T / (4 s),   Cgk = (0.1 T - |mean - reference|) / (2 s),   both >= 1.33 (Cg 1.33 is Q_MS 15 %).
+      Many company guidelines spread 6 s (99.73 %): Cg = 0.2 T / (6 s), Cgk = (0.1 T - |bias|) / (3 s); VDA 5 notes that Cg 1.33 is then Q_MS 10 %.
+      The policy of the measurement system chooses (`cg_spread`, 4 or 6; 4 is the default, as in the text of VDA 5).
   Crossed gauge R&R by analysis of variance (AIAG MSA, 4th edition), p parts x o operators x r trials:
       sigma_EV (repeatability), sigma_AV (reproducibility), sigma_INT (part x operator), sigma_GRR, sigma_PV,
       %GRR of the tolerance = 6 sigma_GRR / T,  %GRR of the total variation,  ndc = 1.41 sigma_PV / sigma_GRR.
@@ -33,7 +35,9 @@ class MsaError(ValueError):
     """The data of a study cannot be evaluated."""
 
 
-def type1(values: Sequence[float], reference: float, tolerance: float, cg_min: float = CG_MIN) -> dict[str, Any]:
+def type1(values: Sequence[float], reference: float, tolerance: float, cg_min: float = CG_MIN, spread: int = 4) -> dict[str, Any]:
+    if spread not in (4, 6):
+        raise MsaError("the spread of a type 1 study is 4 s (VDA 5) or 6 s (company guidelines)")
     x = np.asarray(values, dtype=float)
     if x.ndim != 1 or not np.all(np.isfinite(x)):
         raise MsaError("the measurements must be a list of numbers")
@@ -46,11 +50,11 @@ def type1(values: Sequence[float], reference: float, tolerance: float, cg_min: f
         raise MsaError("the measurements do not vary: the resolution is too coarse to evaluate the study")
     mean = float(x.mean())
     bias = mean - reference
-    cg = 0.2 * tolerance / (6.0 * s)
-    cgk = (0.1 * tolerance - abs(bias)) / (3.0 * s)
+    cg = 0.2 * tolerance / (spread * s)
+    cgk = (0.1 * tolerance - abs(bias)) / (spread / 2.0 * s)
     t = bias / (s / math.sqrt(x.size))
     return {"n": int(x.size), "mean": mean, "sd": s, "reference": float(reference), "bias": float(bias), "bias_p": float(2 * stats.t.sf(abs(t), x.size - 1)),
-            "cg": float(cg), "cgk": float(cgk), "cg_min": cg_min, "verdict": "pass" if cg >= cg_min and cgk >= cg_min else "fail"}
+            "cg": float(cg), "cgk": float(cgk), "cg_min": cg_min, "spread": spread, "verdict": "pass" if cg >= cg_min and cgk >= cg_min else "fail"}
 
 
 def grr(data, tolerance: float | None, pass_pct: float = 10.0, conditional_pct: float = 30.0, ndc_min: float = 5.0) -> dict[str, Any]:

@@ -37,7 +37,7 @@ from spc.core import msa_attribute
 
 POLICY_DEFAULTS: dict[str, Any] = {
     "validity_months": 12, "stability_months": 6, "resolution_share_max": 0.05, "grr_pass": 10.0, "grr_conditional": 30.0, "ndc_min": 5.0,
-    "cg_min": 1.33, "require_stability": True, "k": 2.0, "guard_band_risk": 0.05, "u_cal": 0.0, "budget_pass": 15.0, "budget_conditional": 30.0,
+    "cg_min": 1.33, "cg_spread": 4, "require_stability": True, "k": 2.0, "guard_band_risk": 0.05, "u_cal": 0.0, "budget_pass": 15.0, "budget_conditional": 30.0,
     "iso_q_ms_max": 15.0, "iso_q_mp_max": 30.0, "iso_c_min": 1.33,
     **{f"attr_{k}": v for k, v in msa_attribute.POLICY_DEFAULTS.items()},
 }
@@ -88,6 +88,9 @@ def validate_policy(data: Mapping | None) -> dict:
         p[key] = int(v) if whole else float(v)
     num("validity_months", 1, 60, True); num("stability_months", 1, 60, True); num("resolution_share_max", 0.001, 0.5)
     num("grr_pass", 1, 50); num("grr_conditional", 1, 100); num("ndc_min", 1, 20); num("cg_min", 0.5, 5); num("k", 1, 4)
+    if p["cg_spread"] not in (4, 6) or isinstance(p["cg_spread"], bool):
+        raise ValueError("policy.cg_spread must be 4 (VDA 5) or 6 (company guidelines)")
+    p["cg_spread"] = int(p["cg_spread"])
     num("guard_band_risk", 0.001, 0.499); num("u_cal", 0, 1e9); num("budget_pass", 1, 100); num("budget_conditional", 1, 200)
     num("iso_q_ms_max", 1, 100); num("iso_q_mp_max", 1, 100); num("iso_c_min", 0.5, 5)
     if not p["budget_pass"] < p["budget_conditional"]:

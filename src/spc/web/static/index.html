@@ -557,7 +557,7 @@
     <p class="note" data-i18n="mc.intro"></p>
     <div class="form-grid">
       <label><span data-i18n="mc.mode"></span>
-        <select id="mc-mode"><option value="gpc" data-i18n="mc.mode_gpc"></option><option value="multi" data-i18n="mc.mode_multi"></option><option value="cp" data-i18n="mc.mode_cp"></option><option value="pv" data-i18n="mc.mode_pv"></option></select></label>
+        <select id="mc-mode"><option value="gpc" data-i18n="mc.mode_gpc"></option><option value="multi" data-i18n="mc.mode_multi"></option><option value="cp" data-i18n="mc.mode_cp"></option><option value="pv" data-i18n="mc.mode_pv"></option><option value="class" data-i18n="mc.mode_class"></option></select></label>
     </div>
     <div class="form-grid mc-box" id="mc-gpc">
       <label><span data-i18n="mc.lsl"></span><input id="mc-lsl" type="number" step="any"></label>
@@ -582,6 +582,10 @@
       <label><span data-i18n="mc.ev"></span><input id="mc-ev" type="number" step="any" min="0"></label>
       <label><span data-i18n="mc.k"></span><input id="mc-k" type="number" min="1" value="3"></label>
       <label><span data-i18n="mc.r"></span><input id="mc-r" type="number" min="1" value="3"></label>
+    </div>
+    <div class="form-grid mc-box" id="mc-class" hidden>
+      <label><span data-i18n="mc.ump"></span><input id="mc-ump" type="number" step="any" min="0"></label>
+      <label><span data-i18n="mc.kb"></span><input id="mc-kb" type="number" step="any" min="0"></label>
     </div>
     <p><button id="mc-run" class="primary" data-i18n="mc.run"></button></p>
     <div id="mc-out" role="status"></div>
@@ -1167,6 +1171,7 @@
         <label class="msa-var"><span data-i18n="msa.p_iso_q_mp_max"></span><input id="msp-iso_q_mp_max" type="number" min="1" max="100" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_iso_c_min"></span><input id="msp-iso_c_min" type="number" min="0.5" max="5" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_cg"></span><input id="msp-cg_min" type="number" min="0.5" max="5" step="any"></label>
+        <label class="msa-var"><span data-i18n="msa.p_cg_spread"></span><select id="msp-cg_spread"><option value="4" data-i18n="msa.cg_spread_4"></option><option value="6" data-i18n="msa.cg_spread_6"></option></select></label>
         <label class="msa-var"><span data-i18n="msa.p_k"></span><input id="msp-k" type="number" min="1" max="4" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_guard"></span><input id="msp-guard_band_risk" type="number" min="0.1" max="49.9" step="any"></label>
         <label class="msa-var"><span data-i18n="msa.p_ucal"></span><input id="msp-u_cal" type="number" min="0" step="any"></label>

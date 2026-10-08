@@ -368,6 +368,17 @@ def real_capability_from_cmp(c_obs: float, c_mp: float) -> float | None:
     return real_capability(c_obs, 0.4 / _num(c_mp, "C_MP", positive=True))
 
 
+def classification(u_mp: float, class_width: float) -> dict:
+    """VDA 5, 8.2: parts sorted into classes. A part is assigned to two adjacent classes at most when the expanded uncertainty is at most half the class width,
+    U_MP / KB <= 0.5. In general a part can fall into 2 U_MP / KB + 1 adjacent classes (a real number; the whole number is the one rounded up, because a result interval can still touch a further class)."""
+    u = _num(u_mp, "the expanded measurement uncertainty U_MP", nonnegative=True)
+    kb = _num(class_width, "the class width KB", positive=True)
+    ratio = u / kb
+    adjacent = 2.0 * ratio + 1.0
+    return {"u_mp": u, "class_width": kb, "ratio": float(ratio), "ratio_max": 0.5, "ok": bool(ratio <= 0.5 + 1e-12), "adjacent": float(adjacent),
+            "adjacent_max": int(math.ceil(adjacent - 1e-9)), "u_mp_max": 0.5 * kb}
+
+
 # ------------------------------------------------------------------ monitoring (clause 11.2)
 
 def linearity_monitor(beta0: float, beta1: float, sigma: float, df: int, references: Sequence[float], readings: Sequence[Sequence[float]], epsilon: float = 0.05) -> dict:

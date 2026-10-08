@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from fastapi import Depends, FastAPI
 
-from spc.api.schemas import CpImpactBody, GpcBody, LinearityMonitorBody, MsaBody, MsaStudyBody, MultipleReadingsBody, PvCorrectionBody, ReasonBody
+from spc.api.schemas import ClassificationBody, CpImpactBody, GpcBody, LinearityMonitorBody, MsaBody, MsaStudyBody, MultipleReadingsBody, PvCorrectionBody, ReasonBody
 from spc.api.errors import ApiError
 from spc.auth import User
-from spc.core import msa_aiag
+from spc.core import iso22514_7, msa_aiag
 from spc.core.msa import MsaError
 from spc.msa.service import MsaService
 
@@ -30,6 +30,11 @@ def add_msa_routes(app: FastAPI, svc: MsaService, reader, engineer, admin) -> No
     def calc_multiple_readings(body: MultipleReadingsBody, _: User = Depends(reader)):
         """Reducing variation through multiple readings (chapter IV G)."""
         return _calc(msa_aiag.multiple_readings, body.current, body.target)
+
+    @app.post("/api/msa-calc/classification")
+    def calc_classification(body: ClassificationBody, _: User = Depends(reader)):
+        """Classified parts (VDA 5, 8.2): the uncertainty against the class width."""
+        return _calc(iso22514_7.classification, body.u_mp, body.class_width)
 
     @app.post("/api/msa-calc/cp-impact")
     def calc_cp_impact(body: CpImpactBody, _: User = Depends(reader)):

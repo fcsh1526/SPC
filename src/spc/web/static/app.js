@@ -2563,7 +2563,7 @@
     $$("#ms-editor .msa-var").forEach((e) => { e.hidden = attr; });
     $$("#ms-editor .msa-attr").forEach((e) => { e.hidden = !attr; });
   }
-  const DEFAULT_MSA_POLICY = { validity_months: 12, stability_months: 6, resolution_share_max: 0.05, grr_pass: 10, grr_conditional: 30, ndc_min: 5, cg_min: 1.33, require_stability: true, k: 2, guard_band_risk: 0.05, u_cal: 0, budget_pass: 15, budget_conditional: 30, iso_q_ms_max: 15, iso_q_mp_max: 30, iso_c_min: 1.33,
+  const DEFAULT_MSA_POLICY = { validity_months: 12, stability_months: 6, resolution_share_max: 0.05, grr_pass: 10, grr_conditional: 30, ndc_min: 5, cg_min: 1.33, cg_spread: 4, require_stability: true, k: 2, guard_band_risk: 0.05, u_cal: 0, budget_pass: 15, budget_conditional: 30, iso_q_ms_max: 15, iso_q_mp_max: 30, iso_c_min: 1.33,
     attr_eff_pass: 90, attr_eff_conditional: 80, attr_miss_pass: 2, attr_miss_conditional: 5, attr_fa_pass: 5, attr_fa_conditional: 10, attr_kappa_pass: 0.75, attr_kappa_conditional: 0.4 };
   function readMsaEditor() {
     const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
@@ -3853,6 +3853,10 @@
       if (num("#mc-cp-value") === null || g === null) return bad(t("mc.need_numbers"));
       body = { cp: num("#mc-cp-value"), grr: g / 100, basis: $("#mc-cp-basis").value, given: $("#mc-cp-given").value };
       path = "cp-impact";
+    } else if (mode === "class") {
+      body = { u_mp: num("#mc-ump"), class_width: num("#mc-kb") };
+      if (body.u_mp === null || body.class_width === null) return bad(t("mc.need_numbers"));
+      path = "classification";
     } else {
       body = { range_of_part_averages: num("#mc-rp"), n_parts: num("#mc-nparts"), ev: num("#mc-ev"), appraisers: num("#mc-k"), trials: num("#mc-r") };
       if (Object.values(body).some((v) => v === null)) return bad(t("mc.need_numbers"));
@@ -3878,6 +3882,9 @@
     } else if (mode === "cp") {
       p(t(r.reachable ? "mc.out_cp" : "mc.out_cp_unreachable", { obs: r.cp_observed === null ? "–" : sig(r.cp_observed, 4), act: r.cp_actual === null ? "–" : sig(r.cp_actual, 4), loss: r.loss === null ? "–" : sig(r.loss, 3) }), "strong");
       p(t("mc.cp_note_" + r.basis), "muted");
+    } else if (mode === "class") {
+      p(t(r.ok ? "mc.out_class_ok" : "mc.out_class_bad", { ratio: sig(r.ratio, 4), adjacent: sig(r.adjacent, 4), max: r.adjacent_max, umax: sig(r.u_mp_max, 5) }), "strong");
+      p(t("mc.class_note"), "muted");
     } else {
       p(t("mc.out_pv", { k3: sig(r.k3, 5), pv0: sig(r.pv_uncorrected, 5), pv: sig(r.pv, 5), diff: sig(r.difference_pct, 3) }), "strong");
       p(t("mc.pv_note"), "muted");

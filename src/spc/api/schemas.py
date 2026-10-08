@@ -493,6 +493,11 @@ class MultipleReadingsBody(Strict):
     target: float = Field(gt=0)
 
 
+class ClassificationBody(Strict):
+    u_mp: float = Field(ge=0)
+    class_width: float = Field(gt=0)
+
+
 class CpImpactBody(Strict):
     cp: float = Field(gt=0)
     grr: float = Field(ge=0, description="a fraction: 0.3 is 30 %")

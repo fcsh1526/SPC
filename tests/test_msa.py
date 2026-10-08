@@ -30,10 +30,14 @@ def test_type1_follows_the_vda_5_formulas():
     x = 10.0 + rng.normal(0.001, 0.02, 50)
     r = msa.type1(x, 10.0, 1.0)
     s = x.std(ddof=1)
-    assert r["cg"] == pytest.approx(0.2 * 1.0 / (6 * s)) and r["cgk"] == pytest.approx((0.1 - abs(x.mean() - 10.0)) / (3 * s))
+    assert r["cg"] == pytest.approx(0.2 * 1.0 / (4 * s)) and r["cgk"] == pytest.approx((0.1 - abs(x.mean() - 10.0)) / (2 * s)) and r["spread"] == 4  # VDA 5, 5.2.2.1
+    r6 = msa.type1(x, 10.0, 1.0, spread=6)  # the variant of company guidelines: Cg 1.33 is then Q_MS 10 %
+    assert r6["cg"] == pytest.approx(0.2 * 1.0 / (6 * s)) and r6["cgk"] == pytest.approx((0.1 - abs(x.mean() - 10.0)) / (3 * s))
+    with pytest.raises(msa.MsaError):
+        msa.type1(x, 10.0, 1.0, spread=5)
     assert r["verdict"] == "pass" and r["n"] == 50 and r["bias"] == pytest.approx(x.mean() - 10.0)
-    assert msa.type1(10.0 + rng.normal(0, 0.1, 50), 10.0, 1.0)["verdict"] == "fail"  # Cg 0.33
-    assert msa.type1(10.07 + rng.normal(0, 0.01, 50), 10.0, 1.0)["verdict"] == "fail"  # a good gauge with a bias: Cg is fine, Cgk is not
+    assert msa.type1(10.0 + rng.normal(0, 0.1, 50), 10.0, 1.0)["verdict"] == "fail"  # Cg 0.5
+    assert msa.type1(10.09 + rng.normal(0, 0.01, 50), 10.0, 1.0)["verdict"] == "fail"  # a good gauge with a bias: Cg is fine, Cgk is not
     for bad in (lambda: msa.type1(x[:10], 10.0, 1.0), lambda: msa.type1([5.0] * 30, 5.0, 1.0), lambda: msa.type1(x, 10.0, 0.0)):
         with pytest.raises(msa.MsaError):
             bad()
