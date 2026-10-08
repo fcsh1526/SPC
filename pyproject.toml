@@ -43,11 +43,14 @@ dev = [
 spc-serve = "spc.api.__main__:main"
 spc-admin = "spc.admin:main"
 spc-sign = "spc.signing.__main__:main"
+spc-setup = "spc.setup:main"
+spc-qualify = "spc.qualification.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
+"spc" = ["RELEASE.json"]
 "spc.web" = ["static/*", "static/i18n/*"]
 "spc.validation" = ["data/*.json"]
 

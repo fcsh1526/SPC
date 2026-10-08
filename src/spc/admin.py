@@ -5,6 +5,8 @@
     spc-admin --db spc.sqlite3 unlock alice
     spc-admin --db spc.sqlite3 list-users
     spc-admin --db spc.sqlite3 audit-verify
+    spc-admin --db spc.sqlite3 backup --to D:\\SPC-backup
+    spc-admin --db spc.sqlite3 restore D:\\SPC-backup\\spc-backup-20261008T093112Z.sqlite3
 
 The password is asked on the terminal (not shown), or read from the first line of standard input with --password-stdin.
 """
@@ -46,7 +48,29 @@ def main(argv: list[str] | None = None) -> int:
     unlock.add_argument("username")
     sub.add_parser("list-users")
     sub.add_parser("audit-verify")
+    backup = sub.add_parser("backup", help="write a checked copy of the database and its SHA-256 into a folder (the server may keep running)")
+    backup.add_argument("--to", required=True, help="the folder")
+    restore = sub.add_parser("restore", help="replace the database by a backup (stop the server first); the replaced file is kept")
+    restore.add_argument("file")
+    restore.add_argument("--yes", action="store_true", help="do it without asking")
     args = parser.parse_args(argv)
+
+    if args.command in ("backup", "restore"):
+        from spc import maintenance
+
+        try:
+            if args.command == "backup":
+                r = maintenance.backup(args.db, args.to)
+                print(f"backup {r['file']}\nsha256 {r['sha256']}\naudit entries {r['audit_entries']}")
+            else:
+                if not args.yes and input(f"Replace {args.db} by {args.file}? The server must be stopped. Type yes: ").strip().lower() != "yes":
+                    return 1
+                r = maintenance.restore(args.file, args.db)
+                print(f"restored from {r['restored_from']}\nprevious database kept as {r['kept_previous']}\naudit chain {'ok' if r['audit_ok'] else 'BROKEN'} ({r['audit_entries']} entries)")
+            return 0
+        except maintenance.MaintenanceError as exc:
+            print(f"error: {exc.code}: {exc}", file=sys.stderr)
+            return 1
 
     auth = AuthService(Database(args.db))
     try:

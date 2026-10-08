@@ -14,6 +14,8 @@ spc-admin --db spc.sqlite3 create-user alice --role admin     # the first user c
 spc-serve --db spc.sqlite3                      # or: python -m spc.api   -> http://127.0.0.1:8000
 ```
 
+**Customer installation** (Windows installer, installation and operational qualification IQ/OQ, backup and restore, upgrade): see `docs/INSTALLATION.md`. In short: `spc-setup --data-dir D --admin NAME --tls self-signed`, `spc-qualify all --out D/qualification --db D/spc.sqlite3`, `spc-serve --config D/spc.json`; `spc-admin backup --to DIR`. The installer scripts in `packaging/windows` were written without a Windows machine and have not been run on one yet.
+
 Data, marks, reports and the audit trail are stored in one SQLite file (`--db`, or the environment variable `SPC_DB`; default `spc.sqlite3`, created with mode 0600). Back it up like any other record.
 The server listens on 127.0.0.1 only. To serve a team, put it behind an https proxy, use `--host` and `--secure-cookies`. Without https, passwords and session cookies travel in clear text, and the server says so at start.
 
