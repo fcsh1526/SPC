@@ -46,12 +46,12 @@ def add_monitor_routes(app: FastAPI, svc: MonitorService, datasets: DatasetStore
         width = max((len(p["values"]) for p in points), default=0)
         out = io.StringIO()
         w = csv.writer(out, lineterminator="\r\n")
-        w.writerow(["seq", "taken_at", "entered_at", "entered_by", "label", "tags", *[f"value_{i + 1}" for i in range(width)], "location", "variation", "valid", "invalid_reason", "alarms", "warnings", "incident_id"])
+        w.writerow(["seq", "taken_at", "entered_at", "entered_by", "label", "tags", *[f"value_{i + 1}" for i in range(width)], "location", "variation", "valid", "invalid_reason", "alarms", "warnings", "incident_id", "new_cycle"])
         for p in points:
             w.writerow([p["seq"], p["taken_at"], p["entered_at"], safe(p["entered_by"] or ""), safe(p["label"] or ""), safe(";".join(f"{k}={v}" for k, v in sorted((p["tags"] or {}).items()))),
                         *[repr(v) for v in p["values"]], *[""] * (width - len(p["values"])), p["loc"] if p["loc"] is not None else "", p["var"] if p["var"] is not None else "",
                         int(p["valid"]), safe((p["invalid"] or {}).get("reason") or ""), ";".join(f"{a['chart']}:{a['rule']}" for a in p["alarms"]),
-                        ";".join(f"{a['chart']}:{a['rule']}" for a in p["warnings"]), p["incident_id"] or ""])
+                        ";".join(f"{a['chart']}:{a['rule']}" for a in p["warnings"]), p["incident_id"] or "", safe(p.get("cycle") or "")])
         return Response(("\ufeff" + out.getvalue()).encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="monitor-{monitor["id"]}-points.csv"'})
 
@@ -80,7 +80,7 @@ def add_monitor_routes(app: FastAPI, svc: MonitorService, datasets: DatasetStore
 
     @app.post("/api/monitors/{mid}/points")
     def add_point(mid: int, body: PointBody, user: User = Depends(operator)):
-        return svc.add_point(mid, body.values, body.label, body.tags, body.taken_at, user, body.part)
+        return svc.add_point(mid, body.values, body.label, body.tags, body.taken_at, user, body.part, body.cycle)
 
     @app.get("/api/monitors/{mid}/points")
     def points(mid: int, limit: int = Query(100, ge=1, le=2000), before: int | None = Query(None, ge=1), _: User = Depends(reader)):

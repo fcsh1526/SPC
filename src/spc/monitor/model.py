@@ -57,7 +57,13 @@ SHAPE_KINDS = (EXT_KIND, PEARSON_KIND)
 AR_KIND = "ar"
 MS_KIND = "multistream"
 BASE_KIND["ar"] = "imr"
-KINDS = (*SUBGROUP_KINDS, "imr", *ATTRIBUTE_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS, ZMR_KIND, *VECTOR_KINDS, *SHAPE_KINDS, AR_KIND, MS_KIND)
+# a process with a trend that cannot be removed (tool wear, draft 7.2 C3, 10.3.5): the residuals about the line of the cycle are charted. A cycle starts when a person says so
+# (the tool was changed); the position inside the cycle is the number of samples since then
+TREND_KIND = "trend"
+BASE_KIND["trend"] = "imr"
+NO_SPEC_KINDS = (*ATTRIBUTE_KINDS, ZMR_KIND, *VECTOR_KINDS, AR_KIND, MS_KIND, TREND_KIND)
+MAX_CYCLE_NOTE = 200
+KINDS = (*SUBGROUP_KINDS, "imr", *ATTRIBUTE_KINDS, *ACCEPT_KINDS, PRE_KIND, *SEQ_KINDS, ZMR_KIND, *VECTOR_KINDS, *SHAPE_KINDS, AR_KIND, MS_KIND, TREND_KIND)
 PRE_RULES = ("pre_red", "pre_two_yellow_same_side", "pre_two_yellow_opposite")
 ACCEPT_DEFAULTS = {"accept_p": 0.01, "accept_pa": 0.99}  # draft 10.3.4: 1 % out of tolerance is detected with 99 %
 PRE_QUALIFY = 5  # consecutive parts in the green zone before a run is released (classical pre-control)
@@ -135,10 +141,10 @@ def validate_config(data: Mapping[str, Any]) -> dict:
     if standardised:
         out["standardised"] = True
     kind = d["kind"]
-    n = d.get("n", 1 if kind in ("imr", "c", "acc-x", ZMR_KIND, AR_KIND, *SEQ_KINDS, *VECTOR_KINDS) else (2 if kind == PRE_KIND else None))
+    n = d.get("n", 1 if kind in ("imr", "c", "acc-x", ZMR_KIND, AR_KIND, TREND_KIND, *SEQ_KINDS, *VECTOR_KINDS) else (2 if kind == PRE_KIND else None))
     if isinstance(n, bool) or not isinstance(n, int):
         raise ValueError("n must be a whole number")
-    if kind in ("imr", "c", "acc-x", ZMR_KIND, AR_KIND) and n != 1:
+    if kind in ("imr", "c", "acc-x", ZMR_KIND, AR_KIND, TREND_KIND) and n != 1:
         raise ValueError("this monitor takes one value per sample (a count per inspection unit, or an individual value): n must be 1")
     if kind == PRE_KIND and n != 2:
         raise ValueError("a pre-control sample is two consecutive parts: n must be 2")
@@ -197,7 +203,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
         raise ValueError("specs.model must be one of A1 .. D")
     if specs.get("edition", "draft") not in ("draft", "final"):
         raise ValueError("specs.edition must be 'draft' or 'final'")
-    if kind in (*ATTRIBUTE_KINDS, ZMR_KIND, *VECTOR_KINDS, AR_KIND, MS_KIND) and any(specs.get(k) is not None for k in ("lsl", "usl", "target_class", "model")):
+    if kind in NO_SPEC_KINDS and any(specs.get(k) is not None for k in ("lsl", "usl", "target_class", "model")):
         raise ValueError("this monitor has no specification limits and no capability indices: counts, mixed products and several characteristics have no single tolerance")
     msa_id = specs.get("msa_id")
     if msa_id is not None and (isinstance(msa_id, bool) or not isinstance(msa_id, int) or msa_id < 1):
@@ -562,6 +568,35 @@ def ar_chart_limits(alpha: float, warn_alpha: float | None, mu: float, phi, sigm
     out = compute_limits("imr", 1, alpha, warn_alpha, 0.0, sigma_e)  # residuals: centre 0, standard deviation sigma_e
     out.update(process_mean=float(mu), phi=phi, order=len(phi), diagnostics=diagnostics or {})
     return out
+
+
+# ---- a trend that cannot be removed: the residuals about the line of the cycle
+
+def trend_chart_limits(alpha: float, warn_alpha: float | None, intercept: float, slope: float, sigma: float, diagnostics: dict | None = None) -> dict:
+    """The line `intercept + slope * position` (position = samples since the start of the cycle) and the residual standard deviation. The chart plots the residuals, so the
+    limits are those of an individuals chart with centre 0."""
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in (intercept, slope, sigma)):
+        raise ValueError("intercept, slope and sigma must be numbers")
+    if not sigma > 0:
+        raise ValueError("the standard deviation of the residuals must be positive")
+    out = compute_limits("imr", 1, alpha, warn_alpha, 0.0, sigma)
+    out.update(intercept=float(intercept), slope=float(slope), diagnostics=diagnostics or {})
+    return out
+
+
+def trend_fitted(limits: Mapping, position: int) -> float:
+    return float(limits["intercept"] + limits["slope"] * position)
+
+
+def cycle_position(marks, seq: int) -> tuple[int, int]:
+    """(position inside the cycle, number of the cycle) of the point `seq`, from the marks (seq, note) of the points that start a new cycle. Cycle 1 starts at the first point."""
+    start, number = 1, 1
+    for m, _ in marks:
+        if m <= seq:
+            if m > 1:
+                number += 1
+            start = m
+    return seq - start, number
 
 
 # ---- several streams: mean over the streams (level) and the largest standardised deviation of one stream

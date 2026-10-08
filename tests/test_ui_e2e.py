@@ -1107,6 +1107,65 @@ def test_autocorrelated_and_multistream_monitors_in_the_browser(server, browser,
     ctx.close()
 
 
+def test_trend_monitor_with_a_cycle_marked_by_the_operator_in_the_browser(server, browser, app):
+    expect = playwright_sync.expect
+    problems = []
+    ctx = browser.new_context(viewport={"width": 1250, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=monitor]")
+    page.click("#mon-new")
+    page.fill("#me-name", "Honing")
+    page.fill("#me-characteristic", "bore diameter")
+    page.select_option("#me-kind", "trend")
+    expect(page.locator("#me-specs-box")).to_be_hidden()
+    expect(page.locator("#me-intercept")).to_be_visible()
+    expect(page.locator("#me-mu-label")).to_be_hidden()
+    assert page.input_value("#me-n") == "1"
+    page.fill("#me-intercept", "10")
+    page.fill("#me-slope", "-0.01")
+    page.fill("#me-sigma", "0.01")
+    page.locator("#me-ocap tr[data-key=default] input").nth(0).fill("Measure again")
+    page.locator("#me-ocap tr[data-key=default] input").nth(1).fill("Setter")
+    page.click("#me-save")
+    expect(page.locator("#md-title")).to_have_text("Honing")
+    expect(page.locator("#md-cycle-info")).to_contain_text("first sample starts cycle 1")
+    page.click("#md-ack-btn")
+    for i, v in enumerate([10.004, 9.986, 9.983, 9.968]):  # near the line 10 - 0.01 x position (not exactly on it: two equal residuals would be a moving range of 0)
+        page.fill("#md-v0", str(v))
+        page.click("#md-submit")
+        expect(page.locator("#md-result .ok-box")).to_contain_text(f"Sample {i + 1}: within the limits")  # wait for the answer to this sample, not the one before
+        expect(page.locator("#md-result .ok-box")).to_contain_text(f"position {i}")
+    expect(page.locator("#md-cycle-info")).to_contain_text("next sample is number 5 of the cycle")
+    # the tool is changed: without saying so, the value 10.00 is far above the line (9.96 expected)
+    page.fill("#md-v0", "10.0")
+    page.click("#md-submit")
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("OUT OF CONTROL")
+    expect(page.locator("#md-result .alarm-box")).to_contain_text("Sample 5")
+    # a new cycle needs a note
+    page.check("#md-cycle")
+    expect(page.locator("#md-cycle-note")).to_be_visible()
+    page.fill("#md-v0", "10.0")
+    page.click("#md-submit")
+    expect(page.locator("#errors")).to_contain_text("note of what happened")
+    page.click("#errors button")
+    page.fill("#md-cycle-note", "Stone 8 fitted")
+    page.click("#md-submit")
+    expect(page.locator("#md-result")).to_contain_text("Sample 6", timeout=20000)
+    expect(page.locator("#md-result")).to_contain_text("Cycle 2, position 0")
+    expect(page.locator("#md-cycle")).not_to_be_checked()
+    expect(page.locator("#md-cycle-info")).to_contain_text("Cycle 2: the next sample is number 2 of the cycle")
+    expect(page.locator("#md-points")).to_contain_text("↻ Stone 8 fitted")
+    page.locator("#md-limits").locator("xpath=ancestor::details").locator("summary").click()
+    expect(page.locator("#md-limits")).to_contain_text("Line of the cycle")
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#md-dep-note")).to_contain_text("週期由人宣告")
+    assert problems == [], problems
+    ctx.close()
+
+
 def test_mcusum_monitor_in_the_browser(server, browser, app):
     expect = playwright_sync.expect
     problems = []

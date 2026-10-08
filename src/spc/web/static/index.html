@@ -673,6 +673,7 @@
           <option value="ext-xbar" data-i18n="analysis.chart_ext-xbar"></option>
           <option value="pearson" data-i18n="analysis.chart_pearson"></option>
           <option value="ar" data-i18n="analysis.chart_ar"></option>
+          <option value="trend" data-i18n="analysis.chart_trend"></option>
           <option value="multistream" data-i18n="analysis.chart_multistream"></option>
         </select></label>
       <label><span data-i18n="mon.f_n" id="me-n-label"></span><input id="me-n" type="number" min="1" max="1000000" step="1" value="5"></label>
@@ -719,6 +720,8 @@
       <label class="me-dep me-ar me-par" hidden><span data-i18n="mon.f_phi"></span><input id="me-phi" type="text" placeholder="0.8"></label>
       <label class="me-dep me-ar me-data" hidden><span data-i18n="mon.f_ar_order"></span>
         <select id="me-ar-order"><option value="" data-i18n="mon.ar_order_auto"></option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+      <label class="me-dep me-tr me-par" hidden><span data-i18n="mon.f_intercept"></span><input id="me-intercept" type="number" step="any"></label>
+      <label class="me-dep me-tr me-par" hidden><span data-i18n="mon.f_slope"></span><input id="me-slope" type="number" step="any"></label>
       <label class="me-dep me-ms me-par me-obs" hidden><span data-i18n="mon.f_stream_names"></span><input id="me-ms-names" type="text" placeholder="S1, S2, S3, S4"></label>
       <label class="me-dep me-ms me-par" hidden><span data-i18n="mon.f_stream_offsets"></span><input id="me-ms-offsets" type="text" placeholder="0.3, -0.1, 0, -0.2"></label>
       <label class="me-dep me-ms me-par" hidden><span data-i18n="mon.f_stream_sigma_time"></span><input id="me-ms-sigma-time" type="number" step="any" min="0" value="0"></label>
@@ -839,7 +842,10 @@
       <div class="form-grid">
         <label><span data-i18n="mon.label"></span><input id="md-label" type="text" maxlength="100"></label>
         <label><span data-i18n="mon.taken_at"></span><input id="md-taken" type="datetime-local"></label>
+        <label id="md-cycle-label" class="check wide" hidden><input id="md-cycle" type="checkbox"><span data-i18n="mon.cycle_new"></span></label>
+        <label id="md-cycle-note-label" class="wide" hidden><span data-i18n="mon.cycle_note"></span><input id="md-cycle-note" type="text" maxlength="200"></label>
       </div>
+      <p id="md-cycle-info" class="muted" hidden></p>
       <p class="row"><button id="md-submit" class="primary" data-i18n="mon.submit"></button></p>
       <div id="md-result" role="status"></div>
     </div>
@@ -889,6 +895,8 @@
           <label class="nl-dep nl-ar nl-par" hidden><span data-i18n="mon.f_phi"></span><input id="nl-phi" type="text" placeholder="0.8"></label>
           <label class="nl-dep nl-ar nl-data" hidden><span data-i18n="mon.f_ar_order"></span>
             <select id="nl-ar-order"><option value="" data-i18n="mon.ar_order_auto"></option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+          <label class="nl-dep nl-tr nl-par" hidden><span data-i18n="mon.f_intercept"></span><input id="nl-intercept" type="number" step="any"></label>
+          <label class="nl-dep nl-tr nl-par" hidden><span data-i18n="mon.f_slope"></span><input id="nl-slope" type="number" step="any"></label>
           <label class="nl-dep nl-ms nl-par nl-obs" hidden><span data-i18n="mon.f_stream_names"></span><input id="nl-ms-names" type="text" placeholder="S1, S2, S3, S4"></label>
           <label class="nl-dep nl-ms nl-par" hidden><span data-i18n="mon.f_stream_offsets"></span><input id="nl-ms-offsets" type="text" placeholder="0.3, -0.1, 0, -0.2"></label>
           <label class="nl-dep nl-ms nl-par" hidden><span data-i18n="mon.f_stream_sigma_time"></span><input id="nl-ms-sigma-time" type="number" step="any" min="0" value="0"></label>

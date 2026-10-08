@@ -16,12 +16,14 @@ from spc.db.database import Database
 from spc.db.stores import DatasetStore, now_iso
 from spc.monitor.model import (
     AR_KIND, MS_KIND, ar_chart_limits, check_multistream_point, multistream_limits, dep,
+    MAX_CYCLE_NOTE, TREND_KIND, cycle_position, trend_chart_limits, trend_fitted,
     EXT_KIND, PEARSON_KIND, SHAPE_KINDS, extended_chart_limits, pearson_chart_limits, shape_base, ext,
     VECTOR_KINDS, ZMR_KIND, check_vector_point, estimate_reference, vector_limits, zmr_limits, zmr_z,
     ACCEPT_KINDS, ACTION_STEPS, SEQ_KINDS, check_sequential_point, ewma_band, sequential_limits, ATTRIBUTE_KINDS, EVENT_KINDS, PRE_KIND, PRE_QUALIFY, TOLERANCE_KINDS, acceptance_from_values,
     acceptance_limits, base_kind, check_pre_point, pre_statistic, pre_zone, precontrol_limits, OUTCOMES, STEPS, MonitorError, attribute_limits, band, check_attribute_point,
     check_point, check_values, compute_limits, limits_from_counts, limits_from_values, ocap_for, standardised_point, statistic, validate_config,
 )
+from spc.core.charts import trend as trendchart
 from spc.core.constants import cn, u_quantile
 from spc.monitor.notify import Notifier
 from spc.monitor.store import MonitorStore
@@ -115,6 +117,8 @@ class MonitorService:
             return self._shape_limits_from(monitor, source)
         if kind == AR_KIND:
             return self._ar_limits_from(monitor, source)
+        if kind == TREND_KIND:
+            return self._trend_limits_from(monitor, source)
         if kind == MS_KIND:
             return self._multistream_limits_from(monitor, source)
         if kind == ZMR_KIND:
@@ -297,6 +301,49 @@ class MonitorService:
             fit = dep.fit_ar(ref, order)
             return (ar_chart_limits(alpha, warn, fit["mu"], fit["phi"], fit["sigma_e"], fit["diagnostics"]),
                     {**described, "order": fit["order"]})
+        except ValueError as exc:
+            if isinstance(exc, MonitorError):
+                raise
+            raise MonitorError("bad_source", str(exc)) from None
+
+    def _trend_limits_from(self, monitor: dict, source: dict) -> tuple[dict, dict]:
+        """The line of the cycle and the residual spread, given, or fitted to a data set (its restarts are the starts of the cycles) or to points of this monitor (its cycle marks)."""
+        alpha, warn = monitor["alpha"], monitor["warn_alpha"]
+        typ = source.get("type")
+        try:
+            if typ == "parameters":
+                a, b, sigma = source.get("intercept"), source.get("slope"), source.get("sigma")
+                return trend_chart_limits(alpha, warn, a, b, sigma), {"type": "parameters", "intercept": a, "slope": b, "sigma": sigma}
+            if typ == "dataset":
+                ds = self.datasets.get(source.get("dataset_id", ""))
+                values, rows = ds.individuals()
+                starts = sorted(ds.restart_info())
+                t, g = [], []
+                for r in rows:  # a restart sits before the value at its row: that row is the first of the new cycle (invalid rows still take their place in time)
+                    begun = [p for p in starts if p <= r]
+                    start = begun[-1] if begun else 0
+                    t.append(int(r) - start)
+                    g.append(len(begun))
+                described = {"type": "dataset", "dataset_id": source["dataset_id"], "name": ds.source.name if ds.source else "", "n_values": int(len(values))}
+            elif typ == "points":
+                lo, hi = source.get("seq_from"), source.get("seq_to")
+                if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in (lo, hi)) or lo > hi:
+                    raise ValueError("seq_from and seq_to must be point numbers, seq_from <= seq_to")
+                marks = self.store.cycle_marks(monitor["id"])
+                pts = [p for p in self.store.points(monitor["id"], limit=100000, since_seq=lo) if p["seq"] <= hi and p["valid"]]
+                values = [p["values"][0] for p in pts]
+                t, g = [], []
+                for p in pts:
+                    position, number = cycle_position(marks, p["seq"])
+                    t.append(position)
+                    g.append(number)
+                described = {"type": "points", "seq_from": lo, "seq_to": hi, "n_points": len(pts)}
+            else:
+                raise ValueError("source.type must be parameters, dataset or points")
+            fit = trendchart.fit(values, positions=t, groups=g, alpha=alpha)
+            diagnostics = {"n": int(len(values)), "n_cycles": fit.n_cycles, "longest_cycle": int(max(t)) + 1, "df": fit.df, "r2": fit.r2, "slope_p": fit.slope_p,
+                           "slope_ci": [float(fit.slope_ci[0]), float(fit.slope_ci[1])], "cycle_level_p": fit.cycle_level_p}
+            return trend_chart_limits(alpha, warn, fit.intercept, fit.slope, fit.sigma, diagnostics), {**described, "n_cycles": fit.n_cycles}
         except ValueError as exc:
             if isinstance(exc, MonitorError):
                 raise
@@ -527,12 +574,18 @@ class MonitorService:
             out.append({"rule": a["rule"], **ocap_for(monitor, a["rule"])})
         return out
 
-    def add_point(self, monitor_id: int, values, label: str, tags: dict, taken_at: str | None, user, part: str | None = None) -> dict:
+    def add_point(self, monitor_id: int, values, label: str, tags: dict, taken_at: str | None, user, part: str | None = None, cycle: str | None = None) -> dict:
         monitor = self.store.get(monitor_id)
         if not monitor["active"]:
             raise MonitorError("monitor_inactive", "this monitor is switched off", 409)
         msa_state = self._gate(monitor)
         values = check_values(monitor, values)
+        if cycle is not None:
+            cycle = cycle.strip()
+            if monitor["kind"] != TREND_KIND:
+                raise MonitorError("invalid_input", "only a trend monitor has cycles")
+            if not cycle or len(cycle) > MAX_CYCLE_NOTE:
+                raise MonitorError("invalid_input", f"a new cycle needs a note of what happened (for example the tool that was changed), up to {MAX_CYCLE_NOTE} characters")
         if monitor["kind"] == ZMR_KIND:
             tags = {**tags, "part": str(part or "").strip()}
         if len(label) > 100:
@@ -553,6 +606,13 @@ class MonitorService:
                 hist = self.store.recent_values(monitor_id, limits["order"])
                 e = dep.next_residual(hist, values[0], limits["process_mean"], limits["phi"])
                 loc, var = statistic("imr", [e], previous)
+                hist_loc, hist_var = self.store.valid_history(monitor_id, limits["revision"], HISTORY_FOR_RULES)
+                alarms, warnings = check_point(monitor, limits, hist_loc, hist_var, loc, var)
+            elif monitor["kind"] == TREND_KIND:
+                marks = self.store.cycle_marks(monitor_id) + ([(self.store.next_seq(monitor_id), cycle)] if cycle else [])
+                position, _number = cycle_position(marks, self.store.next_seq(monitor_id))
+                e = values[0] - trend_fitted(limits, position)
+                loc, var = statistic("imr", [e], None if cycle else previous)  # the moving range starts again with a new cycle, like a restart of the I-MR chart
                 hist_loc, hist_var = self.store.valid_history(monitor_id, limits["revision"], HISTORY_FOR_RULES)
                 alarms, warnings = check_point(monitor, limits, hist_loc, hist_var, loc, var)
             elif monitor["kind"] == MS_KIND:
@@ -583,7 +643,7 @@ class MonitorService:
                 loc, var = pre_statistic(limits, values), None
             else:
                 loc, var = statistic(monitor["kind"], values, previous)
-            if monitor["kind"] in (*SEQ_KINDS, ZMR_KIND, *VECTOR_KINDS, AR_KIND, MS_KIND):
+            if monitor["kind"] in (*SEQ_KINDS, ZMR_KIND, *VECTOR_KINDS, AR_KIND, MS_KIND, TREND_KIND):
                 pass
             elif monitor["kind"] == PRE_KIND:
                 alarms, warnings = check_pre_point(limits, values)
@@ -599,7 +659,9 @@ class MonitorService:
             incident_id = incident["id"] if incident else None
             self.store.insert_point(monitor_id, seq, limits_rev=limits["revision"], taken_at=when, entered_by=_label(user), label=label.strip(),
                                     tags=tags, values=values, loc=loc, var=var, alarms=alarms, warnings=warnings,
-                                    incident_id=incident_id)
+                                    incident_id=incident_id, cycle=cycle or "")
+            if cycle:
+                self._log("monitor_cycle_started", user, monitor["name"], {"id": monitor_id, "point": seq, "note": cycle})
             opened = None
             if alarms and incident is None:
                 opened = self.store.open_incident(monitor_id, seq, alarms)
@@ -613,6 +675,8 @@ class MonitorService:
             point = self.store.point(monitor_id, seq)
             if monitor["kind"] == AR_KIND:
                 point["ar"] = self._ar_info(limits, point)
+            if monitor["kind"] == TREND_KIND:
+                point["trend"] = self._trend_info(limits, point, self.store.cycle_marks(monitor_id))
             incident_now = self.store.incident(incident_id) if incident_id else None
         if opened:
             self._notify({"type": "incident_opened", "at": now_iso(), "monitor": {"id": monitor_id, "name": monitor["name"], "line": monitor["line"],
@@ -757,8 +821,24 @@ class MonitorService:
         gain = 1.0 - sum(limits["phi"])
         return {"predicted": point["values"][0] - point["loc"], "residual": point["loc"], "level_shift": point["loc"] / gain if gain > 1e-9 else None}
 
+    @staticmethod
+    def _trend_info(limits: dict | None, point: dict, marks) -> dict | None:
+        """Where the point stands in its cycle, the value the line expected there and the residual that is plotted (draft 10.3.5: tool wear)."""
+        if not limits or "slope" not in limits or point.get("loc") is None:
+            return None
+        position, number = cycle_position(marks, point["seq"])
+        return {"position": position, "cycle": number, "expected": trend_fitted(limits, position), "residual": point["loc"], "new_cycle": point.get("cycle", "")}
+
     def _with_bands(self, monitor: dict, pts: list[dict]) -> list[dict]:
         """Count charts: limits follow the sample size, so each point carries the band that applied to it."""
+        if monitor["kind"] == TREND_KIND:
+            revs: dict[int, dict | None] = {}
+            marks = self.store.cycle_marks(monitor["id"])
+            for p in pts:
+                if p["limits_rev"] not in revs:
+                    revs[p["limits_rev"]] = self.store.limits(monitor["id"], p["limits_rev"])
+                p["trend"] = self._trend_info(revs[p["limits_rev"]], p, marks)
+            return pts
         if monitor["kind"] == AR_KIND:
             revs: dict[int, dict | None] = {}
             for p in pts:
@@ -801,6 +881,8 @@ class MonitorService:
     def window_dataset(self, monitor: dict, window: int) -> tuple[Dataset, list[dict]]:
         if monitor["kind"] in ATTRIBUTE_KINDS:
             raise MonitorError("report_not_for_attribute", "the capability report needs measured values: counts have no capability index")
+        if monitor["kind"] == TREND_KIND:
+            raise MonitorError("report_not_for_trend", "the points of a process with a trend are residuals about the line of the cycle: a capability index from them would mean nothing. Use the performance indices of an analysis of the values")
         if monitor["kind"] in (ZMR_KIND, *VECTOR_KINDS, AR_KIND, MS_KIND):
             raise MonitorError("report_not_for_this_chart", "mixed products and several characteristics have no single capability: the report is not available")
         if monitor["kind"] == PRE_KIND:

@@ -1329,9 +1329,10 @@
   const SEQ_KINDS = ["cusum", "ewma"];
   const SEQ_RULES = ["shift_up", "shift_down"];
   const isTol = (kind) => ACC_KINDS.includes(kind) || kind === "pre";
-  const BASE_KIND = { "acc-xbar": "xbar-s", "acc-median": "median-r", "acc-x": "imr", zmr: "imr", "ext-xbar": "xbar-s" };
+  const BASE_KIND = { "acc-xbar": "xbar-s", "acc-median": "median-r", "acc-x": "imr", zmr: "imr", "ext-xbar": "xbar-s", trend: "imr" };
   const SHAPE_KINDS = ["ext-xbar", "pearson"];
-  const DEP_KINDS = ["ar", "multistream"];
+  const DEP_KINDS = ["ar", "multistream", "trend"];
+  const depNoteKey = (kind) => (kind === "ar" ? "mon.dep_note_ar" : kind === "trend" ? "mon.dep_note_trend" : "mon.dep_note_ms");
   const VEC_KINDS = ["t2", "mewma", "mcusum"];
   const isVec = (kind) => VEC_KINDS.includes(kind);
   const lines = (text) => text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== "");
@@ -1369,6 +1370,8 @@
     if (kind === "ar") {
       if (type === "parameters") src.phi = numbers($(`#${prefix}-phi`).value);
       else if ($(`#${prefix}-ar-order`).value) src.order = Number($(`#${prefix}-ar-order`).value);
+    } else if (kind === "trend") {
+      if (type === "parameters") { src.intercept = num("intercept"); src.slope = num("slope"); }
     } else if (kind === "multistream") {
       if (names()) src.names = names();
       if (type === "parameters") {
@@ -1383,14 +1386,14 @@
   function syncDepFields(prefix, kind, type) {
     const dep = DEP_KINDS.includes(kind);
     $$(`.${prefix}-dep`).forEach((e) => {
-      const rightKind = e.classList.contains(`${prefix}-ar`) ? kind === "ar" : e.classList.contains(`${prefix}-ms`) ? kind === "multistream" : true;
+      const rightKind = e.classList.contains(`${prefix}-ar`) ? kind === "ar" : e.classList.contains(`${prefix}-tr`) ? kind === "trend" : e.classList.contains(`${prefix}-ms`) ? kind === "multistream" : true;
       const types = [];
       if (e.classList.contains(`${prefix}-par`)) types.push("parameters");
       if (e.classList.contains(`${prefix}-obs`)) types.push("observations");
       if (e.classList.contains(`${prefix}-data`)) types.push("dataset", "points");
       e.hidden = !(dep && rightKind && (types.length === 0 || types.includes(type)));
     });
-    if (dep) $(`#${prefix}-dep-note`).textContent = t(kind === "ar" ? "mon.dep_note_ar" : "mon.dep_note_ms");
+    if (dep) $(`#${prefix}-dep-note`).textContent = t(depNoteKey(kind));
   }
   function partsSource(text) {  // one product per line: code; target; standard deviation
     return { type: "parts", parts: lines(text).map((l) => { const tk = l.split(/[;,\t]/).map((x) => x.trim()); return { code: tk.slice(0, -2).join(","), mu: Number(tk[tk.length - 2]), sigma: Number(tk[tk.length - 1]) }; }) };
@@ -1525,7 +1528,8 @@
     $("#md-no-spec").hidden = isCount(m.kind) || isTol(m.kind) || m.kind === "zmr" || isVec(m.kind) || DEP_KINDS.includes(m.kind);
     $("#md-zmr-note").hidden = m.kind !== "zmr"; $("#md-mv-note").hidden = !isVec(m.kind);
     $("#md-dep-note").hidden = !DEP_KINDS.includes(m.kind);
-    if (DEP_KINDS.includes(m.kind)) $("#md-dep-note").textContent = t(m.kind === "ar" ? "mon.dep_note_ar" : "mon.dep_note_ms");
+    if (DEP_KINDS.includes(m.kind)) $("#md-dep-note").textContent = t(depNoteKey(m.kind));
+    renderCycleEntry(m, v);
     $("#md-seq-note").hidden = !SEQ_KINDS.includes(m.kind);
     $("#md-ongoing-box").hidden = isCount(m.kind) || m.kind === "pre" || m.kind === "zmr" || isVec(m.kind) || DEP_KINDS.includes(m.kind);
     $("#md-pre-note").hidden = m.kind !== "pre";
@@ -1595,7 +1599,7 @@
     const draw = (sel, part, title) => { if (part.values.length) drawChart($(sel), part, title); else $(sel).replaceChildren(el("p", "muted", t("mon.no_points"))); };
     const b = m.kind === "multistream" ? "multistream" : baseKind(m.kind, m.n);
     draw("#md-chart-loc", loc, isCount(m.kind) || m.kind === "pre" || SEQ_KINDS.includes(m.kind) || isVec(m.kind) ? t("result.kind_" + m.kind)
-      : `${t("result.chart_location")} – ${t(m.kind === "ar" ? "result.series_location_ar" : b === "multistream" ? "result.series_location_multistream" : b === "imr" ? "result.series_location_imr" : b === "median-r" ? "result.series_location_median" : "result.series_location_xbar")}`);
+      : `${t("result.chart_location")} – ${t(m.kind === "ar" ? "result.series_location_ar" : m.kind === "trend" ? "result.series_location_trend" : b === "multistream" ? "result.series_location_multistream" : b === "imr" ? "result.series_location_imr" : b === "median-r" ? "result.series_location_median" : "result.series_location_xbar")}`);
     if (vr) draw("#md-chart-var", vr, `${t("result.chart_variation")} – ${t("result.series_variation_" + b)}`);
   }
   function statusOf(p) {
@@ -1611,7 +1615,9 @@
     table.appendChild(head);
     M.view.points.slice(-30).reverse().forEach((p) => {
       const tr = el("tr", p.valid ? "" : "invalid-point");
-      cell(tr, String(p.seq)); cell(tr, when(p.taken_at)); cell(tr, p.label); cell(tr, p.values.map((x) => sig(x, 5)).join(" "));
+      cell(tr, String(p.seq)); cell(tr, when(p.taken_at));
+      cell(tr, (p.cycle ? `↻ ${p.cycle}` : "") + (p.cycle && p.label ? " · " : "") + p.label);
+      cell(tr, p.values.map((x) => sig(x, 5)).join(" ") + (p.trend ? ` (${t("mon.cycle_pos", { cycle: p.trend.cycle, pos: p.trend.position })})` : ""));
       cell(tr, sig(p.loc, 5)); cell(tr, p.var === null ? "–" : sig(p.var, 4));
       const [text, cls] = statusOf(p);
       const s = cell(tr, text); s.className = cls; if (p.invalid) s.title = `${p.invalid.reason} (${p.invalid.by})`;
@@ -1640,6 +1646,7 @@
     if (r.point.ar) {  // the correction of a residual chart in the unit of the characteristic (draft 10.3.2.6)
       div.appendChild(el("p", "muted", t("mon.ar_correction", { predicted: sig(r.point.ar.predicted, 6), residual: sig(r.point.ar.residual, 4), shift: r.point.ar.level_shift === null ? "–" : sig(r.point.ar.level_shift, 4) })));
     }
+    if (r.point.trend) div.appendChild(el("p", "muted", t("mon.trend_info", { cycle: r.point.trend.cycle, pos: r.point.trend.position, expected: sig(r.point.trend.expected, 6), residual: sig(r.point.trend.residual, 4) })));
     if (r.msa && r.msa.status === "conditional") div.appendChild(el("p", "status-warning", t("msa.monitor_conditional", { name: r.msa.name })));
     if (r.status === "alarm") {
       div.appendChild(el("p", "", r.point.alarms.map((a) => `${t("mon.chart_" + a.chart)}: ${t("alarmrule." + a.rule)}`).join("; ")));
@@ -1652,6 +1659,17 @@
     }
     box.appendChild(div);
   }
+  function renderCycleEntry(m, v) {  // the person says when a new cycle starts (the tool was changed ...): that is the only way a cycle begins
+    const trend = m.kind === "trend";
+    $("#md-cycle-label").hidden = !trend;
+    $("#md-cycle-note-label").hidden = !trend || !$("#md-cycle").checked;
+    const info = $("#md-cycle-info");
+    info.hidden = !trend;
+    if (trend) {
+      const last = v.points.length ? v.points[v.points.length - 1].trend : null;
+      info.textContent = last ? t("mon.cycle_status", { cycle: last.cycle, next: last.position + 2 }) : t("mon.cycle_status_first");
+    }
+  }
   async function submitPoint() {
     const m = M.view.monitor;
     const values = [];
@@ -1663,12 +1681,18 @@
     }
     const body = { values, label: $("#md-label").value };
     if (m.kind === "zmr") body.part = $("#md-part").value;
+    if (m.kind === "trend" && $("#md-cycle").checked) {
+      const note = $("#md-cycle-note").value.trim();
+      if (!note) return showError({ code: "cycle_note_required", message: "", params: {} });
+      body.cycle = note;
+    }
     const taken = $("#md-taken").value;
     if (taken) body.taken_at = new Date(taken).toISOString();
     await guarded(async () => {
       M.last = await post(`/api/monitors/${M.id}/points`, body);
       $$("#md-values input").forEach((i) => { i.value = ""; });
       $("#md-label").value = ""; $("#md-taken").value = "";
+      $("#md-cycle").checked = false; $("#md-cycle-note").value = "";
       M.view = await api(`/api/monitors/${M.id}`);
       renderMonitor();
       startAlertPolling();
@@ -1723,6 +1747,16 @@
       const d = lim.diagnostics || {};
       box.appendChild(el("p", "", t("mon.limits_ar", { rev: lim.revision, order: lim.order, phi: lim.phi.map((x) => sig(x, 4)).join(", "), mu: sig(lim.process_mean, 6), sigma: sig(lim.sigma, 5) })));
       if (d.raw_lag1 !== undefined) box.appendChild(el("p", "muted", t("mon.limits_ar_diag", { lag1: sig(d.raw_lag1, 3), p: sig(d.residual_ljung_box_p, 3), raw: sig(d.sigma_raw, 4), resid: sig(lim.sigma, 4) })));
+      box.appendChild(el("p", "", row(t("result.chart_location"), lim.location)));
+      box.appendChild(el("p", "", row(t("result.chart_variation"), lim.variation)));
+    } else if (v.monitor.kind === "trend") {
+      const d = lim.diagnostics || {};
+      box.appendChild(el("p", "", t("mon.limits_trend", { rev: lim.revision, a: sig(lim.intercept, 6), b: sig(lim.slope, 5), sigma: sig(lim.sigma, 5) })));
+      if (d.n !== undefined) {
+        box.appendChild(el("p", "muted", t("mon.limits_trend_diag", { n: d.n, cycles: d.n_cycles, longest: d.longest_cycle, p: sig(d.slope_p, 3), r2: sig(d.r2, 3) })));
+        if (d.slope_p > 0.05) box.appendChild(el("p", "status-warning", t("mon.limits_trend_flat")));
+        if (d.cycle_level_p != null && d.cycle_level_p < 0.01) box.appendChild(el("p", "status-warning", t("mon.limits_trend_levels", { p: sig(d.cycle_level_p, 3) })));
+      }
       box.appendChild(el("p", "", row(t("result.chart_location"), lim.location)));
       box.appendChild(el("p", "", row(t("result.chart_variation"), lim.variation)));
     } else if (v.monitor.kind === "multistream") {
@@ -1813,7 +1847,7 @@
       $$(".nl-mv").forEach((e) => { e.hidden = !(vec && type === "parameters"); });
       $$(".nl-obs").forEach((e) => { e.hidden = !((vec || M.view.monitor.kind === "multistream") && type === "observations"); });
       $$(".nl-parts").forEach((e) => { e.hidden = type !== "parts"; });
-      if (!vec) $("#nl-mu-label").hidden = type !== "parameters" || isTol(M.view.monitor.kind);
+      if (!vec) $("#nl-mu-label").hidden = type !== "parameters" || isTol(M.view.monitor.kind) || M.view.monitor.kind === "trend";
       if ($("#nl-type").selectedOptions[0] && $("#nl-type").selectedOptions[0].disabled) { $("#nl-type").value = ok[0]; return syncSourceFields(); }
       const sizes = M.view.monitor.kind === "p" || M.view.monitor.kind === "u";
       $$(".nl-seq").forEach((e) => { e.hidden = !((SEQ_KINDS.includes(M.view.monitor.kind) || M.view.monitor.kind === "mewma" || M.view.monitor.kind === "mcusum") && e.classList.contains("nl-" + M.view.monitor.kind)); });
@@ -1917,14 +1951,14 @@
     else if (kind === "pre") $("#me-n").value = 2;
     else if (count) { if (!($("#me-n").dataset.kind && isCount($("#me-n").dataset.kind))) $("#me-n").value = 50; }
     else if (kind === "pearson") { if ($("#me-n").dataset.kind !== "pearson") $("#me-n").value = 1; }
-    else if (kind === "ar") $("#me-n").value = 1;
+    else if (kind === "ar" || kind === "trend") $("#me-n").value = 1;
     else if (kind === "multistream") { if ($("#me-n").dataset.kind !== "multistream" || Number($("#me-n").value) < 2) $("#me-n").value = 4; }
     else if (Number($("#me-n").value) < 2 || Number($("#me-n").value) > (kind === "xbar-s" || kind === "acc-xbar" || kind === "ext-xbar" ? 25 : 10)) $("#me-n").value = 5;
     if ((SEQ_KINDS.includes(kind) && !SEQ_KINDS.includes($("#me-n").dataset.kind || "")) || kind === "zmr"
       || (isVec(kind) && !isVec($("#me-n").dataset.kind || ""))) $("#me-n").value = 1;  // individual values unless asked otherwise
     $("#me-n").dataset.kind = kind;
     $("#me-n-label").textContent = t(count ? (kind === "p" || kind === "u" ? "mon.f_n_typical" : "mon.f_n_size") : "mon.f_n");
-    if (!$("#me-kind").disabled) $("#me-n").disabled = kind === "imr" || kind === "c" || kind === "acc-x" || kind === "pre" || kind === "zmr" || kind === "ar";
+    if (!$("#me-kind").disabled) $("#me-n").disabled = kind === "imr" || kind === "c" || kind === "acc-x" || kind === "pre" || kind === "zmr" || kind === "ar" || kind === "trend";
     if (kind === "multistream") $("#me-n-label").textContent = t("mon.f_streams");
     if (isVec(kind)) $("#me-n-label").textContent = t("mon.f_m");
     const laneyKind = kind === "p" || kind === "u";  // Laney limits: for the p and u charts, from reference counts
@@ -1965,7 +1999,7 @@
     $("#me-src-parts").hidden = type !== "parts";
     $("#me-src-rate").hidden = type !== "rate"; $("#me-src-counts").hidden = type !== "counts";
     $("#me-src-tolerance").hidden = type !== "tolerance";
-    $("#me-mu-label").hidden = isTol(kind);
+    $("#me-mu-label").hidden = isTol(kind) || kind === "trend";
     $("#me-sizes-box").hidden = !(kind === "p" || kind === "u");
   }
   function readMonitorEditor() {
@@ -4002,6 +4036,7 @@
     ROLE_SELECTS.forEach((s) => $(s).addEventListener("change", refreshImportForm));
     $("#decimal").addEventListener("change", () => { if (state.preview) { const g = guessColumns(); if (!$("#col-value").value && g.value) { $("#col-value").value = g.value; refreshImportForm(); } } });
     $("#import-btn").addEventListener("click", doImport);
+    $("#md-cycle").addEventListener("change", () => { $("#md-cycle-note-label").hidden = !$("#md-cycle").checked; if ($("#md-cycle").checked) $("#md-cycle-note").focus(); });
     $("#import-sheet").addEventListener("change", (e) => { state.imp.sheet = e.target.value; state.imp.template = null; importSerial(repreview); });
     $("#import-header-row").addEventListener("change", (e) => { const n = parseInt(e.target.value, 10); state.imp.headerRow = n >= 1 && n <= 1000 ? n : 1; state.imp.template = null; importSerial(repreview); });
     $("#import-template").addEventListener("change", (e) => importSerial(() => applyTemplate(e.target.value ? parseInt(e.target.value, 10) : null)));

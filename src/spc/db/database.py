@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 SCHEMA = """
 CREATE TABLE users (
@@ -114,6 +114,7 @@ CREATE TABLE monitor_points (
     alarms         TEXT NOT NULL DEFAULT '[]',
     warnings       TEXT NOT NULL DEFAULT '[]',
     incident_id    INTEGER,
+    cycle          TEXT NOT NULL DEFAULT '',
     UNIQUE (monitor_id, seq)
 );
 CREATE INDEX monitor_points_time ON monitor_points(monitor_id, taken_at);
@@ -301,6 +302,9 @@ CREATE TABLE import_templates (
 """
 
 
+MIGRATION_12_TO_13 = "ALTER TABLE monitor_points ADD COLUMN cycle TEXT NOT NULL DEFAULT ''"  # a note: this point starts a new cycle (trend monitors)
+
+
 MIGRATION_9_TO_10 = """
 CREATE TABLE lots (
     id         INTEGER PRIMARY KEY,
@@ -430,7 +434,7 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11):
+        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
@@ -484,9 +488,15 @@ class Database:
                 self._conn.execute(MIGRATION_10_TO_11)
                 self._conn.execute("PRAGMA user_version = 11")
                 self._conn.execute("COMMIT")
-            self._conn.execute("BEGIN IMMEDIATE")  # version 12 adds the import templates (column maps of customers' files)
-            self._conn.execute(MIGRATION_11_TO_12)
-            self._conn.execute("PRAGMA user_version = 12")
+            if version <= 11:
+                self._conn.execute("BEGIN IMMEDIATE")  # version 12 adds the import templates (column maps of customers' files)
+                self._conn.execute(MIGRATION_11_TO_12)
+                self._conn.execute("PRAGMA user_version = 12")
+                self._conn.execute("COMMIT")
+            self._conn.execute("BEGIN IMMEDIATE")  # version 13 adds the cycle marks of the trend monitors
+            if "cycle" not in [r[1] for r in self._conn.execute("PRAGMA table_info(monitor_points)")]:  # a database made by version 3 to 12 of this schema text has it already
+                self._conn.execute(MIGRATION_12_TO_13)
+            self._conn.execute("PRAGMA user_version = 13")
             self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")

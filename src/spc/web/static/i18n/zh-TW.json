@@ -2379,5 +2379,22 @@
   "doe.plan_run_no": "試驗",
   "doe.plan_std_no": "標準順序",
   "doe.plan_order_standard": "試驗依標準順序排列。",
-  "doe.plan_order_random": "試驗順序為隨機（種子 {seed}）；請依此順序做試驗。"
+  "doe.plan_order_random": "試驗順序為隨機（種子 {seed}）；請依此順序做試驗。",
+  "analysis.chart_trend": "有趨勢製程的殘差圖（刀具磨耗等，週期由現場人員註記）",
+  "result.series_location_trend": "相對於週期直線的殘差",
+  "mon.f_intercept": "週期開始時的值（位置 0）",
+  "mon.f_slope": "週期內每個樣本的變化量（斜率）",
+  "mon.dep_note_trend": "適用於兩次處置之間，值會依已知方式漂移的製程，例如刀具磨耗。每個值與其所屬週期的直線比較，圖上畫的是殘差。週期由人宣告：處置後（換刀、換液…）輸入的第一個樣本勾選「新週期」並寫下發生什麼事。沒有註記時，圖會繼續按舊週期計位置，值的跳動就是警報。參考資料可以是「重啟」標記了週期起點的資料集、本監控器的點，或已知的直線。這張圖不與規格比較，也沒有製程能力報告。",
+  "mon.limits_trend": "界限版本 {rev}。週期的直線：{a} + {b} × 位置。殘差標準差 {sigma}。殘差界限：下限／零／上限：",
+  "mon.limits_trend_diag": "直線由 {cycles} 個週期、共 {n} 個值擬合，最長的週期有 {longest} 個樣本。斜率：p ＝ {p}；R² ＝ {r2}。",
+  "mon.limits_trend_flat": "斜率不顯著：參考資料看不出明顯趨勢。直接畫原始值的管制圖可能更適合這個製程。",
+  "mon.limits_trend_levels": "參考資料的各週期起點水準不同（p ＝ {p}）：一條直線不能描述全部，界限也比單一週期需要的寬。",
+  "mon.cycle_new": "這個樣本開始一個新週期（換刀、換液…）",
+  "mon.cycle_note": "發生了什麼事（必填，會跟著這個樣本保存）",
+  "mon.cycle_status": "週期 {cycle}：下一個樣本是該週期的第 {next} 個。",
+  "mon.cycle_status_first": "第一個樣本就是週期 1 的開始。",
+  "mon.cycle_pos": "週期 {cycle}，位置 {pos}",
+  "mon.trend_info": "週期 {cycle}，位置 {pos}：直線預期 {expected}；圖上畫的殘差是 {residual}。",
+  "error.cycle_note_required": "勾選「新週期」時必須寫下發生什麼事，例如換了哪一把刀。",
+  "error.report_not_for_trend": "有趨勢製程的點是相對於週期直線的殘差，由它算出的能力指數沒有意義。請用資料分析的績效指標。"
 }

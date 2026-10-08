@@ -14,7 +14,7 @@
 | ⬜ | 未實作 |
 | ➖ | 說明性文字或組織責任，軟體沒有對應功能 |
 
-統計：✅ 78，🔶 10，◐ 6，⬜ 0，➖ 6（共 100 列）
+統計：✅ 79，🔶 10，◐ 5，⬜ 0，➖ 6（共 100 列）
 
 「驗證」欄的測試以「tests/檔名::測試名」表示。另有獨立證據：ISO/TR 11462-3 的資料集（內建確效報告，`src/spc/validation/iso11462.py`）、ISO 22514-8 附錄的算例（`src/spc/validation/iso22514.py`）、草案自己的數值範例（表 8-1、9-3、12 章範例）、AIAG MSA 手冊例。
 
@@ -113,7 +113,7 @@
 | 10.2.3 | 不穩定時的矯正：重量、調整製程參數、調整要素、根因分析、遏制；改變後重新評估界限 | ✅ | `src/spc/monitor/service.py` | `tests/test_monitor.py::test_the_plan_is_followed_step_by_step_and_an_incident_closes_only_on_proof` | |
 | 10.2.4 | 管制圖效能：OC、ARL | ✅ | `src/spc/core/arl_oc.py` | `tests/test_arl_oc_and_params.py::test_oc_values_for_a_one_sigma_shift` | |
 | 10.3.1 | 圖面要素：標頭資料、中心線、界限、警告界限、樣本編號與時間／使用者、違規標記、事件與對策記錄；現場圖不顯示規格限 | ✅ | `src/spc/monitor/`（圖表資料不含規格；規格只用於持續績效報告）、`src/spc/web/static/app.js` | `tests/test_monitor.py::test_check_point_flags_limits_warnings_and_only_what_the_new_point_completes` | |
-| 10.3.2、圖 10-5 | 選圖指南（資料類型、觀察方向、概念、有無記憶、非常態、前期、多變量、短批） | ◐ | `src/spc/core/chart_guide.py`（決策樹照圖 10-5）、`POST /api/chart-guide`、介面「工具」 | `tests/test_chart_guide.py::test_the_tree_is_figure_10_5`、`tests/test_special_charts.py::test_laney_p_follows_the_formula` | 圖中點名的圖都已有：Laney p′／u′（監控選項與工具）、z 化計數型圖、百分位數、G、T、UWMA、與目標的差、Levey-Jennings、Box-Cox 與 Johnson 轉換後的個別值圖（工具）；**只有「迴歸圖」仍標為部分**（僅分析用，不是監控） |
+| 10.3.2、圖 10-5 | 選圖指南（資料類型、觀察方向、概念、有無記憶、非常態、前期、多變量、短批） | ✅ | `src/spc/core/chart_guide.py`（決策樹照圖 10-5）、`POST /api/chart-guide`、介面「工具」；迴歸圖的監控版：`src/spc/monitor/`（種類 `trend`） | `tests/test_chart_guide.py::test_the_tree_is_figure_10_5`、`tests/test_special_charts.py::test_laney_p_follows_the_formula`、`tests/test_trend_monitor.py::test_the_residual_chart_follows_the_line_and_a_new_cycle_starts_the_line_again` | 圖中點名的圖都已有：Laney p′／u′（監控選項與工具）、z 化計數型圖、百分位數、G、T、UWMA、與目標的差、Levey-Jennings、Box-Cox 與 Johnson 轉換後的個別值圖（工具）；「迴歸圖」也有監控版（有趨勢製程的殘差圖，週期由現場人員註記） |
 | 10.3.2.6 | 非常態：轉換（Box-Cox、Johnson）、自迴歸模型殘差圖；殘差圖的修正要反轉換 | ✅ | `src/spc/core/charts/dependent.py`（AR 殘差圖）；分布轉換在 `distributions.py` | `tests/test_monitor.py::test_an_ar_monitor_end_to_end`、`tests/test_monitor.py::test_an_ar_monitor_gives_the_correction_in_the_unit_of_the_characteristic` | AR 殘差圖的修正量依 殘差/(1−Σφ) 轉回原單位；草案沒有給 AR 的公式（標準方法） |
 | 10.3.2.7 | 前期管制：用預期的最大變異或相近製程的參數；預先驗收圖；預控圖；只用於監視不用於控制 | ✅ | `src/spc/monitor/model.py`（參數來源）；預控圖 | `tests/test_monitor.py::test_pre_control_zones_follow_the_classical_rules` | 預控圖草案沒有規則，用古典規則（標明） |
 | 10.3.2.8 | 多變量：Hotelling T²、MEWMA、MCUSUM | ✅ | `src/spc/core/charts/multivariate.py` | `tests/test_monitor.py::test_hotelling_limit_has_the_stated_false_alarm_rate`、`tests/test_monitor.py::test_the_mcusum_limit_agrees_with_crosier_and_the_recursion_is_the_published_one` | 草案沒有給公式，用標準式（文件已註明）🔶 |
@@ -131,7 +131,7 @@
 | 10.4 | 持續績效與能力報告：滾動期間重算指標、四象限（圖 10-26）、界限檢討（太窄／太寬）、反應時效 | ✅ | `src/spc/monitor/service.py`（持續績效報告） | `tests/test_monitor.py::test_ongoing_report_gives_indices_quadrant_trend_limits_review_and_response`、`tests/test_monitor.py::test_the_limits_review_notices_limits_that_are_too_narrow_too_wide_or_off_centre` | |
 | 10.4 | 依時間模型的風險分組、樣本大小與頻率建議；理性抽樣與理性分組 | 🔶 | 風險分組與樣本大小／頻率的定性建議同表 10-2（`src/spc/core/time_model.py::recommendation`）；樣本大小與抽樣間隔的計算：`src/spc/core/arl_oc.py::required_subgroup_size`、`sampling_interval`、介面「工具」 | `tests/test_time_model.py::test_the_api_gives_the_recommendation_and_the_suggestion_carries_it`、`tests/test_arl_oc_and_params.py::test_the_sampling_interval_follows_the_run_length` | 草案只給定性建議；數字由 ARL 推得：每組件數取達到目標 ARL 的最小值，抽樣間隔＝允許件數／ARL（件）。這是我們的解讀。理性分組只在結果中附說明，沒有互動式引導 |
 | 10.3.1、10.3.2 | 多串流與巢狀資料的變異來源（SoV）研究 | 🔶 | `src/spc/core/nested.py`、介面「特殊情形」 | `tests/test_special.py::test_balanced_nested_anova_equals_the_textbook_formulas`、`tests/test_special.py::test_unbalanced_estimators_are_unbiased_for_the_known_components` | 草案只點名沒有給方法；動差法巢狀變異數分析；交叉因子與 REML 未做 |
-| 10.3.2.6、9.4 C3 | 有趨勢的製程（刀具磨耗） | 🔶 | `src/spc/core/charts/trend.py`（迴歸管制圖，分析用） | `tests/test_special.py::test_trend_chart_matches_an_independent_regression` | 草案沒有給公式；不是監控；有趨勢的製程只算績效指標 |
+| 10.3.2.6、9.4 C3 | 有趨勢的製程（刀具磨耗） | 🔶 | 分析：`src/spc/core/charts/trend.py`（迴歸管制圖）；監控：`src/spc/monitor/`（種類 `trend`）、`src/spc/api/monitors.py`（`cycle`）、介面「監控」 | `tests/test_special.py::test_trend_chart_matches_an_independent_regression`、`tests/test_trend_monitor.py::test_the_residual_chart_follows_the_line_and_a_new_cycle_starts_the_line_again`、`tests/test_trend_monitor.py::test_a_forgotten_tool_change_is_an_alarm_until_somebody_marks_the_new_cycle`、`tests/test_trend_monitor.py::test_limits_from_the_points_of_the_monitor_use_its_cycle_marks`、`tests/test_trend_monitor.py::test_limits_from_a_data_set_use_its_restarts_as_the_starts_of_the_cycles`、`tests/test_ui_e2e.py::test_trend_monitor_with_a_cycle_marked_by_the_operator_in_the_browser` | 草案沒有給公式。監控版畫的是相對於「週期直線」的殘差；**週期由現場人員宣告**（輸入處置後的第一個樣本時勾選「新週期」並寫下發生什麼事，記入稽核鏈），沒有註記時圖繼續按舊週期計位置，值的跳動就是警報。位置＝週期內的樣本序號；新週期時移動全距重新開始（如 I-MR 的重啟）；無效的點仍佔位置。參考：資料集（其「重啟」標記是週期起點）、本監控器的點（用週期標記）、或已知的直線。直線與殘差標準差由所有週期合併擬合；各週期起點水準不同時（變異數分析）會警告。沒有規格比較與能力報告；補註記只能向前（已輸入的點不重算）。這些規則是我們的 |
 | 10.5 | 其他方法：PAA、AI 異常偵測；內部可另用，替代協議標準時須經雙方同意 | ➖ | — | — | 草案只舉例，未要求 |
 
 ## 第 11 章　軟體的應用
@@ -169,12 +169,11 @@
 
 ## 缺口總表（⬜ 與 ◐，依對稽核的影響排序）
 
-1. **圖 10-5 的迴歸圖**：只做成分析用的工具，不是監控器。
-2. **ISO 22514-7**：已依 2012 第一版全文實作並以其範例核對。剩下：2021 第二版只有預覽（可能有差異）；標準自己的幾處不一致（A.5 的臨界值自由度、8.2 的 t 值、表 11 對 C_MP 的定義）以公式為準並標為已知；計數型 MSA（AIAG）接受準則未對照 AIAG 手冊。
-3. **AIAG／VDA 5 的判定門檻**：計數型 MSA、AIAG 線性、通用預算（2U/T 15 %／30 %）的門檻未對照手冊；ISO 22514-7 的 Q_MS ≤ 15 %、Q_MP ≤ 30 %、C > 1.33 已依標準。
-4. **ISO/TR 11462-5 的量測值交換**：只讀描述資料；量測值的寫法、結構與管制圖欄位、目錄與範例在預覽版之外，需要完整文件才能讀寫量測值與寫檔。
-5. 製程特性化已有迴歸、二水準完全與部分因子、中心複合與 Box-Behnken 的反應曲面與規劃；沒有混合設計、有限制的設計（D 最佳）、分組與 Taguchi／Shainin（草案只點名，沒有方法）。
-6. **不在軟體範圍或需要其他系統**（仍標 ◐ 或 ➖）：與特定 CAQ 系統的連接器（11.1，已有 REST、CSV 匯出與事件通知可串接）、規劃的工作站與物流（6.5 的生產規劃）、產品／製程／系統稽核（5.4 迴路 4～6，組織責任）。軟體只提供證據鏈與對應的記錄。
+1. **ISO 22514-7**：已依 2012 第一版全文實作並以其範例核對。剩下：2021 第二版只有預覽（可能有差異）；標準自己的幾處不一致（A.5 的臨界值自由度、8.2 的 t 值、表 11 對 C_MP 的定義）以公式為準並標為已知；計數型 MSA（AIAG）接受準則未對照 AIAG 手冊。
+2. **AIAG／VDA 5 的判定門檻**：計數型 MSA、AIAG 線性、通用預算（2U/T 15 %／30 %）的門檻未對照手冊；ISO 22514-7 的 Q_MS ≤ 15 %、Q_MP ≤ 30 %、C > 1.33 已依標準。
+3. **ISO/TR 11462-5 的量測值交換**：只讀描述資料；量測值的寫法、結構與管制圖欄位、目錄與範例在預覽版之外，需要完整文件才能讀寫量測值與寫檔。
+4. 製程特性化已有迴歸、二水準完全與部分因子、中心複合與 Box-Behnken 的反應曲面與規劃；沒有混合設計、有限制的設計（D 最佳）、分組與 Taguchi／Shainin（草案只點名，沒有方法）。
+5. **不在軟體範圍或需要其他系統**（仍標 ◐ 或 ➖）：與特定 CAQ 系統的連接器（11.1，已有 REST、CSV 匯出與事件通知可串接）、規劃的工作站與物流（6.5 的生產規劃）、產品／製程／系統稽核（5.4 迴路 4～6，組織責任）。軟體只提供證據鏈與對應的記錄。
 
 ## 我方解讀清單（🔶，建議請統計人員審閱）
 
@@ -197,6 +196,7 @@
 | ISO 22514-7 的判定 | 建議 Q_MS ≤ 15 %、Q_MP ≤ 30 %、C > 1.33；計數型不確定範圍經驗法則 20 % | 研究的判定＝兩個 Q 與兩個 C 都在界限內；有設計不足（少於 5 個工件、少於 30 次量測…）、不適合度顯著、解析度過粗或標準差不一致時為「有條件」；不確定範圍 ≤ 20 % 通過、≤ Q_MP 上限有條件；Bowker 檢定的顯著差異為「有條件」 |
 | ISO 22514-7 的 u_BI | 7.1.2 偏差的標準不確定度 | 用迴歸函數修正讀值時 u_BI ＝ 0（A.3 的作法）；否則由單一標準件的偏差 |
 | 改善循環（PDCA） | 草案只給 PDCA 的方法與負責人 | KPI＝持續報告的 Pk 或 P 與目標；驗證用實施後至少 25 個有效點重算；有效＝指標 ≥ 目標且穩定；有效才可成為新標準，無效須重擬計畫 |
+| 有趨勢製程的監控（迴歸圖） | 只點名「刀具磨耗」，沒有公式與規則 | 殘差圖；週期由人宣告並註記；位置＝週期內樣本序號；直線由所有週期合併擬合；新週期時移動全距重新開始 |
 | 隨機抽樣的取點位置 | 草案例：「在班別中段取樣」 | 每個子組一個時段；取點位置可選隨機或正中 |
 | 稽核鏈錨點 | 草案要求可追溯、防竄改 | 保存的「筆數＋最後雜湊」在鏈中該筆的雜湊必須相同，否則是被截斷（較短）、被改動或重建 |
 | 批次放行處置 | 草案只說放行合格品、攔下不合格品；操作員負責產品處置（6.8.1）；挑選、報廢、重工是對輸出的過渡措施 | 批次連結監控器與一段點；證據阻擋＝開著或升級（轉根本原因分析）的事件、被 MSA 閘門擋住的量測系統、範圍內沒有有效點；放行需證據乾淨，否則挑選（全檢、件數須相加）或由工程師附客戶核准編號特採；沒有連結監控器的放行須工程師與理由；操作員可記錄、暫扣、在證據乾淨時處置；重新開啟須工程師與理由；每步入歷程與稽核鏈 |

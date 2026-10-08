@@ -2379,5 +2379,22 @@
   "doe.plan_run_no": "Run",
   "doe.plan_std_no": "Standard order",
   "doe.plan_order_standard": "The runs are in standard order.",
-  "doe.plan_order_random": "The order of the runs is random (seed {seed}); run the experiment in this order."
+  "doe.plan_order_random": "The order of the runs is random (seed {seed}); run the experiment in this order.",
+  "analysis.chart_trend": "Residual chart of a process with a trend (tool wear, cycles marked by people)",
+  "result.series_location_trend": "Residual about the line of the cycle",
+  "mon.f_intercept": "Value at the start of a cycle (position 0)",
+  "mon.f_slope": "Change per sample inside a cycle (slope)",
+  "mon.dep_note_trend": "For a process whose value drifts in a known way between two interventions, for example the wear of a tool. Each value is compared with the line of its cycle, and the residual is charted. A cycle starts when somebody says so with the first sample after the intervention (tool changed, bath renewed ...) and writes down what happened. Without that note the chart goes on counting in the old cycle, and the jump is an alarm. The reference is a data set whose restarts are the starts of the cycles, or points of this monitor, or a line you know. The values are not compared with the specification: there is no capability report for this chart.",
+  "mon.limits_trend": "Limits revision {rev}. Line of the cycle: {a} + {b} × position. Standard deviation of the residuals {sigma}. Residual limits: lower / zero / upper:",
+  "mon.limits_trend_diag": "The line was fitted to {n} values in {cycles} cycle(s), the longest {longest} samples. Slope: p = {p}; R² = {r2}.",
+  "mon.limits_trend_flat": "The slope is not significant: the reference shows no clear trend. A chart of the plain values may fit the process better.",
+  "mon.limits_trend_levels": "The cycles of the reference start at different levels (p = {p}): one line does not describe them all, and the limits are wider than a single cycle needs.",
+  "mon.cycle_new": "A new cycle starts with this sample (the tool was changed, the bath renewed ...)",
+  "mon.cycle_note": "What happened (required, it stays with the sample)",
+  "mon.cycle_status": "Cycle {cycle}: the next sample is number {next} of the cycle.",
+  "mon.cycle_status_first": "The first sample starts cycle 1.",
+  "mon.cycle_pos": "cycle {cycle}, position {pos}",
+  "mon.trend_info": "Cycle {cycle}, position {pos}: the line expected {expected}; the residual that is charted is {residual}.",
+  "error.cycle_note_required": "Tick “a new cycle starts” only with a note of what happened, for example the tool that was changed.",
+  "error.report_not_for_trend": "The points of a process with a trend are residuals about the line of the cycle: a capability index from them would mean nothing. Use the performance indices of an analysis of the values."
 }

@@ -401,6 +401,7 @@ class PointBody(Strict):
     label: str = Field(default="", max_length=100)
     tags: dict[str, str] = Field(default_factory=dict, max_length=6)
     taken_at: str | None = Field(default=None, max_length=40)
+    cycle: str | None = Field(default=None, max_length=200)  # trend monitors: this sample starts a new cycle (the tool was changed ...); the note says what happened
 
 
 class ReasonBody(Strict):

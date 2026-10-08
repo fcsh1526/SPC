@@ -4,6 +4,9 @@ The draft names the problem and gives no formula. The standard method is the reg
 statistic (subgroup mean, or the value itself) against the position, and the limits lie u residual standard deviations around it. With a known cycle (for example a dressing cycle
 of `cycle` samples) the position is counted inside the cycle, so one line serves every cycle (a saw tooth) and the chart restarts after each dressing.
 
+The cycles can also be given as positions (how far each point is from the start of its cycle, for cycles that people mark when the tool is changed, not at a fixed length), with the cycle of each
+point. A one-way analysis of variance of the residuals by cycle tells whether the cycles start at different levels (then one line does not serve all of them).
+
 The criteria are applied to the residuals about the line: points beyond the limits, runs on one side of the line, trends of the residuals. The slope is tested
 (t test with k - 2 degrees of freedom). The residual standard deviation includes whatever random variation is left after the trend; it is compared with the variation within the subgroups.
 """
@@ -38,16 +41,26 @@ class TrendChart:
     df: int
     violations: tuple
     cycle: int | None
+    n_cycles: int = 1
+    cycle_level_p: float | None = None  # p of the analysis of variance of the residuals by cycle: small = the cycles start at different levels
 
 
-def fit(values, cycle: int | None = None, alpha: float = ALPHA_3SIGMA, rules: RuleSet | None = None, confidence: float = 0.95) -> TrendChart:
+def fit(values, cycle: int | None = None, alpha: float = ALPHA_3SIGMA, rules: RuleSet | None = None, confidence: float = 0.95,
+        positions=None, groups=None) -> TrendChart:
+    """`positions` (distance of each point from the start of its cycle) and `groups` (the cycle of each point) replace the fixed `cycle` length."""
     y = np.asarray(values, dtype=float).ravel()
     k = y.size
     if k < MIN_POINTS or not np.all(np.isfinite(y)):
         raise ValueError(f"need at least {MIN_POINTS} finite points")
-    if cycle is not None and not (isinstance(cycle, int) and 3 <= cycle <= k):
+    if positions is not None:
+        t = np.asarray(positions, dtype=float).ravel()
+        if t.size != k or not np.all(np.isfinite(t)) or np.any(t < 0):
+            raise ValueError("positions: one non-negative number for each point")
+        cycle = None
+    elif cycle is not None and not (isinstance(cycle, int) and 3 <= cycle <= k):
         raise ValueError("the cycle must be a whole number of at least 3 samples and at most the number of samples")
-    t = (np.arange(k) % cycle if cycle else np.arange(k)).astype(float)
+    if positions is None:
+        t = (np.arange(k) % cycle if cycle else np.arange(k)).astype(float)
     if np.ptp(t) == 0:
         raise ValueError("all points have the same position")
     tm, ym = t.mean(), y.mean()
@@ -70,4 +83,18 @@ def fit(values, cycle: int | None = None, alpha: float = ALPHA_3SIGMA, rules: Ru
     z = res / sigma
     rs = rules or RuleSet(beyond_limits=True, run_length=7, trend_length=7)
     viol = evaluate(z, 0.0, -u, u, rs, sigma=1.0).violations
-    return TrendChart(t, y, fitted, fitted - u * sigma, fitted + u * sigma, a, b, sigma, r2, p, (b - tq * se_b, b + tq * se_b), df, tuple(viol), cycle)
+    n_cycles, level_p = 1, None
+    if groups is not None:
+        g = np.asarray(groups).ravel()
+        if g.size != k:
+            raise ValueError("groups: one cycle number for each point")
+        labels = list(dict.fromkeys(g.tolist()))
+        n_cycles = len(labels)
+        parts = [res[g == lab] for lab in labels]
+        usable = [x for x in parts if x.size >= 2]
+        if len(usable) >= 2 and len(usable) == len(parts) and k - len(labels) >= 1:
+            level_p = float(stats.f_oneway(*parts).pvalue)
+            level_p = level_p if math.isfinite(level_p) else None
+    elif cycle:
+        n_cycles = int(math.ceil(k / cycle))
+    return TrendChart(t, y, fitted, fitted - u * sigma, fitted + u * sigma, a, b, sigma, r2, p, (b - tq * se_b, b + tq * se_b), df, tuple(viol), cycle, n_cycles, level_p)

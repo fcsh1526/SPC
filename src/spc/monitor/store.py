@@ -32,6 +32,7 @@ def point_json(r) -> dict:
         "loc": r["loc"], "var": r["var"], "valid": bool(r["valid"]),
         "invalid": None if r["valid"] else {"reason": r["invalid_reason"], "by": r["invalid_by"], "at": r["invalid_at"]},
         "alarms": json.loads(r["alarms"]), "warnings": json.loads(r["warnings"]), "incident_id": r["incident_id"],
+        "cycle": r["cycle"],
     }
 
 
@@ -123,10 +124,10 @@ class MonitorStore:
 
     def insert_point(self, monitor_id: int, seq: int, **f: Any) -> None:
         self.db.execute(
-            "INSERT INTO monitor_points (monitor_id, seq, limits_rev, taken_at, entered_at, entered_by, label, tags, vals, loc, var, alarms, warnings, incident_id)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO monitor_points (monitor_id, seq, limits_rev, taken_at, entered_at, entered_by, label, tags, vals, loc, var, alarms, warnings, incident_id, cycle)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (monitor_id, seq, f["limits_rev"], f["taken_at"], now_iso(), f["entered_by"], f["label"], _dump(f["tags"]), _dump(f["values"]),
-             f["loc"], f["var"], _dump(f["alarms"]), _dump(f["warnings"]), f.get("incident_id")))
+             f["loc"], f["var"], _dump(f["alarms"]), _dump(f["warnings"]), f.get("incident_id"), f.get("cycle", "")))
 
     def points(self, monitor_id: int, limit: int = 100, before: int | None = None, since_seq: int | None = None) -> list[dict]:
         rows = self.db.all(
@@ -158,6 +159,11 @@ class MonitorStore:
             "SELECT vals, alarms FROM monitor_points WHERE monitor_id = ? AND limits_rev = ? AND valid = 1 ORDER BY seq DESC LIMIT ?",
             (monitor_id, limits_rev, limit))
         return [(json.loads(r["vals"]), bool(json.loads(r["alarms"]))) for r in rows]
+
+    def cycle_marks(self, monitor_id: int) -> list[tuple[int, str]]:
+        """(seq, note) of the points that start a new cycle (trend monitors), oldest first."""
+        rows = self.db.all("SELECT seq, cycle FROM monitor_points WHERE monitor_id = ? AND cycle != '' ORDER BY seq", (monitor_id,))
+        return [(r["seq"], r["cycle"]) for r in rows]
 
     def recent_values(self, monitor_id: int, count: int) -> list[float]:
         """The first value of the latest valid points (of any limits revision), oldest first: the history of an autoregressive model."""
