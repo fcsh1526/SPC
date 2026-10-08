@@ -14,9 +14,10 @@ result. A reference decision for each part (1 = conforming, 0 = nonconforming) c
   system                 parts on which all appraisers judged right in all trials
 
 Kappa = (po - pe) / (1 - pe). Intervals are exact binomial (Clopper-Pearson) 95 %: they treat the decisions as independent, which the trials of one part are not,
-so they are a guide. The acceptance guidelines are the ones commonly attributed to AIAG MSA (4th edition) and are parameters of the policy of a system:
+so they are a guide. The acceptance guidelines are the ones of AIAG MSA (4th edition) and are parameters of the policy of a system:
 effectiveness >= 90 % capable, >= 80 % conditional; miss rate <= 2 % capable, <= 5 % conditional; false alarm rate <= 5 % capable, <= 10 % conditional;
-kappa >= 0.75 capable, >= 0.4 conditional. They have not been checked against the manual.
+kappa >= 0.75 capable, >= 0.4 conditional. They are Table III-C 6 of the manual (which calls them example guidelines) and its rule of thumb for kappa, and the 50-part study of the
+manual (Tables III-C 1 to 7) gives the printed kappas, effectiveness, miss and false alarm rates (spc.validation.aiag_msa).
 """
 
 from __future__ import annotations
