@@ -2092,6 +2092,81 @@ def test_aiag_bias_range_signal_detection_and_analytic_studies_in_the_browser(se
     ctx.close()
 
 
+def test_pooled_grr_gage_r_and_the_msa_calculators_in_the_browser(server, browser):
+    import numpy as np
+
+    from spc.validation import aiag_msa as manual
+
+    expect = playwright_sync.expect
+    ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page)
+    page.click("nav.tabs button[data-tab=msa]")
+    page.click("#ms-new")
+    page.fill("#mse-name", "Laboratory balance")
+    page.fill("#mse-resolution", "0.01")
+    page.fill("#mse-tolerance", "12")
+    page.click("#mse-save")
+    expect(page.locator("#ms-title")).to_have_text("Laboratory balance", timeout=20000)
+    data = np.array(manual.POOLED).transpose(2, 0, 1)  # part x appraiser x reading
+    text = "\n".join(" ; ".join(" ".join(str(v) for v in appraiser) for appraiser in part) for part in data.tolist())
+    page.select_option("#mss-kind", "pooled_grr")
+    expect(page.locator("#mss-psd-label")).to_be_visible()
+    page.fill("#mss-psd", "1")
+    page.fill("#mss-data", text)
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("pooled standard deviation, study 1", timeout=20000)
+    expect(page.locator("#ms-more-detail")).to_contain_text("GRR 0.29904")
+    expect(page.locator("#ms-more-detail")).to_contain_text("-3.41")  # z of the average h of appraiser C
+    expect(page.locator("#ms-checks")).to_contain_text("Gauge R&R")
+    page.select_option("#mss-kind", "gage_r")
+    expect(page.locator("#mss-psd-label")).to_be_hidden()
+    page.fill("#mss-data", "10.02 9.98 10.01 10.03 9.99 10.00 10.02 9.97 10.01 10.00")
+    page.click("#mss-save")
+    expect(page.locator("#ms-more-detail")).to_contain_text("Gage R study, study 2", timeout=20000)
+    expect(page.locator("#ms-more-detail")).to_contain_text("shows no signal")
+
+    # the calculators in the tools tab
+    page.click("nav.tabs button[data-tab=tools]")
+    page.fill("#mc-lsl", "0.6")
+    page.fill("#mc-usl", "1.0")
+    page.fill("#mc-bias", "0.05")
+    page.fill("#mc-sigma", "0.05")
+    page.fill("#mc-refs", "0.5 0.7 0.9")
+    page.click("#mc-run")
+    expect(page.locator("#mc-out table")).to_contain_text("0.1587", timeout=20000)
+    expect(page.locator("#mc-out")).to_contain_text("6 sigma range 0.3")
+    page.select_option("#mc-mode", "multi")
+    expect(page.locator("#mc-gpc")).to_be_hidden()
+    page.fill("#mc-current", "25.5")
+    page.fill("#mc-target", "15")
+    page.click("#mc-run")
+    expect(page.locator("#mc-out")).to_contain_text("3 independent readings", timeout=20000)
+    page.select_option("#mc-mode", "cp")
+    page.fill("#mc-cp-value", "1.3")
+    page.fill("#mc-grr", "30")
+    page.select_option("#mc-cp-given", "actual")
+    page.click("#mc-run")
+    expect(page.locator("#mc-out")).to_contain_text("Observed Cp 1.24", timeout=20000)
+    page.select_option("#mc-mode", "pv")
+    page.fill("#mc-rp", "3.511")
+    page.fill("#mc-ev", "0.20188")
+    page.click("#mc-run")
+    expect(page.locator("#mc-out")).to_contain_text("K3 = 0.31456", timeout=20000)
+    page.select_option("#mc-mode", "multi")
+    page.fill("#mc-current", "10")
+    page.fill("#mc-target", "20")
+    page.click("#mc-run")
+    expect(page.locator("#errors")).to_contain_text("smaller than the present one", timeout=20000)
+    page.select_option("#lang", "zh-TW")
+    expect(page.locator("#mc-card h3")).to_contain_text("計算器")
+    assert problems == []
+    ctx.close()
+
+
 def test_linearity_nested_grr_and_budget_in_the_browser(server, browser):
     expect = playwright_sync.expect
     ctx = browser.new_context(viewport={"width": 1300, "height": 1000}, locale="en")

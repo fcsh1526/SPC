@@ -342,3 +342,199 @@ def analytic_method(reference: Sequence[float], accepts: Sequence[int], limit: f
            "pct_tol": None if tolerance is None else float(100.0 * 6.0 * sigma / tolerance)}
     out["verdict"] = "fail" if out["bias_significant"] else "pass"
     return out
+
+
+# ------------------------------------------------------------------ chapter IV and the appendices
+
+def gage_performance_curve(lsl: float | None, usl: float | None, bias: float, sigma: float, reference_values: Sequence[float] | None = None, points: int = 121) -> dict[str, Any]:
+    """Gage performance curve of a variable measurement system (chapter IV F): the gauge reads N(X + bias, sigma^2) for a part of reference value X, so the probability of accepting it is
+    Pa = Phi((UL - (X + b)) / sigma) - Phi((LL - (X + b)) / sigma). With one limit only the term of the other is left out. Returns Pa at the given reference values and along a grid, and for each
+    limit the reference values at which Pa of that limit is 0.99865, 0.5 and 0.00135 (their difference is the 6 sigma range of the repeatability and reproducibility, and the value at
+    0.5 gives the bias)."""
+    if lsl is None and usl is None:
+        raise MsaError("give at least one specification limit")
+    if lsl is not None and usl is not None and not lsl < usl:
+        raise MsaError("the lower specification limit must be smaller than the upper one")
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in (bias, sigma) + tuple(v for v in (lsl, usl) if v is not None)):
+        raise MsaError("the limits, the bias and the standard deviation must be numbers")
+    if not sigma > 0:
+        raise MsaError("the standard deviation of the measurement system must be positive")
+
+    def pa(x: float) -> float:
+        hi = 1.0 if usl is None else float(stats.norm.cdf((usl - (x + bias)) / sigma))
+        lo = 0.0 if lsl is None else float(stats.norm.cdf((lsl - (x + bias)) / sigma))
+        return hi - lo
+
+    xs = [] if reference_values is None else [float(v) for v in reference_values]
+    if any(not math.isfinite(v) for v in xs):
+        raise MsaError("the reference values must be numbers")
+    lo_x = (lsl if lsl is not None else usl) - 4.0 * sigma - abs(bias)
+    hi_x = (usl if usl is not None else lsl) + 4.0 * sigma + abs(bias)
+    if not 11 <= points <= 2001:
+        raise MsaError("points must be between 11 and 2001")
+    grid = np.linspace(lo_x, hi_x, points)
+    z3 = float(stats.norm.isf(0.00135))
+    marks: dict[str, Any] = {}
+    for name, limit in (("lower", lsl), ("upper", usl)):
+        if limit is None:
+            continue
+        # accepting at this limit alone: rises with X for the lower limit, falls for the upper one
+        sgn = 1.0 if name == "lower" else -1.0
+        centre = limit - bias if name == "lower" else limit - bias  # Pa = 0.5 where X + b equals the limit
+        marks[name] = {"limit": float(limit), "x_p50": float(centre), "x_p99865": float(centre + sgn * z3 * sigma), "x_p00135": float(centre - sgn * z3 * sigma),
+                       "range_6sigma": float(2 * z3 * sigma), "bias": float(bias)}
+    return {"lsl": lsl, "usl": usl, "bias": float(bias), "sigma": float(sigma), "grr_range": float(6 * sigma),
+            "at": [{"reference": v, "pa": pa(v), "rejected": 1.0 - pa(v)} for v in xs],
+            "curve": [{"reference": float(x), "pa": pa(float(x))} for x in grid], "limits_marks": marks}
+
+
+def multiple_readings(current_pct: float, target_pct: float) -> dict[str, Any]:
+    """Reducing variation through multiple readings (chapter IV G): the average of n independent readings has the variance of one reading divided by n, so the spread falls by sqrt(n).
+    The number of readings that brings the %GRR (or the 6 sigma spread) from `current_pct` to `target_pct` is (current / target)^2. The manual rounds to the nearest integer;
+    here it is rounded up, so that the target is met."""
+    for v in (current_pct, target_pct):
+        if not (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v > 0):
+            raise MsaError("the current and the wanted values must be positive numbers")
+    if target_pct >= current_pct:
+        raise MsaError("the wanted value must be smaller than the present one")
+    exact = (current_pct / target_pct) ** 2
+    n = int(math.ceil(exact - 1e-9))
+    return {"current": float(current_pct), "target": float(target_pct), "n_exact": float(exact), "n": n, "n_rounded": int(round(exact)), "achieved": float(current_pct / math.sqrt(n)),
+            "note": "temporary measure, with the agreement of the customer, until the measurement system is improved"}
+
+
+def capability_impact(cp: float, grr: float, basis: str = "process", given: str = "observed") -> dict[str, Any]:
+    """Impact of the GRR on the capability index Cp (appendix B). sigma_obs^2 = sigma_act^2 + sigma_meas^2.
+    basis = 'process': GRR = sigma_meas / sigma_obs (a fraction), Cp_obs = Cp_act sqrt(1 - GRR^2).
+    basis = 'tolerance': GRR = 6 sigma_meas / (U - L) (a fraction), Cp_obs = Cp_act sqrt(1 - (Cp_obs GRR)^2), solved for Cp_obs = Cp_act / sqrt(1 + (Cp_act GRR)^2).
+    `given` says whether `cp` is the observed or the actual index; the other is returned (None when the observed Cp cannot be reached)."""
+    if not (isinstance(cp, (int, float)) and not isinstance(cp, bool) and math.isfinite(cp) and cp > 0):
+        raise MsaError("the capability index must be a positive number")
+    if not (isinstance(grr, (int, float)) and not isinstance(grr, bool) and math.isfinite(grr) and 0 <= grr):
+        raise MsaError("the GRR is a fraction (for example 0.3 for 30 %), zero or more")
+    if basis not in ("process", "tolerance") or given not in ("observed", "actual"):
+        raise MsaError("basis is process or tolerance, given is observed or actual")
+    obs = act = None
+    if basis == "process":
+        if grr >= 1:
+            raise MsaError("a GRR against the observed process variation is below 1 (100 %)")
+        if given == "observed":
+            obs, act = cp, cp / math.sqrt(1.0 - grr ** 2)
+        else:
+            obs, act = cp * math.sqrt(1.0 - grr ** 2), cp
+    else:
+        if given == "observed":
+            obs = cp
+            act = None if (cp * grr) >= 1.0 else cp / math.sqrt(1.0 - (cp * grr) ** 2)
+        else:
+            act, obs = cp, cp / math.sqrt(1.0 + (cp * grr) ** 2)
+    return {"basis": basis, "given": given, "grr": float(grr), "cp_observed": None if obs is None else float(obs), "cp_actual": None if act is None else float(act),
+            "loss": None if (obs is None or act is None) else float(act - obs), "reachable": act is not None}
+
+
+def pv_error_corrected(range_of_part_averages: float, n_parts: int, ev: float, appraisers: int, trials: int) -> dict[str, Any]:
+    """Part variation with the equipment variation taken out (appendix E): PV = sqrt((R_P K3)^2 - EV^2 / (k r)), K3 = 1 / d2* (m = number of parts, g = 1). The usual PV = R_P K3 contains
+    EV; the difference is a percentage point or two."""
+    if not (math.isfinite(range_of_part_averages) and range_of_part_averages > 0 and math.isfinite(ev) and ev >= 0):
+        raise MsaError("the range of the part averages must be positive and the equipment variation zero or more")
+    if not (isinstance(appraisers, int) and appraisers >= 1 and isinstance(trials, int) and trials >= 1):
+        raise MsaError("the numbers of appraisers and trials are whole numbers from 1")
+    d2s, _ = d2_star(n_parts, 1)
+    k3 = 1.0 / d2s
+    pv0 = range_of_part_averages * k3
+    inner = pv0 ** 2 - ev ** 2 / (appraisers * trials)
+    if inner <= 0:
+        raise MsaError("the equipment variation is larger than the part variation: the corrected part variation does not exist")
+    pv = math.sqrt(inner)
+    return {"k3": float(k3), "pv_uncorrected": float(pv0), "pv": float(pv), "difference_pct": float(100.0 * (pv0 - pv) / pv0)}
+
+
+def gage_r_study(values: Sequence[float], tolerance: float, pass_pct: float = 10.0, conditional_pct: float = 30.0) -> dict[str, Any]:
+    """Gage R study (appendix D): one part, one operator, the part taken out of the fixture and measured again, 10 readings. A preliminary repeatability only (not for the final acceptance of a gauge).
+    The readings go on an individuals / moving range chart to look at stability; sigma is the standard deviation of all readings or MR-bar / d2*, and %Repeatability = 100 * 6 sigma / tolerance."""
+    x = np.asarray(values, dtype=float)
+    if x.ndim != 1 or not np.all(np.isfinite(x)):
+        raise MsaError("give the readings as a list of numbers")
+    if x.size < 10:
+        raise MsaError("a Gage R study takes 10 readings of one part by one operator")
+    if not (isinstance(tolerance, (int, float)) and math.isfinite(tolerance) and tolerance > 0):
+        raise MsaError("the tolerance must be positive")
+    mr = np.abs(np.diff(x))
+    mrbar = float(mr.mean())
+    s = float(x.std(ddof=1))
+    if not s > 0 or not mrbar > 0:
+        raise MsaError("the readings do not vary: the resolution is too coarse to evaluate the study")
+    d2s, _ = d2_star(2, int(mr.size))
+    sigma_mr = mrbar / d2s
+    centre = float(x.mean())
+    ucl_x = centre + 3.0 * sigma_mr
+    lcl_x = centre - 3.0 * sigma_mr
+    ucl_mr = 3.267 * mrbar  # D4 for subgroups of 2
+    out_x = int(np.sum((x > ucl_x) | (x < lcl_x)))
+    out_mr = int(np.sum(mr > ucl_mr))
+    pct_s = 100.0 * 6.0 * s / tolerance
+    pct_mr = 100.0 * 6.0 * sigma_mr / tolerance
+    stable = out_x == 0 and out_mr == 0
+    return {"n": int(x.size), "mean": centre, "sigma_s": s, "sigma_mr": float(sigma_mr), "d2_star": d2s, "mr_bar": mrbar, "pct_s": float(pct_s), "pct_mr": float(pct_mr),
+            "pct": float(pct_s), "tolerance": float(tolerance), "stable": bool(stable), "points_outside": {"x": out_x, "mr": out_mr},
+            "limits": {"pass": pass_pct, "conditional": conditional_pct}, "verdict": "fail" if not stable else _grade(pct_s, pass_pct, conditional_pct),
+            "note": "preliminary: short-term repeatability of one part and one operator; not for the final acceptance of a gauge"}
+
+
+K_EXPECTED_MEDIAN = 0.861  # the manual's "expected median" and standard deviation of the median k of a study with 3 appraisers and 3 readings
+K_EXPECTED_SD = 0.439
+
+
+def pooled_sd_grr(data, process_sd: float | None = None, tolerance: float | None = None, pass_pct: float = 10.0, conditional_pct: float = 30.0) -> dict[str, Any]:
+    """Pooled standard deviation approach to the GRR (chapter IV H, after ASTM E691): each part is treated as a separate material, so the parts need not be measured in random order.
+    `data[part][appraiser][trial]`. For each part: the repeatability s_E (the root of the average of the appraisers' variances), the standard deviation s_xbar between the appraiser
+    averages, the reproducibility s_A = sqrt(s_xbar^2 - s_E^2 / r) (zero if negative) and GRR = sqrt(s_E^2 + s_A^2). The overall values pool the parts (root of the mean of the variances).
+    Consistency statistics: h = (appraiser average - part average) / s_xbar and k = (appraiser standard deviation) / s_E; for each appraiser the average h with z = mean(h) sqrt(g) and the
+    median k (with z = (median - 0.861) / (0.439 / sqrt(g)), the manual's constants, for 3 appraisers and 3 readings only). %GRR against the historic process standard deviation."""
+    try:
+        a = np.asarray(data, dtype=float)
+    except (TypeError, ValueError):
+        raise MsaError("the data must be parts x appraisers x readings, the same number of values everywhere") from None
+    if a.ndim != 3 or not np.all(np.isfinite(a)):
+        raise MsaError("the data must be parts x appraisers x readings of numbers")
+    g, m, r = a.shape
+    if g < 2 or m < 2 or r < 3:
+        raise MsaError("the pooled standard deviation study needs at least 2 parts, 2 appraisers and 3 readings of each (the manual: m >= 2 appraisers, r >= 3 readings)")
+    s_app = a.std(axis=2, ddof=1)  # g x m
+    xbar = a.mean(axis=2)  # g x m
+    s_e2 = (s_app ** 2).mean(axis=1)  # per part
+    s_x = xbar.std(axis=1, ddof=1)
+    s_a2 = np.maximum(0.0, s_x ** 2 - s_e2 / r)
+    grr2 = s_e2 + s_a2
+    if not np.all(s_e2 > 0):
+        raise MsaError("the repeated readings of a part are identical for every appraiser: the resolution is too coarse to evaluate the study")
+    per_part = [{"part": i + 1, "repeatability": float(math.sqrt(s_e2[i])), "s_xbar": float(s_x[i]), "reproducibility": float(math.sqrt(s_a2[i])), "grr": float(math.sqrt(grr2[i]))} for i in range(g)]
+    ev, av, grr = math.sqrt(float(s_e2.mean())), math.sqrt(float(s_a2.mean())), math.sqrt(float(grr2.mean()))
+    h = (xbar - xbar.mean(axis=1, keepdims=True)) / np.where(s_x > 0, s_x, np.nan)[:, None]
+    k = s_app / np.sqrt(s_e2)[:, None]
+    appr = []
+    for j in range(m):
+        hj, kj = h[:, j], k[:, j]
+        avg_h = float(np.nanmean(hj))
+        med_k = float(np.median(kj))
+        row = {"appraiser": j + 1, "h": [None if not math.isfinite(v) else float(v) for v in hj], "k": [float(v) for v in kj], "avg_h": avg_h, "z_h": float(avg_h * math.sqrt(g)),
+               "median_k": med_k, "z_k": None}
+        if m == 3 and r == 3:
+            row["z_k"] = float((med_k - K_EXPECTED_MEDIAN) / (K_EXPECTED_SD / math.sqrt(g)))
+        appr.append(row)
+    pct_process = None
+    if process_sd is not None:
+        if not (math.isfinite(process_sd) and process_sd > 0):
+            raise MsaError("the process standard deviation must be positive")
+        pct_process = 100.0 * grr / process_sd
+    if tolerance is not None and not (math.isfinite(tolerance) and tolerance > 0):
+        raise MsaError("the tolerance must be positive")
+    pct_tol = None if tolerance is None else 100.0 * 6.0 * grr / tolerance
+    if pct_process is None and pct_tol is None:
+        raise MsaError("give the historic process standard deviation or the tolerance to judge the GRR")
+    basis_pct = pct_tol if pct_tol is not None else pct_process
+    return {"parts": g, "appraisers": m, "trials": r, "per_part": per_part, "appraiser_stats": appr,
+            "sigma": {"ev": ev, "av": av, "interaction": 0.0, "grr": grr}, "pct_tv": pct_process, "pct_tol": pct_tol, "ndc": None,
+            "basis": "tolerance" if pct_tol is not None else "process", "limits": {"pass": pass_pct, "conditional": conditional_pct, "ndc": None},
+            "verdict": _grade(basis_pct, pass_pct, conditional_pct), "pooled": True,
+            "notes": ["no_part_variation"] + (["small_design"] if g < 5 else [])}

@@ -69,6 +69,12 @@ ROWS = """
 """
 # Table III-C 1, column "Ref Value": the reference value of each part measured by a variable system (signal detection approach, Table III-C 8)
 REF_VALUES = [0.476901, 0.509015, 0.576459, 0.566152, 0.570360, 0.544951, 0.465454, 0.502295, 0.437817, 0.515573, 0.488905, 0.559918, 0.542704, 0.454518, 0.517377, 0.531939, 0.519694, 0.484167, 0.520496, 0.477236, 0.452310, 0.545604, 0.529065, 0.514192, 0.599581, 0.547204, 0.502436, 0.521642, 0.523754, 0.561457, 0.503091, 0.505850, 0.487613, 0.449696, 0.498698, 0.543077, 0.409238, 0.488184, 0.427687, 0.501132, 0.513779, 0.566575, 0.462410, 0.470832, 0.412453, 0.493441, 0.486379, 0.587893, 0.483803, 0.446697]
+# Table IV-H 1: appraiser x trial x part (10 parts)
+POOLED = [
+    [[0.29, -0.56, 1.34, 0.47, -0.8, 0.02, 0.59, -0.31, 2.26, -1.36], [0.41, -0.68, 1.17, 0.5, -0.92, -0.11, 0.75, -0.2, 1.99, -1.25], [0.64, -0.58, 1.27, 0.64, -0.84, -0.21, 0.66, -0.17, 2.01, -1.31]],
+    [[0.08, -0.47, 1.19, 0.01, -0.56, -0.2, 0.47, -0.63, 1.8, -1.68], [0.25, -1.22, 0.94, 1.03, -1.2, 0.22, 0.55, 0.08, 2.12, -1.62], [0.07, -0.68, 1.34, 0.2, -1.28, 0.06, 0.83, -0.34, 2.19, -1.5]],
+    [[0.04, -1.38, 0.88, 0.14, -1.46, -0.29, 0.02, -0.46, 1.77, -1.49], [-0.11, -1.13, 1.09, 0.2, -1.07, -0.67, 0.01, -0.56, 1.45, -1.77], [-0.15, -0.96, 0.67, 0.11, -1.45, -0.49, 0.21, -0.49, 1.87, -2.16]],
+]
 BIAS = [5.8, 5.7, 5.9, 5.9, 6.0, 6.1, 6.0, 6.1, 6.4, 6.3, 6.0, 6.1, 6.2, 5.6, 6.0]  # Table III-B 1, reference value 6.00
 
 
@@ -121,6 +127,7 @@ def scenarios() -> list[Check]:
             _c("bias-q", "Table III-B 2, significant t value (2-tailed)", 2.14479, q, 5e-6),
             _c("bias-lo", "Table III-B 2, lower bound of the bias", -0.1107, bias - q * se, 5e-5), _c("bias-hi", "Table III-B 2, upper bound of the bias", 0.1241, bias + q * se, 5e-5)]
     out += _new_methods(ratings)
+    out += _chapter_iv()
     return out
 
 
@@ -158,4 +165,47 @@ def _new_methods(ratings) -> list[Check]:
             _c("an-bias", "chapter III-C, analytic method, bias", 0.0023, an["bias"], 3e-4, plot),
             _c("an-sigma", "chapter III-C, analytic method, repeatability", 0.00142, an["repeatability"], 2e-4, plot),
             Check("aiag-an-sig", "aiag_msa", "req.agreement", REF + "chapter III-C, analytic method: the bias differs significantly from zero (t = 9.84 against 2.093)", True, an["bias_significant"])]
+    return out
+
+
+def _chapter_iv() -> list[Check]:
+    import numpy as np
+
+    from spc.core import msa_aiag as AI
+
+    out: list[Check] = []
+    # pooled standard deviation approach (chapter IV H, Table IV-H 1): per part and pooled over the 10 parts
+    data = np.array(POOLED).transpose(2, 0, 1)  # part x appraiser x trial
+    r = AI.pooled_sd_grr(data, process_sd=1.0)
+    out += [_c("pool-ev", "chapter IV H, repeatability pooled over the 10 parts", 0.21443466, r["sigma"]["ev"], 5e-8), _c("pool-av", "chapter IV H, reproducibility pooled over the 10 parts", 0.20843064, r["sigma"]["av"], 5e-8),
+            _c("pool-grr", "chapter IV H, GRR pooled over the 10 parts", 0.29904106, r["sigma"]["grr"], 5e-8)]
+    for i, (e, a, g) in enumerate(((0.13153, 0.25056, 0.28299), (0.25721, 0.23743, 0.35004), (0.17534, 0.16839, 0.24310))):
+        p = r["per_part"][i]
+        out += [_c(f"pool-e{i + 1}", f"chapter IV H, part {i + 1}: repeatability", e, p["repeatability"], 5e-6), _c(f"pool-a{i + 1}", f"chapter IV H, part {i + 1}: reproducibility", a, p["reproducibility"], 5e-6),
+                _c(f"pool-g{i + 1}", f"chapter IV H, part {i + 1}: GRR", g, p["grr"], 5e-6)]
+    for x, avg_h, z_h, med_k, z_k in zip(r["appraiser_stats"], (0.80, 0.28, -1.08), (2.53, 0.88, -3.41), (0.42, 1.30, 0.84), (-3.20, 3.14, -0.17)):
+        n = x["appraiser"]
+        out += [_c(f"pool-h{n}", f"chapter IV H, appraiser {n}: average h", avg_h, x["avg_h"], 5e-3), _c(f"pool-zh{n}", f"chapter IV H, appraiser {n}: z of the average h", z_h, x["z_h"], 5e-3),
+                _c(f"pool-k{n}", f"chapter IV H, appraiser {n}: median k", med_k, x["median_k"], 5e-3), _c(f"pool-zk{n}", f"chapter IV H, appraiser {n}: z of the median k", z_k, x["z_k"], 5e-3)]
+    # gage performance curve (chapter IV F): USL 1.0, LSL 0.6, bias 0.05, sigma 0.05 Nm
+    g = AI.gage_performance_curve(0.6, 1.0, 0.05, 0.05, [0.5, 0.7, 0.9])
+    for x, printed, tol, note in ((0.5, 0.16, 5e-3, "printed as 1.0 - 0.84"), (0.7, 0.999, 5e-4, "printed as 0.999 (0.99865)"), (0.9, 0.84, 5e-3, "")):
+        out.append(_c(f"gpc-{x}", f"chapter IV F, probability of accepting a part of {x} Nm", printed, next(a["pa"] for a in g["at"] if a["reference"] == x), tol, note))
+    # reducing variation through multiple readings (chapter IV G): 25.5 % to 15 % needs 3 readings
+    m = AI.multiple_readings(25.5, 15.0)
+    out += [Check("aiag-multi-n", "aiag_msa", "req.agreement", REF + "chapter IV G, readings needed to bring 25.5 % to 15 %", 3, m["n"]), _c("multi-exact", "chapter IV G, (25.5 / 15)^2", 2.89, m["n_exact"], 5e-3)]
+    # appendix B, Table B 1: observed Cp for an actual Cp of 1.3
+    for grr, printed in ((0.1, 1.29), (0.2, 1.27), (0.3, 1.24), (0.4, 1.19), (0.5, 1.13), (0.6, 1.04), (0.7, 0.93), (0.9, 0.57)):
+        out.append(_c(f"b1-process-{int(grr * 100)}", f"Table B 1, observed Cp (process based) for Cp 1.3 and GRR {int(grr * 100)} %", printed, AI.capability_impact(1.3, grr, "process", "actual")["cp_observed"], 5e-3))
+    for grr, printed in ((0.1, 1.29), (0.2, 1.26), (0.3, 1.20), (0.4, 1.11), (0.5, 0.99), (0.6, 0.81), (0.7, 0.54)):
+        exact = AI.capability_impact(1.3, grr, "tolerance", "actual")["cp_observed"]
+        table_formula = 1.3 * math.sqrt(1.0 - (1.3 * grr) ** 2)  # what the printed values follow
+        differs = abs(exact - printed) > 5e-3
+        out.append(Check(f"aiag-b1-tol-{int(grr * 100)}", "aiag_msa", "req.agreement", REF + f"Table B 1, observed Cp (tolerance based) for Cp 1.3 and GRR {int(grr * 100)} %", printed, round(exact, 3), None,
+                         f"the printed value is Cp_act sqrt(1 - (Cp_act GRR)^2) = {table_formula:.3f}; equation (7) has Cp_obs under the root, and its solution Cp_act / sqrt(1 + (Cp_act GRR)^2) is what the program gives"
+                         if differs else "", level="known" if differs else "must").with_abs(5e-3))
+    # appendix E: PV with the equipment variation taken out (the example of the average and range method: R_P = 3.511, EV = 0.20188, 3 appraisers, 3 trials)
+    pv = AI.pv_error_corrected(3.511, 10, 0.20188, 3, 3)
+    out += [_c("e-k3", "appendix E and the report of Figure III-B 16, K3 for 10 parts", 0.3146, pv["k3"], 5e-5), _c("e-pv0", "Figure III-B 16, PV = R_P K3", 1.10456, pv["pv_uncorrected"], 2e-4),
+            _c("e-pv", "appendix E, PV = sqrt((R_P K3)^2 - EV^2 / (k r)): about 0.2 % below the usual PV", 1.1025, pv["pv"], 3e-4, "the manual gives no number; independent arithmetic with its example")]
     return out

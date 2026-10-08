@@ -16,7 +16,8 @@ The draft assumes a capable and stable measurement process (1, 6.3) and asks for
 A system of the kind `attribute` (go / no-go) has the checks `attribute` (the latest attribute agreement study is capable, `spc.core.msa_attribute`) and
 `validity` (that study is not older than the validity time); the checks of a variable system do not apply to it, and the other way round. The signal detection approach and the analytic
 method of AIAG MSA are checked as `attribute_aiag` (optional). The range method of the gauge R&R is a quick check, not the proof of repeatability and reproducibility: it is kept with the
-studies and does not count in the gate.
+studies and does not count in the gate. So is the Gage R study (appendix D): a preliminary repeatability of one part and one operator. The pooled standard deviation study (chapter IV H) is a gauge
+R&R: it proves repeatability and reproducibility like the crossed and the nested one.
 
 Result of a check: pass, warn (conditional), fail, missing (no evidence), not_done (optional), not_needed, or waived (recorded with
 a reason by an engineer: it passes and stays flagged). The gate is `block` when a check failed or is missing without a waiver,
@@ -42,15 +43,15 @@ POLICY_DEFAULTS: dict[str, Any] = {
 }
 CHECKS = ("resolution", "grr", "type1", "validity", "stability", "attribute", "linearity", "budget", "iso22514_7", "attribute_iso", "bias", "attribute_aiag")
 STUDY_KINDS = ("type1", "grr", "grr_nested", "stability", "linearity", "budget", "iso_study", "attribute", "bowker", "uncertainty_range", "attribute_review",
-               "bias", "bias_chart", "grr_range", "signal_detection", "analytic")
+               "bias", "bias_chart", "grr_range", "signal_detection", "analytic", "pooled_grr", "gage_r")
 BIAS_KINDS = ("bias", "bias_chart")
 AIAG_ATTRIBUTE_KINDS = ("signal_detection", "analytic")
 SYSTEM_KINDS = ("variable", "attribute")
-STUDY_KINDS_OF = {"variable": ("type1", "grr", "grr_nested", "stability", "linearity", "budget", "iso_study", "bias", "bias_chart", "grr_range"),
+STUDY_KINDS_OF = {"variable": ("type1", "grr", "grr_nested", "stability", "linearity", "budget", "iso_study", "bias", "bias_chart", "grr_range", "pooled_grr", "gage_r"),
                   "attribute": ("attribute", "bowker", "uncertainty_range", "attribute_review", "signal_detection", "analytic")}
 ISO_ATTRIBUTE_KINDS = ("bowker", "uncertainty_range", "attribute_review")
 GRADE = {"pass": "pass", "conditional": "warn", "fail": "fail"}
-GRR_KINDS = ("grr", "grr_nested")  # the crossed study, and the nested one for destructive measurement: either proves repeatability and reproducibility
+GRR_KINDS = ("grr", "grr_nested", "pooled_grr")  # the crossed study, the nested one for destructive measurement and the pooled standard deviation one (parts that cannot be measured in random order): each proves repeatability and reproducibility
 
 
 def add_months(d: date, months: int) -> date:

@@ -552,6 +552,40 @@
       <div id="dp-out" role="status"></div>
     </details>
   </div>
+  <div class="card" id="mc-card">
+    <h3 data-i18n="mc.title"></h3>
+    <p class="note" data-i18n="mc.intro"></p>
+    <div class="form-grid">
+      <label><span data-i18n="mc.mode"></span>
+        <select id="mc-mode"><option value="gpc" data-i18n="mc.mode_gpc"></option><option value="multi" data-i18n="mc.mode_multi"></option><option value="cp" data-i18n="mc.mode_cp"></option><option value="pv" data-i18n="mc.mode_pv"></option></select></label>
+    </div>
+    <div class="form-grid mc-box" id="mc-gpc">
+      <label><span data-i18n="mc.lsl"></span><input id="mc-lsl" type="number" step="any"></label>
+      <label><span data-i18n="mc.usl"></span><input id="mc-usl" type="number" step="any"></label>
+      <label><span data-i18n="mc.bias"></span><input id="mc-bias" type="number" step="any" value="0"></label>
+      <label><span data-i18n="mc.sigma"></span><input id="mc-sigma" type="number" step="any" min="0"></label>
+      <label class="wide"><span data-i18n="mc.refs"></span><input id="mc-refs" type="text" placeholder="0.5 0.7 0.9"></label>
+    </div>
+    <div class="form-grid mc-box" id="mc-multi" hidden>
+      <label><span data-i18n="mc.current"></span><input id="mc-current" type="number" step="any" min="0"></label>
+      <label><span data-i18n="mc.target"></span><input id="mc-target" type="number" step="any" min="0"></label>
+    </div>
+    <div class="form-grid mc-box" id="mc-cp" hidden>
+      <label><span data-i18n="mc.cp"></span><input id="mc-cp-value" type="number" step="any" min="0"></label>
+      <label><span data-i18n="mc.grr"></span><input id="mc-grr" type="number" step="any" min="0"></label>
+      <label><span data-i18n="mc.cp_basis"></span><select id="mc-cp-basis"><option value="process" data-i18n="mc.basis_process"></option><option value="tolerance" data-i18n="mc.basis_tolerance"></option></select></label>
+      <label><span data-i18n="mc.cp_given"></span><select id="mc-cp-given"><option value="observed" data-i18n="mc.given_observed"></option><option value="actual" data-i18n="mc.given_actual"></option></select></label>
+    </div>
+    <div class="form-grid mc-box" id="mc-pv" hidden>
+      <label><span data-i18n="mc.rp"></span><input id="mc-rp" type="number" step="any" min="0"></label>
+      <label><span data-i18n="mc.nparts"></span><input id="mc-nparts" type="number" min="2" max="20" value="10"></label>
+      <label><span data-i18n="mc.ev"></span><input id="mc-ev" type="number" step="any" min="0"></label>
+      <label><span data-i18n="mc.k"></span><input id="mc-k" type="number" min="1" value="3"></label>
+      <label><span data-i18n="mc.r"></span><input id="mc-r" type="number" min="1" value="3"></label>
+    </div>
+    <p><button id="mc-run" class="primary" data-i18n="mc.run"></button></p>
+    <div id="mc-out" role="status"></div>
+  </div>
   <div class="card" id="rpl-card">
     <h3 data-i18n="rp.title"></h3>
     <p class="note" data-i18n="rp.note"></p>
@@ -1173,7 +1207,7 @@
       <h4 data-i18n="msa.add_study"></h4>
       <div class="form-grid">
         <label><span data-i18n="msa.s_kind"></span>
-          <select id="mss-kind"><option value="grr" data-i18n="msa.kind_grr"></option><option value="grr_nested" data-i18n="msa.kind_grr_nested"></option><option value="linearity" data-i18n="msa.kind_linearity"></option><option value="budget" data-i18n="msa.kind_budget"></option><option value="iso_study" data-i18n="msa.kind_iso_study"></option><option value="type1" data-i18n="msa.kind_type1"></option><option value="stability" data-i18n="msa.kind_stability"></option><option value="attribute" data-i18n="msa.kind_attribute"></option><option value="uncertainty_range" data-i18n="msa.kind_uncertainty_range"></option><option value="bowker" data-i18n="msa.kind_bowker"></option><option value="attribute_review" data-i18n="msa.kind_attribute_review"></option><option value="bias" data-i18n="msa.kind_bias"></option><option value="bias_chart" data-i18n="msa.kind_bias_chart"></option><option value="grr_range" data-i18n="msa.kind_grr_range"></option><option value="signal_detection" data-i18n="msa.kind_signal_detection"></option><option value="analytic" data-i18n="msa.kind_analytic"></option></select></label>
+          <select id="mss-kind"><option value="grr" data-i18n="msa.kind_grr"></option><option value="grr_nested" data-i18n="msa.kind_grr_nested"></option><option value="linearity" data-i18n="msa.kind_linearity"></option><option value="budget" data-i18n="msa.kind_budget"></option><option value="iso_study" data-i18n="msa.kind_iso_study"></option><option value="type1" data-i18n="msa.kind_type1"></option><option value="stability" data-i18n="msa.kind_stability"></option><option value="attribute" data-i18n="msa.kind_attribute"></option><option value="uncertainty_range" data-i18n="msa.kind_uncertainty_range"></option><option value="bowker" data-i18n="msa.kind_bowker"></option><option value="attribute_review" data-i18n="msa.kind_attribute_review"></option><option value="bias" data-i18n="msa.kind_bias"></option><option value="bias_chart" data-i18n="msa.kind_bias_chart"></option><option value="grr_range" data-i18n="msa.kind_grr_range"></option><option value="signal_detection" data-i18n="msa.kind_signal_detection"></option><option value="analytic" data-i18n="msa.kind_analytic"></option><option value="pooled_grr" data-i18n="msa.kind_pooled_grr"></option><option value="gage_r" data-i18n="msa.kind_gage_r"></option></select></label>
         <label><span data-i18n="msa.s_date"></span><input id="mss-date" type="date"></label>
         <label id="mss-ref-label" hidden><span data-i18n="msa.s_reference"></span><input id="mss-reference" type="number" step="any"></label>
         <label id="mss-lower-label" hidden><span data-i18n="msa.s_lower"></span><input id="mss-lower" type="number" step="any"></label>

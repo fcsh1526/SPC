@@ -2291,6 +2291,24 @@
       box.appendChild(el("p", "", t("msa.range_summary", { parts: r.parts, rbar: sig(r.average_range, 4), d2: sig(r.d2_star, 5), grr: sig(r.grr, 4), pct: sig(r.pct, 3), basis: t("msa.range_basis_" + r.basis) })));
       box.appendChild(el("p", "muted", t("msa.range_note")));
     }
+    const pooled = newest("pooled_grr");
+    if (pooled) {
+      const r = pooled.result;
+      box.appendChild(el("h4", "", t("msa.pooled_detail", { id: pooled.id })));
+      box.appendChild(el("p", "", t("msa.pooled_summary", { ev: sig(r.sigma.ev, 5), av: sig(r.sigma.av, 5), grr: sig(r.sigma.grr, 5), pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis) })));
+      box.appendChild(table([t("msa.pooled_part"), t("msa.pooled_ev"), t("msa.pooled_av"), t("msa.pooled_grr")], r.per_part.map((p) => [p.part, sig(p.repeatability, 4), sig(p.reproducibility, 4), sig(p.grr, 4)])));
+      box.appendChild(table([t("msa.pooled_appraiser"), t("msa.pooled_avg_h"), t("msa.pooled_z_h"), t("msa.pooled_med_k"), t("msa.pooled_z_k")],
+        r.appraiser_stats.map((a) => [a.appraiser, sig(a.avg_h, 3), sig(a.z_h, 3), sig(a.median_k, 3), a.z_k === null ? "–" : sig(a.z_k, 3)])));
+      box.appendChild(el("p", "muted", t("msa.pooled_note")));
+    }
+    const gr = newest("gage_r");
+    if (gr) {
+      const r = gr.result;
+      box.appendChild(el("h4", "", t("msa.gage_r_detail", { id: gr.id })));
+      box.appendChild(el("p", "", t("msa.gage_r_summary", { n: r.n, s: sig(r.sigma_s, 4), smr: sig(r.sigma_mr, 4), pct: sig(r.pct_s, 3), pctmr: sig(r.pct_mr, 3) })));
+      box.appendChild(el("p", r.stable ? "status-ok" : "status-alarm", t(r.stable ? "msa.gage_r_stable" : "msa.gage_r_unstable", { x: r.points_outside.x, mr: r.points_outside.mr })));
+      box.appendChild(el("p", "muted", t("msa.gage_r_note")));
+    }
     const sdt = newest("signal_detection");
     if (sdt) {
       const r = sdt.result;
@@ -2350,6 +2368,8 @@
     if (x.kind === "bowker") return t("msa.sum_bowker", { parts: r.parts, pairs: r.pairs.length, result: t(r.symmetric ? "msa.bowd_symmetric" : "msa.bowd_asymmetric") });
     if (x.kind === "attribute_review") return t("msa.sum_review", { k: r.agreeing, n: r.results });
     if (x.kind === "grr_nested") return t("msa.sum_grr_nested", { pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis), ndc: sig(r.ndc, 3), ev: sig(r.sigma.ev, 3), av: sig(r.sigma.av, 3), n: `${r.operators}×${r.parts_per_operator}×${r.trials}` });
+    if (x.kind === "pooled_grr") return t("msa.sum_pooled", { parts: r.parts, app: r.appraisers, trials: r.trials, grr: sig(r.sigma.grr, 4), pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis) });
+    if (x.kind === "gage_r") return t("msa.sum_gage_r", { n: r.n, pct: sig(r.pct, 3), pctmr: sig(r.pct_mr, 3) });
     if (x.kind === "bias" || x.kind === "bias_chart") return t("msa.sum_bias", { n: r.n, bias: sig(r.bias, 3), lo: sig(r.ci[0], 3), hi: sig(r.ci[1], 3), ev: r.ev_pct === null ? "–" : sig(r.ev_pct, 3) });
     if (x.kind === "grr_range") return t("msa.sum_grr_range", { parts: r.parts, grr: sig(r.grr, 4), pct: sig(r.pct, 3), basis: t("msa.range_basis_" + r.basis) });
     if (x.kind === "signal_detection") return t("msa.sum_signal", { parts: r.parts, d: sig(r.d, 4), pct: sig(r.pct, 3) });
@@ -2367,7 +2387,7 @@
     if ($("#mss-kind").selectedOptions[0].disabled) $("#mss-kind").value = attrSystem ? "attribute" : "grr";
     const kind = $("#mss-kind").value;
     $("#mss-ref-label").hidden = !["type1", "bias", "bias_chart"].includes(kind);
-    $("#mss-psd-label").hidden = !["bias", "bias_chart", "grr_range", "signal_detection"].includes(kind);
+    $("#mss-psd-label").hidden = !["bias", "bias_chart", "grr_range", "signal_detection", "pooled_grr"].includes(kind);
     $("#mss-limit-label").hidden = $("#mss-side-label").hidden = kind !== "analytic";
     $("#mss-pv-label").hidden = kind !== "linearity";
     const withLimits = kind === "iso_study" || kind === "uncertainty_range" || kind === "attribute_review" || kind === "signal_detection";
@@ -2455,6 +2475,8 @@
       return { ...base, results: t_.ratings[names[0]], ...(qmp ? { q_mp: Number(qmp) } : {}) };
     }
     const psdField = () => { const v = $("#mss-psd").value.trim(); return v === "" ? {} : { process_sd: Number(v) }; };
+    if (kind === "pooled_grr") return { data: lines(text).map((row) => row.split(";").map(numbers)), ...psdField() };
+    if (kind === "gage_r") return { values: numbers(text) };
     if (kind === "bias") return { reference: Number($("#mss-reference").value), values: numbers(text), ...psdField() };
     if (kind === "bias_chart") return { reference: Number($("#mss-reference").value), subgroups: lines(text).map(numbers), ...psdField() };
     if (kind === "grr_range") {  // one part per line: the reading of appraiser A, then the reading of appraiser B
@@ -3809,6 +3831,61 @@
     r.warnings.forEach((w) => box.appendChild(el("p", "status-warning", t("doe.warn_" + w.code, { ...w, vif: w.vif == null ? "∞" : sig(w.vif, 3) }))));
   }
   $("#doe-run").addEventListener("click", runDoe);
+  function syncCalcForm() {
+    const mode = $("#mc-mode").value;
+    $$(".mc-box").forEach((b) => { b.hidden = b.id !== "mc-" + (mode === "multi" ? "multi" : mode); });
+  }
+  async function runCalc() {
+    const mode = $("#mc-mode").value;
+    const num = (id) => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+    const bad = (m) => showError({ code: "invalid_input", message: m, params: { message: m } });
+    let path, body;
+    if (mode === "gpc") {
+      body = { lsl: num("#mc-lsl"), usl: num("#mc-usl"), bias: num("#mc-bias") ?? 0, sigma: num("#mc-sigma"), reference_values: numbers($("#mc-refs").value) };
+      if (body.sigma === null) return bad(t("mc.need_sigma"));
+      path = "gpc";
+    } else if (mode === "multi") {
+      body = { current: num("#mc-current"), target: num("#mc-target") };
+      if (body.current === null || body.target === null) return bad(t("mc.need_numbers"));
+      path = "multiple-readings";
+    } else if (mode === "cp") {
+      const g = num("#mc-grr");
+      if (num("#mc-cp-value") === null || g === null) return bad(t("mc.need_numbers"));
+      body = { cp: num("#mc-cp-value"), grr: g / 100, basis: $("#mc-cp-basis").value, given: $("#mc-cp-given").value };
+      path = "cp-impact";
+    } else {
+      body = { range_of_part_averages: num("#mc-rp"), n_parts: num("#mc-nparts"), ev: num("#mc-ev"), appraisers: num("#mc-k"), trials: num("#mc-r") };
+      if (Object.values(body).some((v) => v === null)) return bad(t("mc.need_numbers"));
+      path = "pv";
+    }
+    let r = null;
+    await guarded(async () => { r = await post("/api/msa-calc/" + path, body); });
+    const box = $("#mc-out"); box.replaceChildren();
+    if (!r) return;
+    const p = (txt, cls = "") => box.appendChild(el("p", cls, txt));
+    if (mode === "gpc") {
+      if (r.at.length) {
+        const tb = el("table"), head = el("tr");
+        [t("mc.out_ref"), t("mc.out_pa"), t("mc.out_rej")].forEach((h) => head.appendChild(el("th", "", h))); tb.appendChild(head);
+        r.at.forEach((a) => { const tr = el("tr"); [sig(a.reference, 5), sig(a.pa, 4), sig(a.rejected, 4)].forEach((c) => tr.appendChild(el("td", "", c))); tb.appendChild(tr); });
+        box.appendChild(tb);
+      }
+      Object.entries(r.limits_marks).forEach(([side, m]) => p(t("mc.out_marks", { side: t("msa.side_" + side), limit: sig(m.limit, 5), x50: sig(m.x_p50, 5), hi: sig(m.x_p99865, 5), lo: sig(m.x_p00135, 5), range: sig(m.range_6sigma, 4) })));
+      p(t("mc.gpc_note"), "muted");
+    } else if (mode === "multi") {
+      p(t("mc.out_multi", { exact: sig(r.n_exact, 4), n: r.n, achieved: sig(r.achieved, 4) }), "strong");
+      p(t("mc.multi_note"), "muted");
+    } else if (mode === "cp") {
+      p(t(r.reachable ? "mc.out_cp" : "mc.out_cp_unreachable", { obs: r.cp_observed === null ? "–" : sig(r.cp_observed, 4), act: r.cp_actual === null ? "–" : sig(r.cp_actual, 4), loss: r.loss === null ? "–" : sig(r.loss, 3) }), "strong");
+      p(t("mc.cp_note_" + r.basis), "muted");
+    } else {
+      p(t("mc.out_pv", { k3: sig(r.k3, 5), pv0: sig(r.pv_uncorrected, 5), pv: sig(r.pv, 5), diff: sig(r.difference_pct, 3) }), "strong");
+      p(t("mc.pv_note"), "muted");
+    }
+  }
+  $("#mc-mode").addEventListener("change", syncCalcForm);
+  $("#mc-run").addEventListener("click", runCalc);
+  syncCalcForm();
   function syncDoePlanForm() {
     const kind = $("#dp-kind").value;
     $("#dp-gen-wrap").hidden = kind !== "fractional";

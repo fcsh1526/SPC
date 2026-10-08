@@ -131,6 +131,12 @@ class MsaService:
             r = msa_aiag.bias_control_chart(inp["subgroups"], inp["reference"], inp.get("process_sd"), tol, 0.05, pol["grr_pass"], pol["grr_conditional"])
         elif study["kind"] == "grr_range":
             r = msa_aiag.range_method(inp["a"], inp["b"], inp.get("process_sd"), tol, pol["grr_pass"], pol["grr_conditional"])
+        elif study["kind"] == "pooled_grr":
+            r = msa_aiag.pooled_sd_grr(inp["data"], inp.get("process_sd"), tol, pol["grr_pass"], pol["grr_conditional"])
+        elif study["kind"] == "gage_r":
+            if not tol:
+                raise msa.MsaError("a Gage R study needs the tolerance of the measurement system")
+            r = msa_aiag.gage_r_study(inp["values"], tol, pol["grr_pass"], pol["grr_conditional"])
         elif study["kind"] == "signal_detection":
             r = msa_aiag.signal_detection(inp["reference"], msa_aiag.codes_from_ratings(inp["results"]), inp["lower"], inp["upper"], inp.get("process_sd"), pol["grr_pass"], pol["grr_conditional"])
         elif study["kind"] == "analytic":
@@ -229,9 +235,9 @@ class MsaService:
                 "linearity": {"values", "reference"}, "budget": {"components"}, "iso_study": set(), "bowker": {"results"},
                 "uncertainty_range": {"reference", "results", "lower", "upper"}, "attribute_review": {"reference", "results", "lower", "upper"},
                 "bias": {"values", "reference"}, "bias_chart": {"subgroups", "reference"}, "grr_range": {"a", "b"}, "signal_detection": {"reference", "results", "lower", "upper"},
-                "analytic": {"reference", "accepts", "limit"}}[kind]
+                "analytic": {"reference", "accepts", "limit"}, "pooled_grr": {"data"}, "gage_r": {"values"}}[kind]
         optional = {"linearity": {"process_variation"}, "budget": {"lsl", "usl"}, "iso_study": set(iso.ISO_KEYS), "bowker": {"alpha"}, "attribute_review": {"q_mp"},
-                "bias": {"process_sd"}, "bias_chart": {"process_sd"}, "grr_range": {"process_sd"}, "signal_detection": {"process_sd"}, "analytic": {"side"}}.get(kind, set())
+                "bias": {"process_sd"}, "bias_chart": {"process_sd"}, "grr_range": {"process_sd"}, "signal_detection": {"process_sd"}, "analytic": {"side"}, "pooled_grr": {"process_sd"}}.get(kind, set())
         if not need <= set(input_) <= need | optional:
             raise MsaProblem("invalid_input", f"the input of a {kind} study holds {sorted(need)}" + (f" and may hold {sorted(optional)}" if optional else ""))
         study = {"id": system["next_study"], "kind": kind, "date": day, "by": _label(user), "at": now_iso(), "note": note.strip(), "input": input_}

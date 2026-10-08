@@ -707,6 +707,18 @@
 - **閘門**：新增選用檢查 `bias`（計量型系統，最新的偏差研究，不論哪種方法）與 `attribute_aiag`（計數型系統，訊號偵測法與分析法中較差者）；選用檢查沒做是「未做」、做了不通過會擋，可以豁免並註明理由，與線性、預算相同。畫面：量測系統的研究類型選單新增五種，輸入格式見各欄位說明。
 - 測試：`tests/test_msa_aiag_methods.py`（核心、閘門、API）、`tests/test_msa_aiag_manual.py`、瀏覽器測試；內建確效報告區段「AIAG MSA 手冊」。
 
+## 10.24 AIAG MSA 手冊第 4 版的其餘方法（量具績效曲線、多次讀值、合併標準差法、附錄 B／D／E）
+
+延續 10.23，`spc.core.msa_aiag` 補齊手冊其餘有公式的方法，皆以手冊例子核對（`spc.validation.aiag_msa`，該區段共 105 項，只有 `aiag-sys-uci` 與 `aiag-b1-tol-30…70` 標「已知」）。
+
+- **量具績效曲線**（`gage_performance_curve`）：Pa ＝ Φ((USL−(X+b))/σ) − Φ((LSL−(X+b))/σ)；回傳曲線、Pa 為 0.5／0.99865／0.00135 的位置與 6σ 範圍。API：`POST /api/msa-calc/gpc`。
+- **多次讀值**（`multiple_readings`）：n ＝ ⌈(目前 %／目標 %)²⌉；目標須小於目前。API：`/api/msa-calc/multiple-readings`。
+- **GRR 對 Cp**（`capability_impact`，附錄 B）：Cp_obs ＝ Cp_act·√(1−GRR²)；已知觀察 Cp 時反推。表 B 1 以公差為基準的列手冊用 Cp_act 而式 (7) 是 Cp_obs，程式解式 (7)，標「已知」。API：`/api/msa-calc/cp-impact`。
+- **PV 誤差修正**（`pv_error_corrected`，附錄 E）：PV ＝ √((R_P·K3)² − EV²/(k·r))。API：`/api/msa-calc/pv`。
+- **Gage R**（`gage_r_study`，附錄 D，研究 `gage_r`）：10 個讀值，I／MR 穩定性，%重複性 ＝ 100·6σ/公差；需設公差；僅供參考，不計入閘門。
+- **合併標準差法**（`pooled_sd_grr`，研究 `pooled_grr`，ASTM E691）：每零件 s_E、s_x̄、s_A；GRR² ＝ s_E² + s_A²；h、k 與 z_h、z_k（z_k 只在 3 評價者×3 次時算）。**計入 GRR 證據**，但 ndc 為空，基準為「公差」或「製程」（有給製程標準差時）。
+- 介面：量測系統頁的研究類型多 `pooled_grr`、`gage_r`；工具頁多「量測系統計算器」卡（`#mc-card`）。
+
 ## 10.1 資料庫與登入（已實作第一版）
 
 **儲存**：SQLite 單檔（`--db` 或環境變數 `SPC_DB`，預設 `spc.sqlite3`，建立時權限 0600）。一條連線加一把鎖，所有存取走 `spc.db`，日後換 PostgreSQL 只改 `database.py` 與 `stores.py`。結構版本（目前 8）放在 `PRAGMA user_version`，版本不符時拒絕啟動。

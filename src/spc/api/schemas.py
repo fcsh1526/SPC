@@ -477,6 +477,37 @@ class LinearityMonitorBody(Strict):
     epsilon: float = Field(default=0.05, gt=0, lt=0.5)
 
 
+class GpcBody(Strict):
+    """Gage performance curve of a variable system (AIAG MSA, chapter IV F)."""
+
+    lsl: float | None = None
+    usl: float | None = None
+    bias: float = 0.0
+    sigma: float = Field(gt=0)
+    reference_values: list[float] = Field(default_factory=list, max_length=200)
+    points: int = Field(default=121, ge=11, le=2001)
+
+
+class MultipleReadingsBody(Strict):
+    current: float = Field(gt=0)
+    target: float = Field(gt=0)
+
+
+class CpImpactBody(Strict):
+    cp: float = Field(gt=0)
+    grr: float = Field(ge=0, description="a fraction: 0.3 is 30 %")
+    basis: Literal["process", "tolerance"] = "process"
+    given: Literal["observed", "actual"] = "observed"
+
+
+class PvCorrectionBody(Strict):
+    range_of_part_averages: float = Field(gt=0)
+    n_parts: int = Field(ge=2, le=20)
+    ev: float = Field(ge=0)
+    appraisers: int = Field(ge=1, le=20)
+    trials: int = Field(ge=1, le=50)
+
+
 class MsaStudyBody(Strict):
     kind: str = Field(max_length=20)
     date: str = Field(max_length=10)

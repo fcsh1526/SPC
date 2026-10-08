@@ -44,7 +44,7 @@ The server listens on 127.0.0.1 only. To serve a team, put it behind an https pr
 | `spc.data.dfq` | Reads the descriptive data (parts, characteristics, limits) of ISO/TR 11462-5 files (*.DFD, *.DFQ); values are not read |
 | `spc.core.arl_oc` | OC curve and ARL |
 | `spc.params` | All analysis parameters in one record, for archiving |
-| `spc.core.msa_aiag` | AIAG MSA manual methods: bias (independent sample and control chart), gauge R&R range method, attribute signal detection and analytic method, d2* table of Appendix C |
+| `spc.core.msa_aiag` | AIAG MSA manual methods: bias (independent sample and control chart), gauge R&R range method, attribute signal detection and analytic method, gage performance curve, multiple readings, pooled-SD GRR, Appendix B/D/E calculations, d2* table of Appendix C |
 | `spc.data.xlsx_io` | Excel (*.xlsx) import: choose the sheet and the line of the column names; same rules as the CSV import, stored values only (no formulas) |
 | `spc.data.templates` | Import templates: the column map of a customer's file, saved once and used again (columns found by name) |
 | `spc.data.csv_io` | CSV import and export: Big5 / UTF-8, delimiter and decimal comma, all errors reported with line numbers, SHA-256 of the source file |
