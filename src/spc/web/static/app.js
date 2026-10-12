@@ -161,6 +161,7 @@
     if (state.mustChange) name = "password";  // nothing else works until the password is changed
     $$("nav.tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
     $$("main > section").forEach((s) => { s.hidden = s.id !== "tab-" + name; });
+    if (name === "floor") loadFloor();
     if (name === "monitor") loadMonitors();
     if (name === "saved") loadSaved();
     if (name === "study") loadStudies();
@@ -176,6 +177,267 @@
     if (name === "admin") loadAdmin();
     if (name === "password") renderPasswordPanel();
   }
+
+  // ---------------------------------------------------------------- shop floor: the station screen of the operator
+  // Pick the station (one big tile each), then one screen with the state, the chart, the entry of the measurement with a keypad, the handling of an alarm and the change of shift or lot.
+  // It uses the same monitors, points and incidents as the engineer's screen ("Live SPC"); nothing here is a second record.
+  const F = { list: [], id: null, view: null, last: null, mode: "entry", active: null, timer: null };
+  const floorCtxKey = (id) => "spc.floor.ctx." + id;
+  const floorCtx = () => { try { return JSON.parse(localStorage.getItem(floorCtxKey(F.id)) || "{}"); } catch (e) { return {}; } };
+  function floorLastTags(v) {  // without a saved context the last point tells which shift and lot were running
+    const p = [...v.points].reverse().find((x) => x.tags && (x.tags.lot || x.tags.shift));
+    return p ? { shift: p.tags.shift || "", lot: p.tags.lot || "" } : {};
+  }
+  async function loadFloor() {
+    if (F.id && !$("#fl-station").hidden) return refreshStation();
+    await guarded(async () => {
+      F.list = (await api("/api/monitors")).monitors;
+      renderFloorTiles();
+      showFloor("picker");
+    });
+  }
+  function showFloor(which) {
+    $("#fl-picker").hidden = which !== "picker";
+    $("#fl-station").hidden = which !== "station";
+    if (which === "picker") F.id = null;
+  }
+  function renderFloorTiles() {
+    const box = $("#fl-tiles"); box.replaceChildren();
+    $("#fl-none").hidden = F.list.length > 0;
+    F.list.forEach((m) => {
+      const state = !m.active ? "off" : m.open_incidents ? "alarm" : "ok";
+      const b = el("button", "fl-tile fl-" + state); b.type = "button";
+      b.appendChild(el("span", "fl-tile-name", m.name));
+      b.appendChild(el("span", "fl-tile-sub", [m.line, m.characteristic].filter(Boolean).join(" · ")));
+      b.appendChild(el("span", "fl-tile-state", t("floor.state_" + state, { n: m.open_incidents })));
+      b.appendChild(el("span", "fl-tile-last", m.last_point ? t("floor.last_at", { at: when(m.last_point.taken_at) }) : t("floor.no_points")));
+      b.addEventListener("click", () => openStation(m.id));
+      box.appendChild(b);
+    });
+  }
+  async function openStation(id) {
+    await guarded(async () => {
+      F.id = id; F.last = null; F.mode = "entry"; F.view = await api(`/api/monitors/${id}`);
+      showFloor("station");
+      renderStation();
+    });
+    startFloorTimer();
+  }
+  async function refreshStation() {
+    if (!F.id || $("#fl-station").hidden) return;
+    try { F.view = await api(`/api/monitors/${F.id}`); renderStation(true); } catch (e) { /* the next tick tries again */ }
+  }
+  function startFloorTimer() {  // another person may open or close an alarm: the screen follows without a click
+    if (F.timer) return;
+    F.timer = setInterval(() => { if ($("#tab-floor").hidden || $("#fl-station").hidden || busyDepth || !$("#fl-dialog").hidden) return; refreshStation(); }, 15000);
+  }
+  function entryDefs(m, lim) {
+    const count = isCount(m.kind), vec = isVec(m.kind), pv = vec ? lim.p : 0;
+    const n = vec ? m.n * pv : count ? (m.kind === "p" || m.kind === "u" ? 2 : 1) : m.n;
+    return Array.from({ length: n }, (_, i) => ({
+      name: m.kind === "multistream" ? lim.names[i] : vec ? `${lim.names[i % pv]}${m.n > 1 ? ` (${t("mon.obs_n", { i: Math.floor(i / pv) + 1 })})` : ""}`
+        : count ? t(i === 0 ? (m.kind === "p" || m.kind === "np" ? "mon.count_nonconforming" : "mon.count_nonconformities") : "mon.sample_size") : t("mon.value_n", { i: i + 1 }),
+    }));
+  }
+  function stationState(v) {
+    if (v.incident) return "alarm";
+    const last = [...v.points].reverse().find((p) => p.valid);
+    if (!last) return "none";
+    return last.alarms.length ? "alarm" : last.warnings.length ? "warning" : "ok";
+  }
+  function renderStation(keepEntry) {
+    const v = F.view, m = v.monitor, lim = v.limits;
+    $("#fl-title").textContent = m.name;
+    $("#fl-sub").textContent = [m.line, m.characteristic, m.unit].filter(Boolean).join(" · ");
+    const ctx = { ...floorLastTags(v), ...floorCtx() };
+    $("#fl-ctx-label").textContent = t("floor.ctx_line", { shift: ctx.shift || "–", lot: ctx.lot || "–" });
+    const st = stationState(v), last = [...v.points].reverse().find((p) => p.valid);
+    const banner = $("#fl-banner");
+    banner.className = "fl-banner fl-" + st;
+    banner.replaceChildren(el("div", "fl-banner-state", t("floor.banner_" + st)));
+    if (last) banner.appendChild(el("div", "fl-banner-value", `${sig(last.values.length > 1 ? last.loc : last.values[0], 6)} ${m.unit || ""}`.trim() + ` · #${last.seq} · ${when(last.taken_at)}`));
+    // charts: the latest points only, so that the screen needs no scrolling
+    const view = { ...v, points: v.points.slice(-30) };
+    const showVar = !(isCount(m.kind) || m.kind === "pre" || SEQ_KINDS.includes(m.kind) || isVec(m.kind));
+    const draw = (sel, which) => { const part = monitorPart(which, view); if (part.values.length) drawChart($(sel), part, t(which === "loc" ? "result.chart_location" : "result.chart_variation")); else $(sel).replaceChildren(el("p", "muted", t("mon.no_points"))); };
+    draw("#fl-chart-loc", "loc");
+    $("#fl-chart-var").hidden = !showVar;
+    if (showVar) draw("#fl-chart-var", "var");
+    renderStationEntry(m, lim, keepEntry);
+    renderStationIncident();
+    $("#fl-ack").hidden = !(m.require_ack && !v.acknowledged);
+    const inc = !!v.incident;
+    $("#fl-modes").hidden = !inc;
+    if (!inc) F.mode = "entry";
+    $("#fl-entry").hidden = !(F.mode === "entry") || !m.active || $("#fl-ack").hidden === false;
+    $("#fl-incident").hidden = !(inc && F.mode === "incident");
+    $$("#fl-modes button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === F.mode)));
+  }
+  function renderStationEntry(m, lim, keep) {
+    const box = $("#fl-values"), defs = entryDefs(m, lim);
+    if (!(keep && box.dataset.id === String(m.id) && box.dataset.n === String(defs.length) && box.dataset.rev === String(lim.revision))) {
+      box.replaceChildren(); box.dataset.id = String(m.id); box.dataset.n = String(defs.length); box.dataset.rev = String(lim.revision);
+      defs.forEach((d, i) => {
+        const label = el("label", "fl-value");
+        label.appendChild(el("span", "", d.name));
+        const input = el("input"); input.type = "text"; input.inputMode = "decimal"; input.id = "fl-v" + i; input.autocomplete = "off";
+        input.addEventListener("focus", () => { F.active = input; });
+        input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); floorNext(); } });
+        label.appendChild(input); box.appendChild(label);
+      });
+      F.active = null;
+    }
+    const lastMark = F.view.points.length ? F.view.points[F.view.points.length - 1].trend : null;
+    const trend = m.kind === "trend", zmr = m.kind === "zmr";
+    $("#fl-extra").hidden = !(trend || zmr);
+    $("#fl-part-wrap").hidden = !zmr;
+    $("#fl-cycle-wrap").hidden = !trend;
+    $("#fl-cycle-note").hidden = !trend || !$("#fl-cycle").checked;
+    if (zmr) {
+      const sel = $("#fl-part"), keepVal = sel.value, codes = Object.keys(lim.parts);
+      sel.replaceChildren(...codes.map((c) => { const o = el("option", "", c); o.value = c; return o; }));
+      if (codes.includes(keepVal)) sel.value = keepVal;
+    }
+    if (!F.active) { const first = $("#fl-v0"); if (first && !("ontouchstart" in window)) first.focus(); F.active = first; }
+    const r = F.last, out = $("#fl-result"); out.replaceChildren();
+    if (r) {
+      out.className = "fl-result fl-" + (r.status === "alarm" ? "alarm" : r.status === "warning" ? "warning" : "ok");
+      out.appendChild(el("div", "fl-result-title", t("floor.result_" + r.status, { seq: r.point.seq })));
+      if (r.verification) out.appendChild(el("div", "", t("mon.verification_note")));
+    } else out.className = "fl-result";
+  }
+  function floorKey(k) {
+    const input = F.active || $("#fl-v0");
+    if (!input) return;
+    F.active = input;
+    if (k === "back") input.value = input.value.slice(0, -1);
+    else if (k === "clear") input.value = "";
+    else if (k === "next") { const all = $$("#fl-values input"), i = all.indexOf(input); const nx = all[i + 1]; if (nx) { nx.focus(); F.active = nx; } return; }  // sending is the big button
+    else if (k === "-") input.value = input.value.startsWith("-") ? input.value.slice(1) : "-" + input.value;
+    else if (k === ".") { if (!input.value.includes(".")) input.value += input.value === "" || input.value === "-" ? "0." : "."; }
+    else input.value += k;
+  }
+  function floorNext() {  // the next empty field; when all are filled the measurement is sent
+    const inputs = $$("#fl-values input"), i = inputs.indexOf(F.active);
+    const nextEmpty = inputs.find((x, j) => j > i && x.value.trim() === "") || inputs.find((x) => x.value.trim() === "");
+    if (nextEmpty) { nextEmpty.focus(); F.active = nextEmpty; return; }
+    submitFloorPoint();
+  }
+  async function submitFloorPoint() {
+    const v = F.view, m = v.monitor, inputs = $$("#fl-values input");
+    const values = inputs.map((i) => Number(i.value.trim().replace(",", ".")));
+    if (inputs.some((i) => i.value.trim() === "") || values.some((x) => !Number.isFinite(x))) return showError({ code: "wrong_value_count", message: "", params: { n: inputs.length } });
+    const ctx = { ...floorLastTags(v), ...floorCtx() };
+    const body = { values, label: ctx.lot || "", tags: {} };
+    if (ctx.lot) body.tags.lot = ctx.lot;
+    if (ctx.shift) body.tags.shift = ctx.shift;
+    if (m.kind === "zmr") body.part = $("#fl-part").value;
+    if (m.kind === "trend" && $("#fl-cycle").checked) {
+      const note = $("#fl-cycle-note").value.trim();
+      if (!note) return showError({ code: "cycle_note_required", message: "", params: {} });
+      body.cycle = note;
+    }
+    await guarded(async () => {
+      F.last = await post(`/api/monitors/${F.id}/points`, body);
+      inputs.forEach((i) => { i.value = ""; });
+      $("#fl-cycle").checked = false; $("#fl-cycle-note").value = "";
+      F.view = await api(`/api/monitors/${F.id}`);
+      if (F.view.incident) F.mode = "incident";
+      renderStation(true);
+      startAlertPolling();
+    });
+  }
+  function renderStationIncident() {
+    const inc = F.view.incident, m = F.view.monitor;
+    if (!inc) return;
+    $("#fl-inc-title").textContent = t("mon.incident_title", { id: inc.id, at: when(inc.opened_at), seq: inc.point_seq });
+    const rules = inc.rules.map((r) => `${t("mon.chart_" + r.chart)}: ${t("alarmrule." + r.rule)}`).join("; ");
+    $("#fl-inc-line").textContent = `${rules} · ${inc.acked_by ? t("mon.taken_over_by", { by: inc.acked_by, at: when(inc.acked_at) }) : t("mon.not_taken_over")}` + (inc.overdue ? " · " + t("mon.overdue", { min: inc.escalate_after_min }) : "");
+    $("#fl-inc-line").className = "note " + (inc.overdue ? "status-alarm" : "");
+    const plan = $("#fl-inc-plan"); plan.replaceChildren();
+    inc.instructions.forEach((i) => {
+      const row = el("div", "fl-plan-row");
+      row.appendChild(el("strong", "", `${t(i.rule === "default" ? "mon.ocap_default" : "alarmrule." + i.rule)}: ${i.operator_action || "–"}`));
+      row.appendChild(el("span", "", [i.responsible && `${t("mon.ocap_responsible")}: ${i.responsible}`, i.escalate_to && `${t("mon.ocap_escalate")}: ${i.escalate_to}${i.escalate_after_min ? ` (${i.escalate_after_min} min)` : ""}`].filter(Boolean).join(" · ")));
+      plan.appendChild(row);
+    });
+    const steps = $("#fl-inc-step");
+    if (!steps.options.length) ["adjust_parameters", "adjust_elements", "root_cause", "containment", "other"].forEach((k) => { const o = el("option", "", t("mon.step_" + k)); o.value = k; steps.appendChild(o); });
+    const out = $("#fl-inc-outcome");
+    if (!out.options.length) ["recovered", "invalid_sample", "escalated"].forEach((k) => { const o = el("option", "", t("mon.outcome_" + k)); o.value = k; out.appendChild(o); });
+    const ul = $("#fl-inc-events"); ul.replaceChildren();
+    inc.events.slice(-4).forEach((e) => {
+      const what = e.kind === "action" || e.kind === "observation" ? `${t("mon.kind_" + e.kind)} (${t("mon.step_" + e.step)})` : t("mon.kind_" + e.kind);
+      ul.appendChild(el("li", "", `${when(e.at)} · ${e.by} · ${what}${e.text ? ": " + e.text : ""}`));
+    });
+  }
+  async function floorIncident(kind) {
+    const inc = F.view.incident, text = $("#fl-inc-text").value;
+    const body = { kind, step: kind === "action" ? $("#fl-inc-step").value : "other", text };
+    await guarded(async () => {
+      await post(`/api/monitors/${F.id}/incidents/${inc.id}/events`, body);
+      $("#fl-inc-text").value = "";
+      F.view = await api(`/api/monitors/${F.id}`); renderStation(true); startAlertPolling();
+    });
+  }
+  async function floorDeclareInvalid() {
+    const inc = F.view.incident, reason = $("#fl-inc-text").value.trim();
+    if (!reason) return showError({ code: "text_required", message: "", params: {} });
+    await guarded(async () => {
+      await post(`/api/monitors/${F.id}/points/${inc.point_seq}/invalid`, { reason });
+      $("#fl-inc-text").value = "";
+      F.view = await api(`/api/monitors/${F.id}`); renderStation(true);
+    });
+  }
+  async function floorClose() {
+    const inc = F.view.incident;
+    await guarded(async () => {
+      await post(`/api/monitors/${F.id}/incidents/${inc.id}/close`, { outcome: $("#fl-inc-outcome").value, text: $("#fl-inc-text").value });
+      $("#fl-inc-text").value = "";
+      F.view = await api(`/api/monitors/${F.id}`); F.mode = "entry"; renderStation(true); startAlertPolling();
+    });
+  }
+  function openContextDialog() {
+    const ctx = { ...floorLastTags(F.view), ...floorCtx() };
+    $("#fl-shift").value = ctx.shift || ""; $("#fl-lot").value = ctx.lot || ""; $("#fl-ctx-note").value = "";
+    const chips = $("#fl-shift-chips"); chips.replaceChildren();
+    ["floor.shift_day", "floor.shift_evening", "floor.shift_night"].forEach((k) => {
+      const b = el("button", "", t(k)); b.type = "button";
+      b.addEventListener("click", () => { $("#fl-shift").value = t(k); });
+      chips.appendChild(b);
+    });
+    $("#fl-dialog").hidden = false;
+    $("#fl-lot").focus();
+  }
+  async function saveContext() {
+    const shift = $("#fl-shift").value.trim(), lot = $("#fl-lot").value.trim();
+    if (!shift && !lot) return showError({ code: "invalid_input", message: t("floor.context_need"), params: { message: t("floor.context_need") } });
+    await guarded(async () => {
+      await post(`/api/monitors/${F.id}/context`, { shift, lot, note: $("#fl-ctx-note").value });
+      try { localStorage.setItem(floorCtxKey(F.id), JSON.stringify({ shift, lot })); } catch (e) { /* the points carry the tags anyway */ }
+      $("#fl-dialog").hidden = true;
+      renderStation(true);
+    });
+  }
+  function wireFloor() {
+    $("#fl-back").addEventListener("click", () => { showFloor("picker"); guarded(async () => { F.list = (await api("/api/monitors")).monitors; renderFloorTiles(); }); });
+    $("#fl-keypad").addEventListener("click", (e) => { const b = e.target.closest("button[data-key]"); if (b) floorKey(b.dataset.key); });
+    $("#fl-keypad").addEventListener("mousedown", (e) => e.preventDefault());  // the keypad does not take the focus from the field
+    $("#fl-submit").addEventListener("click", submitFloorPoint);
+    $("#fl-ctx-btn").addEventListener("click", openContextDialog);
+    $("#fl-ctx-ok").addEventListener("click", saveContext);
+    $("#fl-ctx-cancel").addEventListener("click", () => { $("#fl-dialog").hidden = true; });
+    $("#fl-ctx-logout").addEventListener("click", doLogout);
+    $("#fl-cycle").addEventListener("change", () => { $("#fl-cycle-note").hidden = !$("#fl-cycle").checked; if ($("#fl-cycle").checked) $("#fl-cycle-note").focus(); });
+    $("#fl-ack-btn").addEventListener("click", () => guarded(async () => { await post(`/api/monitors/${F.id}/ack`, {}); F.view = await api(`/api/monitors/${F.id}`); renderStation(true); }));
+    $$("#fl-modes button").forEach((b) => b.addEventListener("click", () => { F.mode = b.dataset.mode; renderStation(true); }));
+    $("#fl-inc-action").addEventListener("click", () => floorIncident("action"));
+    $("#fl-inc-escalate").addEventListener("click", () => floorIncident("escalation"));
+    $("#fl-inc-invalid").addEventListener("click", floorDeclareInvalid);
+    $("#fl-inc-close").addEventListener("click", floorClose);
+    $("#fl-dialog").addEventListener("keydown", (e) => { if (e.key === "Escape") $("#fl-dialog").hidden = true; });
+  }
+
   // ---------------------------------------------------------------- pages inside a screen
   // A long screen is split into pages with a bar of buttons, so nothing has to be scrolled to find. The parts are hidden with a class (sub-off), because the program
   // uses `hidden` on the same elements for its own purposes. Screens with a list and a detail view already work like pages and are left alone.
@@ -1164,7 +1426,7 @@
     $("#login-user").value = ""; $("#login-pass").value = "";
     renderUserBox();
     if (!state.mustChange) { loadProfiles(); startAlertPolling(); }
-    showTab(state.mustChange ? "password" : (me.user.role === "viewer" ? "saved" : "import"));
+    showTab(state.mustChange ? "password" : (me.user.role === "viewer" ? "saved" : me.user.role === "operator" ? "floor" : "import"));
   }
   function renderUserBox() {
     if (!state.user) return;
@@ -1638,8 +1900,8 @@
       ul.appendChild(li);
     });
   }
-  function monitorPart(which) {
-    const v = M.view, lim = v.limits[which === "loc" ? "location" : "variation"];
+  function monitorPart(which, v = M.view) {
+    const lim = v.limits[which === "loc" ? "location" : "variation"];
     if (v.monitor.kind === "cusum") {  // upper and lower CUSUM on the decision interval +-h
       const rows = v.points.filter((p) => p.valid);
       const l = v.limits.location;
@@ -4360,6 +4622,7 @@
     $("#password-form").addEventListener("submit", (e) => { e.preventDefault(); doChangePassword(); });
     $("#nu-create").addEventListener("click", createUser);
     wireMonitor();
+    wireFloor();
     wireStudy();
     wireMsa();
     wirePlan();

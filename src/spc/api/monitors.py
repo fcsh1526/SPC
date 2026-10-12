@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, Query
 
 from spc.api.errors import ApiError
 from spc.api.schemas import (
-    CloseBody, EventBody, LimitsBody, MonitorConfigBody, MonitorCreateBody, OngoingReportBody, PointBody, ReasonBody,
+    CloseBody, ContextBody, EventBody, LimitsBody, MonitorConfigBody, MonitorCreateBody, OngoingReportBody, PointBody, ReasonBody,
 )
 from spc.auth import Audit, User
 from spc.db import ReportStore, DatasetStore
@@ -81,6 +81,10 @@ def add_monitor_routes(app: FastAPI, svc: MonitorService, datasets: DatasetStore
     @app.post("/api/monitors/{mid}/points")
     def add_point(mid: int, body: PointBody, user: User = Depends(operator)):
         return svc.add_point(mid, body.values, body.label, body.tags, body.taken_at, user, body.part, body.cycle)
+
+    @app.post("/api/monitors/{mid}/context")
+    def change_context(mid: int, body: ContextBody, user: User = Depends(operator)):
+        return svc.record_context(mid, body.shift, body.lot, body.note, user)
 
     @app.get("/api/monitors/{mid}/points")
     def points(mid: int, limit: int = Query(100, ge=1, le=2000), before: int | None = Query(None, ge=1), _: User = Depends(reader)):

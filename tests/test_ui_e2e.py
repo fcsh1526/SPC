@@ -804,6 +804,86 @@ def test_spc_monitor_at_the_line_from_set_up_to_the_action_plan(server, browser,
     ctx.close()
 
 
+def test_an_operator_works_a_station_from_measurement_to_alarm_and_shift_change(server, browser, app):
+    from tests.conftest import logged_in_client
+    from tests.test_monitor import CONFIG, OK_SAMPLE, PARAMS
+
+    expect = playwright_sync.expect
+    if "oper" not in {u.username for u in app.state.auth.list_users()}:
+        app.state.auth.create_user("oper", PASSWORD, "operator", "Olga Operator")
+    eng = logged_in_client(app, "eng")
+    name = "Station turning " + str(len(eng.get("/api/monitors").json()["monitors"]))
+    mid = eng.post("/api/monitors", json={"config": {**CONFIG, "name": name, "line": "T1"}, "source": PARAMS}).json()["monitor"]["id"]
+    ctx = browser.new_context(viewport={"width": 1366, "height": 768}, locale="en")
+    page = ctx.new_page()
+    problems = []
+    page.on("pageerror", lambda e: problems.append(str(e)))
+    page.goto(server)
+    sign_in(page, "oper")
+    # an operator lands on the stations: one tile each, a state on every tile
+    expect(page.locator("#fl-tiles .fl-tile", has_text=name)).to_contain_text("Running", timeout=20000)
+    page.locator("#fl-tiles .fl-tile", has_text=name).click()
+    expect(page.locator("#fl-title")).to_have_text(name, timeout=20000)
+    expect(page.locator("#fl-banner")).to_contain_text("NO SAMPLE YET")
+    # the action plan has to be confirmed before the first sample
+    expect(page.locator("#fl-ack")).to_be_visible()
+    expect(page.locator("#fl-entry")).to_be_hidden()
+    page.click("#fl-ack-btn")
+    expect(page.locator("#fl-entry")).to_be_visible(timeout=20000)
+
+    def send(values):
+        for k, v in enumerate(values):
+            page.click(f"#fl-values label:nth-child({k + 1}) input")
+            for ch in str(v):
+                page.click(f"#fl-keypad button[data-key='{ch}']")
+        page.click("#fl-submit")
+
+    # a sample with the keypad: the field of the page gets the digits, the point is within the limits
+    send(OK_SAMPLE)
+    expect(page.locator("#fl-result")).to_contain_text("within the limits", timeout=20000)
+    expect(page.locator("#fl-banner")).to_contain_text("IN CONTROL")
+    expect(page.locator("#fl-chart-loc svg")).to_be_visible()
+    # a sample far above the centre line: the alarm is handled on the same screen
+    send([10.2, 10.3, 10.25, 10.28, 10.22])
+    expect(page.locator("#fl-banner")).to_contain_text("ALARM", timeout=20000)
+    expect(page.locator("#fl-incident")).to_be_visible()
+    expect(page.locator("#fl-inc-plan")).to_contain_text("Measure again, then call the shift leader")
+    page.click("#fl-inc-action")  # an action needs words
+    expect(page.locator("#errors")).to_contain_text("Write what was done", timeout=20000)
+    page.click("#errors button")
+    page.fill("#fl-inc-text", "Tool insert worn: replaced")
+    page.click("#fl-inc-action")
+    expect(page.locator("#fl-inc-events")).to_contain_text("Tool insert worn", timeout=20000)
+    # the new sample after the action is entered on the other page of the right column, then the alarm is closed
+    page.click("#fl-mode-entry")
+    send(OK_SAMPLE)
+    expect(page.locator("#fl-result")).to_contain_text("within the limits", timeout=20000)
+    page.click("#fl-mode-incident")
+    page.select_option("#fl-inc-outcome", "recovered")
+    page.fill("#fl-inc-text", "Control is back after the new insert")
+    page.click("#fl-inc-close")
+    expect(page.locator("#fl-modes")).to_be_hidden(timeout=20000)
+    expect(page.locator("#fl-banner")).to_contain_text("IN CONTROL")
+    # a change of lot and shift is written to the record and shown on the screen; the next sample carries it
+    page.click("#fl-ctx-btn")
+    page.fill("#fl-lot", "L2411")
+    page.click("#fl-shift-chips button >> nth=2")
+    page.fill("#fl-ctx-note", "new bar stock")
+    page.click("#fl-ctx-ok")
+    expect(page.locator("#fl-ctx-label")).to_contain_text("Night", timeout=20000)
+    expect(page.locator("#fl-ctx-label")).to_contain_text("L2411")
+    send(OK_SAMPLE)
+    expect(page.locator("#fl-result")).to_contain_text("within the limits", timeout=20000)
+    pts = eng.get(f"/api/monitors/{mid}").json()["points"]
+    assert pts[-1]["tags"] == {"lot": "L2411", "shift": "Night"}
+    admin = logged_in_client(app, "admin")
+    assert any(e["action"] == "monitor_context_change" and e["detail"]["lot"] == "L2411" for e in admin.get("/api/audit").json()["entries"])
+    # nothing on the page scrolls: the frame holds
+    assert page.evaluate("() => document.documentElement.scrollHeight <= document.documentElement.clientHeight")
+    assert problems == []
+    ctx.close()
+
+
 def test_count_chart_monitor_with_limits_that_follow_the_sample_size(server, browser, app):
     expect = playwright_sync.expect
     problems = []

@@ -686,6 +686,17 @@ class MonitorService:
         return {"point": point, "status": status, "incident": incident_now, "instructions": self._instructions(monitor, alarms),
                 "verification": bool(incident and not alarms), "msa": msa_state}
 
+    def record_context(self, monitor_id: int, shift: str, lot: str, note: str, user) -> dict:
+        """A shift or lot change at the station, written into the audit chain (who, when, which monitor, the new shift and lot). The points that follow carry the shift and the lot as tags."""
+        monitor = self.store.get(monitor_id)
+        shift, lot, note = shift.strip(), lot.strip(), note.strip()
+        if not shift and not lot:
+            raise MonitorError("invalid_input", "give the shift or the lot")
+        if len(shift) > 40 or len(lot) > 40 or len(note) > 500:
+            raise MonitorError("invalid_input", "the shift and the lot are up to 40 characters, the note up to 500")
+        self._log("monitor_context_change", user, monitor["name"], {"id": monitor_id, "shift": shift, "lot": lot, "note": note})
+        return {"monitor": monitor["name"], "shift": shift, "lot": lot, "note": note, "by": _label(user)}
+
     def invalidate_point(self, monitor_id: int, seq: int, reason: str, user) -> dict:
         if not reason or not reason.strip():
             raise MonitorError("reason_required", "a reason is required to declare a sample invalid")

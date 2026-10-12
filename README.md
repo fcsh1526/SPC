@@ -14,6 +14,8 @@ spc-admin --db spc.sqlite3 create-user alice --role admin     # the first user c
 spc-serve --db spc.sqlite3                      # or: python -m spc.api   -> http://127.0.0.1:8000
 ```
 
+**Interface**: a fixed application frame (tool column on the left, one screen at a time, long screens split into pages) and a station screen for operators (big status banner, chart, keypad entry, alarm handling, shift/lot change; see `docs/screenshots/11-…15-`).
+
 **Customer installation** (Windows installer, installation and operational qualification IQ/OQ, backup and restore, upgrade): see `docs/INSTALLATION.md`. In short: `spc-setup --data-dir D --admin NAME --tls self-signed`, `spc-qualify all --out D/qualification --db D/spc.sqlite3`, `spc-serve --config D/spc.json`; `spc-admin backup --to DIR`. The installer scripts in `packaging/windows` were written without a Windows machine and have not been run on one yet.
 
 Data, marks, reports and the audit trail are stored in one SQLite file (`--db`, or the environment variable `SPC_DB`; default `spc.sqlite3`, created with mode 0600). Back it up like any other record.

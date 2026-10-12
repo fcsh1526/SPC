@@ -53,6 +53,7 @@
 
 <nav class="tabs" role="tablist" aria-orientation="vertical">
   <div class="navgroup" role="presentation"><div class="navtitle" data-i18n="nav.group_floor"></div>
+  <button role="tab" data-tab="floor" aria-selected="false" data-i18n="nav.floor"></button>
   <button role="tab" data-tab="monitor" aria-selected="false"><span data-i18n="nav.monitor"></span> <span id="alert-badge" class="badge" hidden></span></button>
   <button role="tab" data-tab="lots" aria-selected="false" data-i18n="nav.lots"></button>
   <button role="tab" data-tab="improve" aria-selected="false" data-i18n="nav.improve"></button>
@@ -81,6 +82,88 @@
 </nav>
 
 <main>
+<!-- Shop floor: the station screen of the operator -->
+<section id="tab-floor" class="panel floor" hidden>
+  <div id="fl-picker">
+    <h2 data-i18n="floor.title"></h2>
+    <p class="note" data-i18n="floor.pick"></p>
+    <div id="fl-tiles" class="fl-tiles"></div>
+    <p id="fl-none" class="muted" hidden data-i18n="floor.none"></p>
+  </div>
+  <div id="fl-station" hidden>
+    <div class="fl-bar">
+      <button id="fl-back" type="button" data-i18n="floor.back"></button>
+      <div class="fl-name"><strong id="fl-title"></strong> <span id="fl-sub" class="muted"></span></div>
+      <div class="fl-ctx"><span id="fl-ctx-label"></span> <button id="fl-ctx-btn" type="button" data-needs="operator" data-i18n="floor.change_context"></button></div>
+    </div>
+    <div class="fl-main">
+      <div class="fl-left">
+        <div id="fl-banner" class="fl-banner" role="status"></div>
+        <div id="fl-charts" class="fl-charts"><div id="fl-chart-loc" class="chart"></div><div id="fl-chart-var" class="chart"></div></div>
+      </div>
+      <div class="fl-right">
+        <div id="fl-modes" class="subnav" hidden>
+          <button type="button" id="fl-mode-incident" data-mode="incident" data-i18n="floor.mode_incident"></button>
+          <button type="button" id="fl-mode-entry" data-mode="entry" data-i18n="floor.mode_entry"></button>
+        </div>
+        <div id="fl-ack" class="fl-box" hidden>
+          <p class="strong" data-i18n="floor.ack_needed"></p>
+          <button id="fl-ack-btn" class="primary big-btn" type="button" data-i18n="mon.ack_button"></button>
+        </div>
+        <div id="fl-entry" class="fl-box" data-needs="operator">
+          <div id="fl-extra" class="fl-extra" hidden>
+            <label id="fl-part-wrap" hidden><span data-i18n="mon.part"></span><select id="fl-part"></select></label>
+            <label id="fl-cycle-wrap" class="check" hidden><input id="fl-cycle" type="checkbox"><span data-i18n="floor.new_cycle"></span></label>
+            <input id="fl-cycle-note" type="text" maxlength="200" hidden data-i18n-placeholder="floor.cycle_note">
+          </div>
+          <div id="fl-values" class="fl-values"></div>
+          <div class="fl-keypad" id="fl-keypad">
+            <button type="button" data-key="7">7</button><button type="button" data-key="8">8</button><button type="button" data-key="9">9</button>
+            <button type="button" data-key="4">4</button><button type="button" data-key="5">5</button><button type="button" data-key="6">6</button>
+            <button type="button" data-key="1">1</button><button type="button" data-key="2">2</button><button type="button" data-key="3">3</button>
+            <button type="button" data-key="-">±</button><button type="button" data-key="0">0</button><button type="button" data-key=".">.</button>
+            <button type="button" data-key="back">⌫</button><button type="button" data-key="clear" data-i18n="floor.clear"></button><button type="button" data-key="next" data-i18n="floor.next"></button>
+          </div>
+          <button id="fl-submit" class="primary big-btn" type="button" data-i18n="floor.submit"></button>
+          <div id="fl-result" class="fl-result" role="status"></div>
+        </div>
+        <div id="fl-incident" class="fl-box" hidden>
+          <div id="fl-inc-title" class="strong"></div>
+          <div id="fl-inc-line" class="note"></div>
+          <div id="fl-inc-plan" class="fl-plan"></div>
+          <div data-needs="operator">
+            <div class="fl-row"><label><span data-i18n="floor.step"></span><select id="fl-inc-step"></select></label>
+              <button id="fl-inc-action" class="primary" type="button" data-i18n="floor.record_action"></button></div>
+            <label class="wide"><span data-i18n="floor.cause_text"></span><input id="fl-inc-text" type="text" maxlength="2000"></label>
+            <div class="fl-row">
+              <button id="fl-inc-invalid" type="button" data-i18n="floor.declare_invalid"></button>
+              <button id="fl-inc-escalate" type="button" data-i18n="floor.escalate"></button>
+            </div>
+            <div class="fl-row"><label><span data-i18n="floor.outcome"></span><select id="fl-inc-outcome"></select></label>
+              <button id="fl-inc-close" class="primary" type="button" data-i18n="floor.close"></button></div>
+          </div>
+          <ul id="fl-inc-events" class="log"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="fl-dialog" class="fl-dialog" role="dialog" aria-modal="true" hidden>
+    <div class="fl-dialog-box">
+      <h3 data-i18n="floor.context_title"></h3>
+      <p class="note" data-i18n="floor.context_note"></p>
+      <div class="fl-chips" id="fl-shift-chips"></div>
+      <label><span data-i18n="floor.shift"></span><input id="fl-shift" type="text" maxlength="40"></label>
+      <label><span data-i18n="floor.lot"></span><input id="fl-lot" type="text" maxlength="40"></label>
+      <label><span data-i18n="floor.context_remark"></span><input id="fl-ctx-note" type="text" maxlength="500"></label>
+      <div class="fl-row">
+        <button id="fl-ctx-ok" class="primary" type="button" data-i18n="floor.confirm"></button>
+        <button id="fl-ctx-cancel" type="button" data-i18n="admin.pf_cancel"></button>
+        <button id="fl-ctx-logout" type="button" data-i18n="floor.switch_person"></button>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- 1. import -->
 <section id="tab-import" class="panel" data-needs="engineer">
   <h2 data-i18n="import.title"></h2>

@@ -448,6 +448,14 @@ class PointBody(Strict):
     cycle: str | None = Field(default=None, max_length=200)  # trend monitors: this sample starts a new cycle (the tool was changed ...); the note says what happened
 
 
+class ContextBody(Strict):
+    """A change of shift or lot at a monitor station."""
+
+    shift: str = Field(default="", max_length=40)
+    lot: str = Field(default="", max_length=40)
+    note: str = Field(default="", max_length=500)
+
+
 class ReasonBody(Strict):
     reason: str = Field(max_length=2000)
 

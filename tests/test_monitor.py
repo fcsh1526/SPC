@@ -1377,3 +1377,21 @@ def test_the_standardised_option_has_rules(env):
     cfg = {k: view[k] for k in ("name", "characteristic", "kind", "n", "alpha", "warn_alpha", "rules", "specs", "ocap", "require_ack", "active", "process", "unit", "line")}
     assert c["eng"].put(f"/api/monitors/{mid}", json={"config": cfg}).status_code == 409  # the option belongs to the shape
     assert c["eng"].put(f"/api/monitors/{mid}", json={"config": {**cfg, "standardised": True}}).status_code == 200
+
+
+def test_a_change_of_shift_or_lot_is_written_to_the_audit_chain(env):
+    app, c = env
+    mid = make_monitor(c["eng"])
+    r = c["oper"].post(f"/api/monitors/{mid}/context", json={"shift": "Night", "lot": "L2411", "note": "new bar stock"})
+    assert r.status_code == 200 and r.json()["shift"] == "Night" and r.json()["lot"] == "L2411" and r.json()["by"].startswith("Olga")
+    entries = [e for e in c["admin"].get("/api/audit").json()["entries"] if e["action"] == "monitor_context_change"]
+    assert entries and entries[0]["username"] == "oper" and entries[0]["detail"]["lot"] == "L2411" and entries[0]["detail"]["note"] == "new bar stock"
+    assert c["admin"].get("/api/audit/verify").json()["ok"]
+    assert c["view"].post(f"/api/monitors/{mid}/context", json={"shift": "Day"}).status_code == 403
+    assert c["oper"].post(f"/api/monitors/{mid}/context", json={}).status_code == 400
+    assert c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "x" * 41}).status_code == 422
+    assert c["oper"].post("/api/monitors/9999/context", json={"lot": "A"}).status_code == 404
+    # the samples that follow carry the shift and the lot as tags
+    ack(c["oper"], mid)
+    out = enter(c["oper"], mid, OK_SAMPLE, label="L2411", tags={"lot": "L2411", "shift": "Night"})
+    assert out["point"]["tags"] == {"lot": "L2411", "shift": "Night"}
