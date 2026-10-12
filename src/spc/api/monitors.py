@@ -15,7 +15,7 @@ from spc.report import generate
 
 
 def add_monitor_routes(app: FastAPI, svc: MonitorService, datasets: DatasetStore, reports: ReportStore, audit: Audit,
-                       db, reader, operator, engineer, admin) -> None:
+                       db, reader, operator, engineer, admin, leader) -> None:
     store = svc.store
 
     @app.get("/api/monitors")
@@ -86,6 +86,16 @@ def add_monitor_routes(app: FastAPI, svc: MonitorService, datasets: DatasetStore
     def change_context(mid: int, body: ContextBody, user: User = Depends(operator)):
         return svc.record_context(mid, body.shift, body.lot, body.note, user)
 
+    @app.post("/api/monitors/{mid}/lot/approve")
+    def approve_first_article(mid: int, user: User = Depends(leader)):
+        """The leader confirms the first article of the running lot (not the person who measured it): the lot is released."""
+        return svc.approve_first_article(mid, user)
+
+    @app.post("/api/monitors/{mid}/lot/reject")
+    def reject_first_article(mid: int, body: ReasonBody, user: User = Depends(leader)):
+        """The leader does not accept the first article: the lot waits for a new one."""
+        return svc.reject_first_article(mid, body.reason, user)
+
     @app.get("/api/monitors/{mid}/points")
     def points(mid: int, limit: int = Query(100, ge=1, le=2000), before: int | None = Query(None, ge=1), _: User = Depends(reader)):
         store.get(mid)
@@ -118,7 +128,7 @@ def add_monitor_routes(app: FastAPI, svc: MonitorService, datasets: DatasetStore
             out.append({k: inc[k] for k in ("id", "monitor_id", "opened_at", "point_seq", "rules", "acked_by", "overdue")} |
                        {"monitor": m["name"], "line": m["line"], "characteristic": m["characteristic"]})
         return {"open": len(out), "unacknowledged": sum(1 for a in out if not a["acked_by"]), "overdue": sum(1 for a in out if a["overdue"]),
-                "incidents": out}
+                "incidents": out, "approvals": store.approvals_waiting()}
 
     @app.get("/api/monitors/{mid}/ongoing")
     def ongoing(mid: int, window: int = Query(125, ge=10, le=2000), steps: int = Query(6, ge=1, le=12), _: User = Depends(reader)):

@@ -27,7 +27,7 @@ from spc.auth.passwords import DEFAULT_COST, check_policy, hash_password, verify
 from spc.db.database import Database
 from spc.db.stores import now_iso
 
-ROLES = ("viewer", "operator", "engineer", "admin")
+ROLES = ("viewer", "operator", "leader", "engineer", "admin")  # a leader is an operator who also confirms the first article of a lot (the shift or line leader)
 MAX_FAILURES = 5
 LOCK_SECONDS = 15 * 60
 IDLE_SECONDS = 2 * 60 * 60

@@ -187,6 +187,7 @@ def create_app(
         return check
 
     reader, operator, writer, admin = require("viewer"), require("operator"), require("engineer"), require("admin")
+    leader = require("leader")
 
     app = FastAPI(title="SPC", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json",
                   dependencies=[Depends(authenticate)])
@@ -394,7 +395,7 @@ def create_app(
                 "session": None if info is None else {"user": info.user.to_json(), "csrf": info.csrf}}
 
     add_account_routes(app, auth, audit, admin, secure_cookies)
-    add_monitor_routes(app, monitors, store, reports, audit, db, reader, operator, writer, admin)
+    add_monitor_routes(app, monitors, store, reports, audit, db, reader, operator, writer, admin, leader)
     add_lot_routes(app, lot_service, reader, operator, writer, admin)
     add_improvement_routes(app, improvement_service, reader, writer, admin)
     add_import_template_routes(app, template_service, reader, writer)

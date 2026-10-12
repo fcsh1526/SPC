@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 SCHEMA = """
 CREATE TABLE users (
@@ -21,7 +21,7 @@ CREATE TABLE users (
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
     display_name  TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL,
-    role          TEXT NOT NULL CHECK (role IN ('viewer', 'operator', 'engineer', 'admin')),
+    role          TEXT NOT NULL CHECK (role IN ('viewer', 'operator', 'leader', 'engineer', 'admin')),
     active        INTEGER NOT NULL DEFAULT 1,
     must_change   INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
@@ -257,18 +257,21 @@ CREATE TABLE import_templates (
     created_by INTEGER REFERENCES users(id)
 );
 CREATE TABLE monitor_lots (
-    id          INTEGER PRIMARY KEY,
-    monitor_id  INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
-    lot         TEXT NOT NULL,
-    shift       TEXT NOT NULL DEFAULT '',
-    started_at  TEXT NOT NULL,
-    started_by  TEXT NOT NULL,
-    note        TEXT NOT NULL DEFAULT '',
-    status      TEXT NOT NULL CHECK (status IN ('pending', 'released', 'superseded')),
-    attempts    INTEGER NOT NULL DEFAULT 0,
-    first_seq   INTEGER,
-    released_at TEXT NOT NULL DEFAULT '',
-    released_by TEXT NOT NULL DEFAULT ''
+    id            INTEGER PRIMARY KEY,
+    monitor_id    INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    lot           TEXT NOT NULL,
+    shift         TEXT NOT NULL DEFAULT '',
+    started_at    TEXT NOT NULL,
+    started_by    TEXT NOT NULL,
+    note          TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL CHECK (status IN ('pending', 'approval', 'released', 'superseded')),
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    first_seq     INTEGER,
+    first_user_id INTEGER,
+    first_by      TEXT NOT NULL DEFAULT '',
+    released_at   TEXT NOT NULL DEFAULT '',
+    released_by   TEXT NOT NULL DEFAULT '',
+    approved_by   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX monitor_lots_monitor ON monitor_lots(monitor_id, id)
 """
@@ -468,7 +471,7 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13):
+        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
@@ -533,13 +536,16 @@ class Database:
                     self._conn.execute(MIGRATION_12_TO_13)
                 self._conn.execute("PRAGMA user_version = 13")
                 self._conn.execute("COMMIT")
-            self._conn.execute("BEGIN IMMEDIATE")  # version 14 adds the lots of the monitor stations (first article after a change of lot)
-            if not self._conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'monitor_lots'").fetchone():
-                for statement in MIGRATION_13_TO_14.split(";"):
-                    if statement.strip():
-                        self._conn.execute(statement)
-            self._conn.execute("PRAGMA user_version = 14")
-            self._conn.execute("COMMIT")
+            if version <= 13:
+                self._conn.execute("BEGIN IMMEDIATE")  # version 14 adds the lots of the monitor stations (first article after a change of lot)
+                if not self._conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'monitor_lots'").fetchone():
+                    for statement in MIGRATION_13_TO_14.split(";"):
+                        if statement.strip():
+                            self._conn.execute(statement)
+                self._conn.execute("PRAGMA user_version = 14")
+                self._conn.execute("COMMIT")
+            if version <= 14:
+                self._migrate_14_to_15()
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")
 
@@ -561,6 +567,35 @@ class Database:
             if problems:
                 raise RuntimeError(f"foreign key problems after the migration: {len(problems)}")
             self._conn.execute("PRAGMA user_version = 3")
+            self._conn.execute("COMMIT")
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        finally:
+            self._conn.execute("PRAGMA foreign_keys = ON")
+
+    def _migrate_14_to_15(self) -> None:
+        """Version 15 adds the role 'leader' (the users table is built again, a CHECK cannot be changed) and the approval of the first article (the lots of the stations are built again:
+        a new status and the people who measured and approved). Foreign keys are off while that happens and checked after."""
+        self._conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            users = SCHEMA[SCHEMA.index("CREATE TABLE users") : SCHEMA.index("CREATE TABLE sessions")].replace("CREATE TABLE users", "CREATE TABLE users_new", 1)
+            self._conn.execute(users)
+            self._conn.execute("INSERT INTO users_new SELECT * FROM users")
+            self._conn.execute("DROP TABLE users")
+            self._conn.execute("ALTER TABLE users_new RENAME TO users")
+            lots = SCHEMA[SCHEMA.index("CREATE TABLE monitor_lots") : SCHEMA.index("CREATE INDEX monitor_lots_monitor")].replace("CREATE TABLE monitor_lots", "CREATE TABLE monitor_lots_new", 1)
+            self._conn.execute(lots)
+            self._conn.execute("INSERT INTO monitor_lots_new (id, monitor_id, lot, shift, started_at, started_by, note, status, attempts, first_seq, released_at, released_by) "
+                               "SELECT id, monitor_id, lot, shift, started_at, started_by, note, status, attempts, first_seq, released_at, released_by FROM monitor_lots")
+            self._conn.execute("DROP TABLE monitor_lots")
+            self._conn.execute("ALTER TABLE monitor_lots_new RENAME TO monitor_lots")
+            self._conn.execute("CREATE INDEX monitor_lots_monitor ON monitor_lots(monitor_id, id)")
+            problems = self._conn.execute("PRAGMA foreign_key_check").fetchall()
+            if problems:
+                raise RuntimeError(f"foreign key problems after the migration: {len(problems)}")
+            self._conn.execute("PRAGMA user_version = 15")
             self._conn.execute("COMMIT")
         except BaseException:
             self._conn.execute("ROLLBACK")

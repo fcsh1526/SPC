@@ -24,7 +24,7 @@ The server listens on 127.0.0.1 only. To serve a team, put it behind an https pr
 ## Login, roles, audit
 
 - Every `/api` route needs a login except `GET /api/meta` and `POST /api/auth/login`. A new route is protected unless it is listed as public.
-- Roles: **viewer** reads and analyses, **engineer** also imports, marks, makes reports and deletes own datasets, **admin** also manages users, reads the audit trail and deletes any dataset. Datasets and reports are shared by all signed-in users.
+- Roles: **viewer** reads and analyses, **operator** also enters samples and handles alarms at the station, **leader** (shift or line leader) also confirms the first article of a new lot (another person than the one who measured it), **engineer** also imports, marks, makes reports and deletes own datasets, **admin** also manages users, reads the audit trail and deletes any dataset. Datasets and reports are shared by all signed-in users.
 - The person in a mark, a restore or a report is the signed-in user. The client cannot name someone else.
 - Passwords: scrypt, at least 10 characters. Five wrong tries lock a name for 15 minutes. Sessions end after 2 hours idle or 12 hours. State-changing requests need the CSRF token.
 - Users are managed in the Administration tab, or with `spc-admin` (`create-user`, `reset-password`, `unlock`, `list-users`, `audit-verify`). A password set by an administrator must be changed at the first sign-in.

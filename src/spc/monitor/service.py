@@ -595,12 +595,14 @@ class MonitorService:
             raise MonitorError("invalid_input", f"at most {count} tags, key up to {klen} and value up to {vlen} characters")
         when = _parse_time(taken_at)
         lot_row = self.store.current_lot(monitor_id)
+        if lot_row and lot_row["status"] == "approval" and monitor.get("first_article", True):
+            raise MonitorError("first_article_approval_pending", f"the first article of lot {lot_row['lot']} waits for the confirmation of the leader: no sample before that", 409, lot=lot_row["lot"])
         first = bool(lot_row and lot_row["status"] == "pending" and monitor.get("first_article", True))
         given_lot = (tags.get("lot") or "").strip()
         if lot_row and given_lot and given_lot.lower() != lot_row["lot"].lower():
             raise MonitorError("lot_changed", f"this station runs lot {lot_row['lot']} now, not {given_lot}: refresh the screen", 409, lot=lot_row["lot"])
         if first:
-            tags = {**tags, "lot": lot_row["lot"], "first_article": "1"}  # the sample is the first article of the lot, whatever the screen sent
+            tags = {**({"shift": lot_row["shift"]} if lot_row["shift"] else {}), **tags, "lot": lot_row["lot"], "first_article": "1"}  # the sample is the first article of the lot, whatever the screen sent
         if monitor["require_ack"] and not self.store.has_ack(monitor_id, user.id, monitor["ocap_rev"]):
             raise MonitorError("ocap_not_acknowledged", "confirm that you know the action plan of this monitor first", 403)
         with self.db.tx():
@@ -685,10 +687,16 @@ class MonitorService:
             if monitor["kind"] == TREND_KIND:
                 point["trend"] = self._trend_info(limits, point, self.store.cycle_marks(monitor_id))
             incident_now = self.store.incident(incident_id) if incident_id else None
-            first_article = None
+            first_article, approval_event = None, None
             if first:
-                if not alarms and not warnings:
-                    self.store.release_lot(lot_row["id"], seq, _label(user))
+                if not alarms and not warnings and monitor.get("first_article_approval", True):
+                    self.store.await_approval(lot_row["id"], seq, user.id, _label(user))
+                    self._log("monitor_first_article_passed", user, monitor["name"], {"id": monitor_id, "lot": lot_row["lot"], "point": seq, "attempt": lot_row["attempts"] + 1})
+                    first_article = {"lot": lot_row["lot"], "result": "awaiting_approval", "attempt": lot_row["attempts"] + 1}
+                    approval_event = {"type": "first_article_awaiting_approval", "at": now_iso(), "monitor": {"id": monitor_id, "name": monitor["name"], "line": monitor["line"],
+                                                                                                          "characteristic": monitor["characteristic"]}, "lot": lot_row["lot"], "point_seq": seq, "entered_by": _label(user)}
+                elif not alarms and not warnings:
+                    self.store.release_lot(lot_row["id"], seq, _label(user), user.id)
                     self._log("monitor_first_article_released", user, monitor["name"], {"id": monitor_id, "lot": lot_row["lot"], "point": seq, "attempts": lot_row["attempts"] + 1})
                     first_article = {"lot": lot_row["lot"], "result": "passed", "attempt": lot_row["attempts"] + 1}
                 else:
@@ -696,6 +704,8 @@ class MonitorService:
                     self._log("monitor_first_article_failed", user, monitor["name"], {"id": monitor_id, "lot": lot_row["lot"], "point": seq, "attempt": attempts,
                                                                                        "rules": [f"{a['chart']}:{a['rule']}" for a in alarms] + [f"warning:{w}" if isinstance(w, str) else "warning" for w in warnings]})
                     first_article = {"lot": lot_row["lot"], "result": "failed", "attempt": attempts}
+        if approval_event:
+            self._notify(approval_event)
         if opened:
             self._notify({"type": "incident_opened", "at": now_iso(), "monitor": {"id": monitor_id, "name": monitor["name"], "line": monitor["line"],
                                                                                    "characteristic": monitor["characteristic"]},
@@ -725,6 +735,36 @@ class MonitorService:
                                                                          "first_article": ("pending" if required else "not_required") if new_lot else ""})
         return {"monitor": monitor["name"], "shift": shift, "lot": lot, "note": note, "by": _label(user), "new_lot": new_lot, "lot_state": row}
 
+    def _lot_awaiting(self, monitor_id: int) -> tuple[dict, dict]:
+        monitor, lot = self.store.get(monitor_id), self.store.current_lot(monitor_id)
+        if lot is None or lot["status"] != "approval":
+            raise MonitorError("no_first_article_to_approve", "there is no first article waiting for confirmation at this station", 409)
+        return monitor, lot
+
+    def approve_first_article(self, monitor_id: int, user) -> dict:
+        """The leader confirms the first article of the running lot and the lot is released. Another person than the one who measured it: the sample was not checked by its maker alone."""
+        monitor, lot = self._lot_awaiting(monitor_id)
+        if lot["first_user_id"] == user.id:
+            raise MonitorError("same_person", "the first article is confirmed by another person than the one who measured it", 409)
+        point = self.store.point(monitor_id, lot["first_seq"])
+        if point is None or not point["valid"]:
+            raise MonitorError("first_article_invalid", "the first article was declared invalid: a new first article is needed", 409)
+        with self.db.tx():
+            self.store.approve_lot(lot["id"], _label(user))
+            self._log("monitor_first_article_released", user, monitor["name"], {"id": monitor_id, "lot": lot["lot"], "point": lot["first_seq"], "measured_by": lot["first_by"],
+                                                                                 "approved_by": _label(user), "attempts": lot["attempts"]})
+        return self.store.current_lot(monitor_id)
+
+    def reject_first_article(self, monitor_id: int, reason: str, user) -> dict:
+        monitor, lot = self._lot_awaiting(monitor_id)
+        if not reason or not reason.strip():
+            raise MonitorError("reason_required", "say why the first article is not accepted")
+        with self.db.tx():
+            self.store.reopen_lot(lot["id"])
+            self._log("monitor_first_article_rejected", user, monitor["name"], {"id": monitor_id, "lot": lot["lot"], "point": lot["first_seq"], "measured_by": lot["first_by"],
+                                                                                 "rejected_by": _label(user), "reason": reason.strip()})
+        return self.store.current_lot(monitor_id)
+
     def invalidate_point(self, monitor_id: int, seq: int, reason: str, user) -> dict:
         if not reason or not reason.strip():
             raise MonitorError("reason_required", "a reason is required to declare a sample invalid")
@@ -737,8 +777,8 @@ class MonitorService:
         with self.db.tx():
             self.store.invalidate(monitor_id, seq, reason.strip(), _label(user))
             self._log("monitor_point_invalid", user, monitor["name"], {"id": monitor_id, "point": seq, "reason": reason.strip()})
-            released = self.store.lot_released_by(monitor_id, seq)
-            if released:  # the sample that released the lot is not valid: the lot waits for a new first article
+            released = self.store.lot_with_first(monitor_id, seq)
+            if released:  # the first article (waiting for confirmation, or released) is not valid: the lot waits for a new first article
                 self.store.reopen_lot(released["id"])
                 self._log("monitor_first_article_withdrawn", user, monitor["name"], {"id": monitor_id, "lot": released["lot"], "point": seq})
             inc = self.store.incident(point["incident_id"]) if point["incident_id"] else None

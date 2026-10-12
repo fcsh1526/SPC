@@ -163,12 +163,12 @@ def old_database(path, version):
     conn.close()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
 def test_an_old_database_is_migrated_without_losing_anything(tmp_path, version):
     path = tmp_path / "old.sqlite3"
     old_database(path, version)
     db = Database(path)
-    assert db.one("PRAGMA user_version")[0] == 14
+    assert db.one("PRAGMA user_version")[0] == 15
     assert db.one("SELECT username FROM users")["username"] == "old"  # nothing was lost
     assert db.one("SELECT COUNT(*) AS n FROM sessions")["n"] == 1  # the rebuild did not cascade into the sessions
     assert db.all("SELECT * FROM profiles") == [] and db.all("SELECT * FROM monitors") == [] and db.all("SELECT * FROM studies") == [] and db.all("SELECT * FROM msa_systems") == [] and db.all("SELECT * FROM control_plans") == [] and db.all("SELECT * FROM spc_people") == [] and db.all("SELECT * FROM validation_cases") == [] and db.all("SELECT * FROM validation_runs") == [] and db.all("SELECT * FROM equipment_links") == [] and db.all("SELECT * FROM trusted_signers") == [] and db.all("SELECT * FROM report_signatures") == [] and db.all("SELECT * FROM lots") == [] and db.all("SELECT * FROM improvements") == [] and db.all("SELECT * FROM import_templates") == []
@@ -176,7 +176,7 @@ def test_an_old_database_is_migrated_without_losing_anything(tmp_path, version):
     with pytest.raises(sqlite3.IntegrityError):
         db.execute("INSERT INTO users (username, password_hash, role, created_at, updated_at) VALUES ('bad', 'x', 'boss', 'a', 'a')")
     db.close()
-    assert Database(path).one("PRAGMA user_version")[0] == 14  # opens again without migrating twice
+    assert Database(path).one("PRAGMA user_version")[0] == 15  # opens again without migrating twice
 
 
 def test_points_of_version_12_get_the_cycle_column_and_keep_their_data(tmp_path):
@@ -189,11 +189,11 @@ def test_points_of_version_12_get_the_cycle_column_and_keep_their_data(tmp_path)
     conn.commit()
     conn.close()
     db = Database(path)
-    assert db.one("PRAGMA user_version")[0] == 14
+    assert db.one("PRAGMA user_version")[0] == 15
     assert "cycle" in [r[1] for r in db.all("PRAGMA table_info(monitor_points)")]
     assert db.one("SELECT username FROM users")["username"] == "old"
     db.close()
-    assert Database(path).one("PRAGMA user_version")[0] == 14
+    assert Database(path).one("PRAGMA user_version")[0] == 15
 
 
 # ------------------------------------------------------------------ the API
@@ -398,3 +398,29 @@ def test_deleting_a_profile_keeps_old_reports_and_unknown_ids_are_refused(env):
     admin.delete(f"/api/profiles/{p['id']}")
     assert "Acme Quality Lab" in eng.get(made["urls"]["html"]).text
     assert err(eng.post(f"/api/datasets/{ds['id']}/reports", json=report_body(p)))["code"] == "profile_not_found"
+
+
+def test_a_database_of_version_14_gets_the_role_leader_and_the_approval_of_the_first_article(tmp_path):
+    """The rebuild is real: the version 14 tables have the old CHECKs, which refuse the new role and the new status."""
+    path = tmp_path / "v14.sqlite3"
+    conn = sqlite3.connect(path)
+    for statement in SCHEMA.split(";"):
+        if not statement.strip():
+            continue
+        statement = statement.replace("'viewer', 'operator', 'leader', 'engineer', 'admin'", "'viewer', 'operator', 'engineer', 'admin'")
+        statement = statement.replace("IN ('pending', 'approval', 'released', 'superseded')", "IN ('pending', 'released', 'superseded')")
+        if "TABLE monitor_lots" in statement:
+            statement = "CREATE TABLE monitor_lots (id INTEGER PRIMARY KEY, monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE, lot TEXT NOT NULL, shift TEXT NOT NULL DEFAULT '', started_at TEXT NOT NULL, started_by TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', status TEXT NOT NULL CHECK (status IN ('pending', 'released', 'superseded')), attempts INTEGER NOT NULL DEFAULT 0, first_seq INTEGER, released_at TEXT NOT NULL DEFAULT '', released_by TEXT NOT NULL DEFAULT '')"
+        conn.execute(statement)
+    conn.execute("PRAGMA user_version = 14")
+    conn.execute("INSERT INTO users (username, password_hash, role, created_at, updated_at) VALUES ('old', 'x', 'operator', 'a', 'a')")
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO users (username, password_hash, role, created_at, updated_at) VALUES ('boss', 'x', 'leader', 'a', 'a')")
+    conn.close()
+    db = Database(path)
+    assert db.one("PRAGMA user_version")[0] == 15 and db.one("SELECT role FROM users")["role"] == "operator"
+    db.execute("INSERT INTO users (username, password_hash, role, created_at, updated_at) VALUES ('boss', 'x', 'leader', 'a', 'a')")
+    cols = [r[1] for r in db.all("PRAGMA table_info(monitor_lots)")]
+    assert {"first_user_id", "first_by", "approved_by"} <= set(cols)
+    db.close()

@@ -205,8 +205,8 @@
     const box = $("#fl-tiles"); box.replaceChildren();
     $("#fl-none").hidden = F.list.length > 0;
     F.list.forEach((m) => {
-      const first = m.active && !m.open_incidents && m.first_article !== false && m.lot_state && m.lot_state.status === "pending";
-      const state = !m.active ? "off" : m.open_incidents ? "alarm" : first ? "first" : "ok";
+      const lotOn = m.active && !m.open_incidents && m.first_article !== false && m.lot_state;
+      const state = !m.active ? "off" : m.open_incidents ? "alarm" : lotOn && m.lot_state.status === "approval" ? "approval" : lotOn && m.lot_state.status === "pending" ? "first" : "ok";
       const b = el("button", "fl-tile fl-" + state); b.type = "button";
       b.appendChild(el("span", "fl-tile-name", m.name));
       b.appendChild(el("span", "fl-tile-sub", [m.line, m.characteristic].filter(Boolean).join(" · ")));
@@ -241,8 +241,10 @@
     }));
   }
   const firstPending = (v) => v.monitor.first_article !== false && !!v.lot_state && v.lot_state.status === "pending";
+  const approvalWaiting = (v) => v.monitor.first_article !== false && !!v.lot_state && v.lot_state.status === "approval";
   function stationState(v) {
     if (v.incident) return "alarm";
+    if (approvalWaiting(v)) return "approval";
     if (firstPending(v)) return "first";
     const last = [...v.points].reverse().find((p) => p.valid);
     if (!last) return "none";
@@ -254,12 +256,13 @@
     $("#fl-sub").textContent = [m.line, m.characteristic, m.unit].filter(Boolean).join(" · ");
     const ctx = { ...floorLastTags(v), ...floorCtx() };
     const ls = v.lot_state;
-    $("#fl-ctx-label").textContent = t("floor.ctx_line", { shift: ctx.shift || "–", lot: ctx.lot || "–" }) + (ls && m.first_article !== false ? " · " + t(ls.status === "pending" ? "floor.lot_pending" : "floor.lot_released") : "");
+    $("#fl-ctx-label").textContent = t("floor.ctx_line", { shift: ctx.shift || "–", lot: ctx.lot || "–" }) + (ls && m.first_article !== false ? " · " + t(ls.status === "pending" ? "floor.lot_pending" : ls.status === "approval" ? "floor.lot_approval" : "floor.lot_released") : "");
     const st = stationState(v), last = [...v.points].reverse().find((p) => p.valid);
     const banner = $("#fl-banner");
     banner.className = "fl-banner fl-" + st;
     banner.replaceChildren(el("div", "fl-banner-state", t("floor.banner_" + st)));
-    if (st === "first") banner.appendChild(el("div", "fl-banner-value", t("floor.first_line", { lot: v.lot_state.lot, attempts: v.lot_state.attempts })));
+    if (st === "approval") banner.appendChild(el("div", "fl-banner-value", t("floor.appr_line", { lot: v.lot_state.lot, by: v.lot_state.first_by })));
+    else if (st === "first") banner.appendChild(el("div", "fl-banner-value", t("floor.first_line", { lot: v.lot_state.lot, attempts: v.lot_state.attempts })));
     else if (last) banner.appendChild(el("div", "fl-banner-value", `${sig(last.values.length > 1 ? last.loc : last.values[0], 6)} ${m.unit || ""}`.trim() + ` · #${last.seq} · ${when(last.taken_at)}`));
     // charts: the latest points only, so that the screen needs no scrolling
     const view = { ...v, points: v.points.slice(-30) };
@@ -274,9 +277,29 @@
     const inc = !!v.incident;
     $("#fl-modes").hidden = !inc;
     if (!inc) F.mode = "entry";
-    $("#fl-entry").hidden = !(F.mode === "entry") || !m.active || $("#fl-ack").hidden === false;
+    const appr = approvalWaiting(v) && !inc;
+    $("#fl-approval").hidden = !appr;
+    if (appr) renderApproval(v);
+    $("#fl-entry").hidden = !(F.mode === "entry") || !m.active || $("#fl-ack").hidden === false || appr;
     $("#fl-incident").hidden = !(inc && F.mode === "incident");
     $$("#fl-modes button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === F.mode)));
+  }
+  function renderApproval(v) {
+    const ls = v.lot_state, p = v.points.find((x) => x.seq === ls.first_seq);
+    $("#fl-appr-title").textContent = t("floor.appr_title", { lot: ls.lot });
+    $("#fl-appr-detail").textContent = p ? t("floor.appr_detail", { seq: p.seq, values: p.values.map((x) => sig(x, 6)).join(", "), by: ls.first_by, at: when(p.taken_at) }) : "";
+    const me = state.user, same = me && ls.first_user_id === me.id;
+    $("#fl-appr-same").hidden = !same;
+    $("#fl-appr-ok").disabled = !!same;
+    $("#fl-appr-wait").hidden = ["leader", "engineer", "admin"].includes(me.role);
+  }
+  async function approveFirst() {
+    await guarded(async () => { await post(`/api/monitors/${F.id}/lot/approve`, {}); F.view = await api(`/api/monitors/${F.id}`); F.last = null; renderStation(true); });
+  }
+  async function rejectFirst() {
+    const reason = $("#fl-appr-reason").value.trim();
+    if (!reason) return showError({ code: "reason_required", message: "", params: {} });
+    await guarded(async () => { await post(`/api/monitors/${F.id}/lot/reject`, { reason }); $("#fl-appr-reason").value = ""; F.view = await api(`/api/monitors/${F.id}`); F.last = null; renderStation(true); });
   }
   function renderStationEntry(m, lim, keep) {
     const box = $("#fl-values"), defs = entryDefs(m, lim);
@@ -309,9 +332,9 @@
     if (!fn.hidden) fn.textContent = t("floor.first_note", { lot: F.view.lot_state.lot });
     const r = F.last, out = $("#fl-result"); out.replaceChildren();
     if (r && r.first_article) {
-      const ok = r.first_article.result === "passed";
+      const res = r.first_article.result, ok = res !== "failed";
       out.className = "fl-result fl-" + (ok ? "ok" : "alarm");
-      out.appendChild(el("div", "fl-result-title", t(ok ? "floor.first_passed" : "floor.first_failed", { lot: r.first_article.lot, n: r.first_article.attempt, seq: r.point.seq })));
+      out.appendChild(el("div", "fl-result-title", t(res === "passed" ? "floor.first_passed" : res === "awaiting_approval" ? "floor.first_awaiting" : "floor.first_failed", { lot: r.first_article.lot, n: r.first_article.attempt, seq: r.point.seq })));
     } else if (r) {
       out.className = "fl-result fl-" + (r.status === "alarm" ? "alarm" : r.status === "warning" ? "warning" : "ok");
       out.appendChild(el("div", "fl-result-title", t("floor.result_" + r.status, { seq: r.point.seq })));
@@ -442,6 +465,8 @@
     $("#fl-ctx-cancel").addEventListener("click", () => { $("#fl-dialog").hidden = true; });
     $("#fl-ctx-logout").addEventListener("click", doLogout);
     $("#fl-cycle").addEventListener("change", () => { $("#fl-cycle-note").hidden = !$("#fl-cycle").checked; if ($("#fl-cycle").checked) $("#fl-cycle-note").focus(); });
+    $("#fl-appr-ok").addEventListener("click", approveFirst);
+    $("#fl-appr-reject").addEventListener("click", rejectFirst);
     $("#fl-ack-btn").addEventListener("click", () => guarded(async () => { await post(`/api/monitors/${F.id}/ack`, {}); F.view = await api(`/api/monitors/${F.id}`); renderStation(true); }));
     $$("#fl-modes button").forEach((b) => b.addEventListener("click", () => { F.mode = b.dataset.mode; renderStation(true); }));
     $("#fl-inc-action").addEventListener("click", () => floorIncident("action"));
@@ -1439,7 +1464,7 @@
     $("#login-user").value = ""; $("#login-pass").value = "";
     renderUserBox();
     if (!state.mustChange) { loadProfiles(); startAlertPolling(); }
-    showTab(state.mustChange ? "password" : (me.user.role === "viewer" ? "saved" : me.user.role === "operator" ? "floor" : "import"));
+    showTab(state.mustChange ? "password" : (me.user.role === "viewer" ? "saved" : me.user.role === "operator" || me.user.role === "leader" ? "floor" : "import"));
   }
   function renderUserBox() {
     if (!state.user) return;
@@ -1781,6 +1806,8 @@
     const badge = $("#alert-badge");
     badge.hidden = !a.open;
     badge.textContent = String(a.open);
+    const fb = $("#floor-badge"), canLead = state.user && ["leader", "engineer", "admin"].includes(state.user.role);
+    if (fb) { fb.hidden = !(canLead && a.approvals); fb.textContent = String(a.approvals || 0); fb.title = t("floor.approvals_waiting", { n: a.approvals || 0 }); }
     badge.title = t("mon.alerts_line", { open: a.open, unack: a.unacknowledged, overdue: a.overdue });
     $("#mon-alerts").textContent = a.open ? t("mon.alerts_line", { open: a.open, unack: a.unacknowledged, overdue: a.overdue }) : t("mon.alerts_none");
     $("#mon-alerts").className = a.open ? "strong status-alarm" : "muted";
@@ -2277,7 +2304,7 @@
   async function openMonitorEditor(monitor) {
     M.editing = monitor ? monitor.id : "new";
     const m = monitor || { name: "", process: "", characteristic: "", unit: "", line: "", kind: "xbar-s", n: 5, alpha: null, warn_alpha: 0.05,
-      specs: {}, rules: { beyond_limits: true }, ocap: { default: {}, rules: {} }, require_ack: true, first_article: true, active: true };
+      specs: {}, rules: { beyond_limits: true }, ocap: { default: {}, rules: {} }, require_ack: true, first_article: true, first_article_approval: true, active: true };
     $("#mon-editor-title").textContent = monitor ? t("mon.edit_title", { name: m.name }) : t("mon.new");
     ["name", "process", "characteristic", "unit", "line"].forEach((k) => { $("#me-" + k).value = m[k] || ""; });
     $("#me-laney").checked = !!m.laney; $("#me-laney").disabled = !!monitor;
@@ -2291,7 +2318,7 @@
     ["#me-lsl", "#me-usl", "#me-accept-p", "#me-accept-pa"].forEach((sel) => { $(sel).disabled = !!monitor && isTol(m.kind); });  // the tolerance belongs to the limits
     fillRules("mon-r-", m.rules, false);
     ocapEditorRows(m.ocap);
-    $("#me-ack").checked = m.require_ack; $("#me-first").checked = m.first_article !== false; $("#me-active").checked = m.active;
+    $("#me-ack").checked = m.require_ack; $("#me-first").checked = m.first_article !== false; $("#me-first-approval").checked = m.first_article_approval !== false; $("#me-active").checked = m.active;
     syncKindFields();
     if (!monitor) await fillDatasetSelect($("#me-dataset"));
     await fillMsaSelect($("#me-msa"), m.specs.msa_id);
@@ -2363,7 +2390,7 @@
       kind: editing ? editing.kind : $("#me-kind").value, n: editing ? editing.n : Number($("#me-n").value), warn_alpha: warn,
       specs: isCount($("#me-kind").value) || (editing && isCount(editing.kind)) || $("#me-kind").value === "zmr" || isVec($("#me-kind").value) || DEP_KINDS.includes($("#me-kind").value) ? {} : { ...(ACC_KINDS.includes($("#me-kind").value) ? (editing ? { accept_p: editing.specs.accept_p, accept_pa: editing.specs.accept_pa } : { accept_p: num("#me-accept-p") / 100, accept_pa: num("#me-accept-pa") / 100 }) : {}), lsl: num("#me-lsl"), usl: num("#me-usl"), target_class: $("#me-class").value || null, model: $("#me-model").value || null,
         controlled_stable: editing ? editing.specs.controlled_stable : false, edition: editing ? editing.specs.edition : "draft" },
-      rules: readRules("mon-r-"), ocap: readOcap(), require_ack: $("#me-ack").checked, first_article: $("#me-first").checked, active: $("#me-active").checked,
+      rules: readRules("mon-r-"), ocap: readOcap(), require_ack: $("#me-ack").checked, first_article: $("#me-first").checked, first_article_approval: $("#me-first-approval").checked, active: $("#me-active").checked,
     };
     if (editing) config.alpha = editing.alpha; else if ($("#me-alpha").value) config.alpha = Number($("#me-alpha").value);
     if (editing ? editing.laney : $("#me-laney").checked && (config.kind === "p" || config.kind === "u")) config.laney = true;
@@ -3096,7 +3123,7 @@
     l.history.forEach((x) => { const tr = el("tr"); cell(tr, when(x.at)); cell(tr, x.by); cell(tr, t("lot.act_" + x.action)); cell(tr, x.detail.reason || (x.detail.kind ? t("lot.dec_" + x.detail.kind) : "")); h.appendChild(tr); });
     syncLotDecisionForm();
   }
-  function canOperate() { return state.user && ["operator", "engineer", "admin"].includes(state.user.role); }
+  function canOperate() { return state.user && ["operator", "leader", "engineer", "admin"].includes(state.user.role); }
   function syncLotDecisionForm() {
     const k = $("#lotd-decision").value;
     $("#lotd-ref-label").hidden = k !== "concession";
@@ -4398,7 +4425,7 @@
       $("#sig-title").textContent = t("sig.title", { id: rid });
       $("#sig-message").textContent = pl ? pl.message : "";
       $("#sig-broken").hidden = sg.archive_intact;
-      $("#sig-add").hidden = state.user.role === "viewer" || state.user.role === "operator" || !sg.archive_intact;
+      $("#sig-add").hidden = state.user.role === "viewer" || state.user.role === "operator" || state.user.role === "leader" || !sg.archive_intact;
       $("#sig-msg").textContent = "";
       const tb = $("#sig-list"); tb.replaceChildren();
       const head = el("tr");
@@ -4488,7 +4515,7 @@
       const tr = el("tr");
       cell(tr, u.username); cell(tr, u.display_name);
       const roleCell = cell(tr, ""), role = el("select");
-      ["viewer", "operator", "engineer", "admin"].forEach((r) => { const o = el("option", "", t("role." + r)); o.value = r; role.appendChild(o); });
+      ["viewer", "operator", "leader", "engineer", "admin"].forEach((r) => { const o = el("option", "", t("role." + r)); o.value = r; role.appendChild(o); });
       role.value = u.role;
       role.addEventListener("change", () => updateUser(u.id, { role: role.value }));
       roleCell.appendChild(role);

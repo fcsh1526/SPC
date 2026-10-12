@@ -811,6 +811,8 @@ def test_an_operator_works_a_station_from_measurement_to_alarm_and_shift_change(
     expect = playwright_sync.expect
     if "oper" not in {u.username for u in app.state.auth.list_users()}:
         app.state.auth.create_user("oper", PASSWORD, "operator", "Olga Operator")
+    if "lead" not in {u.username for u in app.state.auth.list_users()}:
+        app.state.auth.create_user("lead", PASSWORD, "leader", "Lena Leader")
     eng = logged_in_client(app, "eng")
     name = "Station turning " + str(len(eng.get("/api/monitors").json()["monitors"]))
     mid = eng.post("/api/monitors", json={"config": {**CONFIG, "name": name, "line": "T1"}, "source": PARAMS}).json()["monitor"]["id"]
@@ -876,9 +878,35 @@ def test_an_operator_works_a_station_from_measurement_to_alarm_and_shift_change(
     expect(page.locator("#fl-banner")).to_contain_text("FIRST ARTICLE")
     expect(page.locator("#fl-first-note")).to_contain_text("first article of lot L2411")
     send(OK_SAMPLE)
-    expect(page.locator("#fl-result")).to_contain_text("First article passed", timeout=20000)
-    expect(page.locator("#fl-banner")).to_contain_text("IN CONTROL")
-    expect(page.locator("#fl-first-note")).to_be_hidden()
+    expect(page.locator("#fl-result")).to_contain_text("The leader confirms it before lot L2411", timeout=20000)
+    # it passed, but the lot is released by the leader: the operator can measure nothing before that
+    expect(page.locator("#fl-banner")).to_contain_text("WAITING FOR THE LEADER", timeout=20000)
+    expect(page.locator("#fl-entry")).to_be_hidden()
+    expect(page.locator("#fl-appr-wait")).to_be_visible()
+    expect(page.locator("#fl-appr-ok")).to_be_hidden()  # an operator has no way to confirm
+    assert eng.get(f"/api/monitors/{mid}").json()["lot_state"]["status"] == "approval"
+    # the leader opens the same station on another screen and confirms, after a look at the sample
+    lead_ctx = browser.new_context(viewport={"width": 1366, "height": 768}, locale="en")
+    lead = lead_ctx.new_page()
+    lead.goto(server)
+    sign_in(lead, "lead")
+    expect(lead.locator("#floor-badge")).to_have_text("1", timeout=20000)
+    lead.locator("#fl-tiles .fl-tile", has_text=name).click()
+    expect(lead.locator("#fl-banner")).to_contain_text("WAITING FOR THE LEADER", timeout=20000)
+    expect(lead.locator("#fl-appr-detail")).to_contain_text("Olga Operator")
+    lead.fill("#fl-appr-reason", "")
+    lead.click("#fl-appr-reject")  # not accepting needs words
+    expect(lead.locator("#errors")).to_contain_text("A reason is required", timeout=20000)
+    lead.click("#errors button")
+    lead.click("#fl-appr-ok")
+    expect(lead.locator("#fl-banner")).to_contain_text("IN CONTROL", timeout=20000)
+    assert eng.get(f"/api/monitors/{mid}").json()["lot_state"]["status"] == "released"
+    lead_ctx.close()
+    # the operator's screen follows: the lot is released, the next sample is a normal one
+    page.click("#fl-back")
+    page.locator("#fl-tiles .fl-tile", has_text=name).click()
+    expect(page.locator("#fl-banner")).to_contain_text("IN CONTROL", timeout=20000)
+    expect(page.locator("#fl-entry")).to_be_visible()
     pts = eng.get(f"/api/monitors/{mid}").json()["points"]
     assert pts[-1]["tags"] == {"lot": "L2411", "shift": "Night", "first_article": "1"}
     # the next lot: a first article that does not pass keeps the lot open

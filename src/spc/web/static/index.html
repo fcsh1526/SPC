@@ -53,7 +53,7 @@
 
 <nav class="tabs" role="tablist" aria-orientation="vertical">
   <div class="navgroup" role="presentation"><div class="navtitle" data-i18n="nav.group_floor"></div>
-  <button role="tab" data-tab="floor" aria-selected="false" data-i18n="nav.floor"></button>
+  <button role="tab" data-tab="floor" aria-selected="false"><span data-i18n="nav.floor"></span> <span id="floor-badge" class="badge" hidden></span></button>
   <button role="tab" data-tab="monitor" aria-selected="false"><span data-i18n="nav.monitor"></span> <span id="alert-badge" class="badge" hidden></span></button>
   <button role="tab" data-tab="lots" aria-selected="false" data-i18n="nav.lots"></button>
   <button role="tab" data-tab="improve" aria-selected="false" data-i18n="nav.improve"></button>
@@ -127,6 +127,17 @@
           </div>
           <button id="fl-submit" class="primary big-btn" type="button" data-i18n="floor.submit"></button>
           <div id="fl-result" class="fl-result" role="status"></div>
+        </div>
+        <div id="fl-approval" class="fl-box fl-approval" hidden>
+          <div class="strong" id="fl-appr-title"></div>
+          <div id="fl-appr-detail" class="note"></div>
+          <p id="fl-appr-wait" class="fl-first-note" data-i18n="floor.appr_wait"></p>
+          <div data-needs="leader">
+            <p id="fl-appr-same" class="status-warning" hidden data-i18n="floor.appr_same"></p>
+            <button id="fl-appr-ok" class="primary big-btn" type="button" data-i18n="floor.appr_ok"></button>
+            <label class="wide"><span data-i18n="floor.appr_reason"></span><input id="fl-appr-reason" type="text" maxlength="2000"></label>
+            <button id="fl-appr-reject" type="button" class="big-btn" data-i18n="floor.appr_reject"></button>
+          </div>
         </div>
         <div id="fl-incident" class="fl-box" hidden>
           <div id="fl-inc-title" class="strong"></div>
@@ -930,6 +941,7 @@
       <div class="scroll"><table id="me-ocap" class="grid"></table></div>
       <label class="check"><input id="me-ack" type="checkbox" checked><span data-i18n="mon.f_require_ack"></span></label>
       <label class="check"><input id="me-first" type="checkbox" checked><span data-i18n="mon.f_first_article"></span></label>
+      <label class="check"><input id="me-first-approval" type="checkbox" checked><span data-i18n="mon.f_first_article_approval"></span></label>
       <label class="check"><input id="me-active" type="checkbox" checked><span data-i18n="mon.f_active"></span></label>
     </fieldset>
     <p class="row"><button id="me-save" class="primary" data-i18n="mon.save"></button><button id="me-cancel" data-i18n="admin.pf_cancel"></button></p>
@@ -1686,7 +1698,7 @@
         <select id="nu-role">
           <option value="viewer" data-i18n="role.viewer"></option>
           <option value="operator" data-i18n="role.operator"></option>
-          <option value="engineer" data-i18n="role.engineer" selected></option>
+          <option value="leader" data-i18n="role.leader"></option><option value="engineer" data-i18n="role.engineer" selected></option>
           <option value="admin" data-i18n="role.admin"></option>
         </select></label>
       <label><span data-i18n="admin.initial_password"></span><input id="nu-pass" type="password" maxlength="1024" autocomplete="new-password"></label>

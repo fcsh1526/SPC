@@ -159,7 +159,7 @@ class LotService:
         if monitor.get("first_article", True):  # a lot that was started at the station needs a first article that passed
             rows = store.lots_named(mid, lot["lot_no"])
             if rows and not any(r["status"] == "released" for r in rows):
-                blocking.append({"code": "first_article_pending", "lot": lot["lot_no"]})
+                blocking.append({"code": "first_article_pending", "lot": lot["lot_no"], "awaiting_approval": any(r["status"] == "approval" for r in rows)})
             elif not rows:
                 remarks.append({"code": "first_article_untracked", "lot": lot["lot_no"]})
         msa_id = (monitor.get("specs") or {}).get("msa_id")

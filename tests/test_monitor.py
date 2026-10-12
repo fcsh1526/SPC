@@ -135,7 +135,8 @@ def env():
     app = make_app(max_upload=200_000)
     app.state.auth.create_user("oper", PASSWORD, "operator", "Olga Operator")
     app.state.auth.create_user("oper2", PASSWORD, "operator", "Omar Operator")
-    clients = {u: logged_in_client(app, u) for u in ("admin", "eng", "view", "oper", "oper2")}
+    app.state.auth.create_user("lead", PASSWORD, "leader", "Lena Leader")
+    clients = {u: logged_in_client(app, u) for u in ("admin", "eng", "view", "oper", "oper2", "lead")}
     return app, clients
 
 
@@ -1394,16 +1395,17 @@ def test_a_change_of_shift_or_lot_is_written_to_the_audit_chain(env):
     # the samples that follow carry the shift and the lot as tags
     ack(c["oper"], mid)
     out = enter(c["oper"], mid, OK_SAMPLE, label="L2411", tags={"lot": "L2411", "shift": "Night"})
-    assert out["point"]["tags"] == {"lot": "L2411", "shift": "Night", "first_article": "1"} and out["first_article"]["result"] == "passed"
+    assert out["point"]["tags"] == {"lot": "L2411", "shift": "Night", "first_article": "1"} and out["first_article"]["result"] == "awaiting_approval"
 
 
 ALARMING = [10.2, 10.3, 10.25, 10.28, 10.22]
 
 
-def test_the_first_sample_of_a_new_lot_is_a_first_article_that_must_pass(env):
+def test_the_first_sample_of_a_new_lot_is_a_first_article_that_must_pass_and_the_leader_confirms_it(env):
     app, c = env
     mid = make_monitor(c["eng"])
     ack(c["oper"], mid)
+    ack(c["lead"], mid)
     enter(c["oper"], mid, OK_SAMPLE)
     assert c["oper"].get(f"/api/monitors/{mid}").json()["lot_state"] is None
     # a new lot: the station waits for its first article
@@ -1416,29 +1418,56 @@ def test_the_first_sample_of_a_new_lot_is_a_first_article_that_must_pass(env):
     assert bad["status"] == "alarm" and bad["first_article"] == {"lot": "A1", "result": "failed", "attempt": 1}
     assert bad["point"]["tags"]["first_article"] == "1" and bad["point"]["tags"]["lot"] == "A1"
     assert c["oper"].get(f"/api/monitors/{mid}").json()["lot_state"]["status"] == "pending"
+    # a first article that passes waits for the leader: nothing else can be measured before
     good = enter(c["oper"], mid, OK_SAMPLE)  # no lot tag sent: the server puts the lot on the first article
-    assert good["status"] == "ok" and good["first_article"] == {"lot": "A1", "result": "passed", "attempt": 2} and good["point"]["tags"] == {"lot": "A1", "first_article": "1"}
+    assert good["status"] == "ok" and good["first_article"] == {"lot": "A1", "result": "awaiting_approval", "attempt": 2} and good["point"]["tags"] == {"shift": "Day", "lot": "A1", "first_article": "1"}
     st = c["oper"].get(f"/api/monitors/{mid}").json()["lot_state"]
-    assert st["status"] == "released" and st["released_by"].startswith("Olga") and st["first_seq"] == good["point"]["seq"] and st["attempts"] == 2
+    assert st["status"] == "approval" and st["first_seq"] == good["point"]["seq"] and st["first_by"].startswith("Olga") and st["released_by"] == ""
+    assert c["lead"].get("/api/alerts").json()["approvals"] == 1
+    blocked = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": OK_SAMPLE})
+    assert blocked.status_code == 409 and err(blocked)["code"] == "first_article_approval_pending"
+    # only a leader (or above) confirms, and not the person who measured
+    assert c["oper2"].post(f"/api/monitors/{mid}/lot/approve").status_code == 403
+    assert c["view"].post(f"/api/monitors/{mid}/lot/approve").status_code == 403
+    # the leader does not accept it: a new first article is needed, with the reason on record
+    assert err(c["lead"].post(f"/api/monitors/{mid}/lot/reject", json={"reason": " "}))["code"] == "reason_required"
+    rej = c["lead"].post(f"/api/monitors/{mid}/lot/reject", json={"reason": "burr on the edge, measure again"})
+    assert rej.status_code == 200 and rej.json()["status"] == "pending" and rej.json()["first_by"] == ""
+    again = enter(c["oper"], mid, OK_SAMPLE)
+    assert again["first_article"]["result"] == "awaiting_approval" and again["first_article"]["attempt"] == 3
+    assert c["lead"].post(f"/api/monitors/{mid}/lot/reject", json={"reason": "wrong gauge used"}).status_code == 200
+    # the leader measures it himself: another person has to confirm
+    enter(c["lead"], mid, OK_SAMPLE)
+    same = c["lead"].post(f"/api/monitors/{mid}/lot/approve")
+    assert same.status_code == 409 and err(same)["code"] == "same_person"
+    assert c["admin"].post(f"/api/monitors/{mid}/lot/approve").status_code == 200  # an administrator is above a leader and another person
+    st = c["oper"].get(f"/api/monitors/{mid}").json()["lot_state"]
+    assert st["status"] == "released" and st["approved_by"].startswith("Ada") and st["first_by"].startswith("Lena")
+    assert err(c["lead"].post(f"/api/monitors/{mid}/lot/approve"))["code"] == "no_first_article_to_approve"
     after = enter(c["oper"], mid, OK_SAMPLE, tags={"lot": "A1"})
     assert after["first_article"] is None and "first_article" not in after["point"]["tags"]
     # a change of shift alone keeps the lot; a lot that is not the running one is refused on a sample
-    same = c["oper"].post(f"/api/monitors/{mid}/context", json={"shift": "Night", "lot": "A1"}).json()
-    assert not same["new_lot"] and same["lot_state"]["status"] == "released"
+    same_lot = c["oper"].post(f"/api/monitors/{mid}/context", json={"shift": "Night", "lot": "A1"}).json()
+    assert not same_lot["new_lot"] and same_lot["lot_state"]["status"] == "released"
     clash = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": OK_SAMPLE, "tags": {"lot": "B7"}})
     assert clash.status_code == 409 and err(clash)["code"] == "lot_changed"
-    # a lot that is replaced before its first article passed is never released
+    # a lot that is replaced before its first article was confirmed is never released
     c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "B1"})
     c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "B2"})
     rows = app.state.monitors.store.lot_rows(mid)
     assert [(r["lot"], r["status"]) for r in rows[:3]] == [("B2", "pending"), ("B1", "superseded"), ("A1", "released")]
-    # the sample that released a lot is declared invalid: the lot waits for a new first article
-    ok = enter(c["oper"], mid, OK_SAMPLE)
-    assert c["oper"].get(f"/api/monitors/{mid}").json()["lot_state"]["status"] == "released"
-    assert c["oper"].post(f"/api/monitors/{mid}/points/{ok['point']['seq']}/invalid", json={"reason": "wrong part measured"}).status_code == 200
+    # the first article that waits for the leader is declared invalid: the lot waits for a new first article
+    fa = enter(c["oper"], mid, OK_SAMPLE)
+    assert c["oper"].get(f"/api/monitors/{mid}").json()["lot_state"]["status"] == "approval"
+    assert c["oper"].post(f"/api/monitors/{mid}/points/{fa['point']['seq']}/invalid", json={"reason": "wrong part measured"}).status_code == 200
     assert c["oper"].get(f"/api/monitors/{mid}").json()["lot_state"]["status"] == "pending"
-    actions = [e["action"] for e in c["admin"].get("/api/audit?limit=100").json()["entries"]]
-    assert {"monitor_first_article_released", "monitor_first_article_failed", "monitor_first_article_withdrawn"} <= set(actions)
+    # the leader's confirmation also needs the sample to be valid
+    fa2 = enter(c["oper"], mid, OK_SAMPLE)
+    assert fa2["first_article"]["result"] == "awaiting_approval"
+    actions = [e["action"] for e in c["admin"].get("/api/audit?limit=200").json()["entries"]]
+    assert {"monitor_first_article_passed", "monitor_first_article_released", "monitor_first_article_failed", "monitor_first_article_rejected", "monitor_first_article_withdrawn"} <= set(actions)
+    entry = [e for e in c["admin"].get("/api/audit?limit=200").json()["entries"] if e["action"] == "monitor_first_article_released"][0]
+    assert entry["detail"]["approved_by"].startswith("Ada") and entry["detail"]["measured_by"].startswith("Lena")
     assert c["admin"].get("/api/audit/verify").json()["ok"]
 
 
@@ -1448,4 +1477,15 @@ def test_a_monitor_without_the_first_article_rule_releases_a_new_lot_at_once(env
     ack(c["oper"], mid)
     r = c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "Z9"}).json()
     assert r["lot_state"]["status"] == "released"
+    assert enter(c["oper"], mid, OK_SAMPLE)["first_article"] is None
+
+
+def test_without_the_approval_rule_a_first_article_that_passes_releases_the_lot(env):
+    app, c = env
+    mid = make_monitor(c["eng"], {**CONFIG, "name": "No approval", "first_article_approval": False})
+    ack(c["oper"], mid)
+    c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "Q1"})
+    r = enter(c["oper"], mid, OK_SAMPLE)
+    assert r["first_article"]["result"] == "passed"
+    assert c["oper"].get(f"/api/monitors/{mid}").json()["lot_state"]["status"] == "released"
     assert enter(c["oper"], mid, OK_SAMPLE)["first_article"] is None

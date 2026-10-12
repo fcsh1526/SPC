@@ -263,14 +263,24 @@ class MonitorStore:
         self.db.execute("UPDATE monitor_lots SET attempts = attempts + 1 WHERE id = ?", (lot_id,))
         return self.db.one("SELECT attempts FROM monitor_lots WHERE id = ?", (lot_id,))["attempts"]
 
-    def release_lot(self, lot_id: int, seq: int, by: str) -> None:
-        self.db.execute("UPDATE monitor_lots SET status = 'released', first_seq = ?, released_at = ?, released_by = ?, attempts = attempts + 1 WHERE id = ?", (seq, now_iso(), by, lot_id))
+    def release_lot(self, lot_id: int, seq: int, by: str, user_id: int | None = None) -> None:  # without approval: the first article that passes releases the lot
+        self.db.execute("UPDATE monitor_lots SET status = 'released', first_seq = ?, first_user_id = ?, first_by = ?, released_at = ?, released_by = ?, attempts = attempts + 1 WHERE id = ?", (seq, user_id, by, now_iso(), by, lot_id))
 
-    def lot_released_by(self, monitor_id: int, seq: int) -> dict | None:
-        return self._lot_row(self.db.one("SELECT * FROM monitor_lots WHERE monitor_id = ? AND first_seq = ? AND status = 'released'", (monitor_id, seq)))
+    def lot_with_first(self, monitor_id: int, seq: int) -> dict | None:
+        """The lot whose first article (waiting for approval or released) is this sample."""
+        return self._lot_row(self.db.one("SELECT * FROM monitor_lots WHERE monitor_id = ? AND first_seq = ? AND status IN ('approval', 'released')", (monitor_id, seq)))
+
+    def await_approval(self, lot_id: int, seq: int, user_id: int, by: str) -> None:
+        self.db.execute("UPDATE monitor_lots SET status = 'approval', first_seq = ?, first_user_id = ?, first_by = ?, attempts = attempts + 1 WHERE id = ?", (seq, user_id, by, lot_id))
+
+    def approve_lot(self, lot_id: int, by: str) -> None:
+        self.db.execute("UPDATE monitor_lots SET status = 'released', released_at = ?, released_by = ?, approved_by = ? WHERE id = ?", (now_iso(), by, by, lot_id))
+
+    def approvals_waiting(self) -> int:
+        return self.db.one("SELECT COUNT(*) AS n FROM monitor_lots WHERE status = 'approval'")["n"]
 
     def reopen_lot(self, lot_id: int) -> None:
-        self.db.execute("UPDATE monitor_lots SET status = 'pending', first_seq = NULL, released_at = '', released_by = '' WHERE id = ?", (lot_id,))
+        self.db.execute("UPDATE monitor_lots SET status = 'pending', first_seq = NULL, first_user_id = NULL, first_by = '', released_at = '', released_by = '', approved_by = '' WHERE id = ?", (lot_id,))
 
     def has_ack(self, monitor_id: int, user_id: int, ocap_rev: int) -> bool:
         return self.db.one("SELECT 1 FROM monitor_acks WHERE monitor_id = ? AND user_id = ? AND ocap_rev = ?", (monitor_id, user_id, ocap_rev)) is not None

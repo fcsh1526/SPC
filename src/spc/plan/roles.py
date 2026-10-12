@@ -33,7 +33,7 @@ APPROVERS = ("quality_planning", "product_developer", "process_planner", "inspec
 
 # What the login role allows, as a suggestion for who gets which login role. Nothing here is enforced.
 LOGIN_SUGGESTION = {"quality_planning": "engineer", "product_developer": "engineer", "process_planner": "engineer", "inspection_planner": "engineer",
-                    "equipment_procurer": "viewer", "line_supervisor": "operator", "line_operator": "operator"}
+                    "equipment_procurer": "viewer", "line_supervisor": "leader", "line_operator": "operator"}
 
 LEVELS = (0, 1, 2)  # 0 = no competence recorded or none
 
