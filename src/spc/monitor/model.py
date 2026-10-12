@@ -115,7 +115,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
     """Check and normalise the configuration of a monitor. Raises ValueError that names the field."""
     d = dict(data)
     allowed = {"name", "process", "characteristic", "unit", "line", "kind", "n", "alpha", "warn_alpha", "rules", "specs",
-               "ocap", "require_ack", "active", "laney", "standardised"}
+               "ocap", "require_ack", "active", "laney", "standardised", "first_article"}
     if set(d) - allowed:
         raise ValueError(f"unknown setting(s): {sorted(set(d) - allowed)}")
     out: dict[str, Any] = {"name": _text(d, "name", 100, required=True), "process": _text(d, "process", 200),
@@ -231,6 +231,7 @@ def validate_config(data: Mapping[str, Any]) -> dict:
     out["ocap"] = {"default": _step_config(ocap.get("default"), "ocap.default"),
                    "rules": {r: _step_config(c, f"ocap.rules.{r}") for r, c in rules.items()}}
     out["require_ack"] = bool(d.get("require_ack", True))
+    out["first_article"] = bool(d.get("first_article", True))  # after a change of lot the first sample must pass before the lot counts as released
     out["active"] = bool(d.get("active", True))
     return out
 

@@ -8,6 +8,7 @@ Evidence of a lot linked to a monitor and a range of its points (seq_from..seq_t
   blocking   an incident of a point in the range, or the open incident of the monitor from before the end of the range, is open;
              an incident of the range was closed as `escalated` (root cause analysis open: product conformance is to be ensured by sorting);
              the measurement system of the monitor is blocked by the MSA gate; the range holds no valid point
+             the lot was started at the station (change of lot) and its first article has not passed
   remarks    points marked invalid in the range, a conditional MSA gate, alarms answered by a closed incident (recovered or invalid sample)
 Decisions: release (needs clean evidence), concession (release with blocking evidence: an engineer, a reason and the reference of the customer's approval),
 sort (every part inspected; good + rejected = inspected; the rejected ones go to scrap or rework), rework, scrap. A release without a linked monitor needs an engineer
@@ -155,6 +156,12 @@ class LotService:
                 blocking.append({"code": "escalated_incident", "incident": inc["id"], "point": inc["point_seq"]})
             elif inc["outcome"] in CLOSED_OK:
                 remarks.append({"code": "alarm_answered", "incident": inc["id"], "outcome": inc["outcome"], "point": inc["point_seq"]})
+        if monitor.get("first_article", True):  # a lot that was started at the station needs a first article that passed
+            rows = store.lots_named(mid, lot["lot_no"])
+            if rows and not any(r["status"] == "released" for r in rows):
+                blocking.append({"code": "first_article_pending", "lot": lot["lot_no"]})
+            elif not rows:
+                remarks.append({"code": "first_article_untracked", "lot": lot["lot_no"]})
         msa_id = (monitor.get("specs") or {}).get("msa_id")
         gate_status = None
         if msa_id:

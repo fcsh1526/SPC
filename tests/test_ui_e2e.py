@@ -872,10 +872,24 @@ def test_an_operator_works_a_station_from_measurement_to_alarm_and_shift_change(
     page.click("#fl-ctx-ok")
     expect(page.locator("#fl-ctx-label")).to_contain_text("Night", timeout=20000)
     expect(page.locator("#fl-ctx-label")).to_contain_text("L2411")
+    # a new lot waits for its first article: the station says so, and the first sample is the first article
+    expect(page.locator("#fl-banner")).to_contain_text("FIRST ARTICLE")
+    expect(page.locator("#fl-first-note")).to_contain_text("first article of lot L2411")
     send(OK_SAMPLE)
-    expect(page.locator("#fl-result")).to_contain_text("within the limits", timeout=20000)
+    expect(page.locator("#fl-result")).to_contain_text("First article passed", timeout=20000)
+    expect(page.locator("#fl-banner")).to_contain_text("IN CONTROL")
+    expect(page.locator("#fl-first-note")).to_be_hidden()
     pts = eng.get(f"/api/monitors/{mid}").json()["points"]
-    assert pts[-1]["tags"] == {"lot": "L2411", "shift": "Night"}
+    assert pts[-1]["tags"] == {"lot": "L2411", "shift": "Night", "first_article": "1"}
+    # the next lot: a first article that does not pass keeps the lot open
+    page.click("#fl-ctx-btn")
+    page.fill("#fl-lot", "L2412")
+    page.click("#fl-ctx-ok")
+    expect(page.locator("#fl-banner")).to_contain_text("FIRST ARTICLE", timeout=20000)
+    send([10.2, 10.3, 10.25, 10.28, 10.22])
+    expect(page.locator("#fl-result")).to_contain_text("First article NOT passed", timeout=20000)
+    expect(page.locator("#fl-banner")).to_contain_text("ALARM")
+    assert eng.get(f"/api/monitors/{mid}").json()["lot_state"]["status"] == "pending"
     admin = logged_in_client(app, "admin")
     assert any(e["action"] == "monitor_context_change" and e["detail"]["lot"] == "L2411" for e in admin.get("/api/audit").json()["entries"])
     # nothing on the page scrolls: the frame holds

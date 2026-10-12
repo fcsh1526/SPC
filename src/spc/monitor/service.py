@@ -594,6 +594,13 @@ class MonitorService:
         if len(tags) > count or any(not isinstance(k, str) or not isinstance(v, str) or not 0 < len(k) <= klen or len(v) > vlen for k, v in tags.items()):
             raise MonitorError("invalid_input", f"at most {count} tags, key up to {klen} and value up to {vlen} characters")
         when = _parse_time(taken_at)
+        lot_row = self.store.current_lot(monitor_id)
+        first = bool(lot_row and lot_row["status"] == "pending" and monitor.get("first_article", True))
+        given_lot = (tags.get("lot") or "").strip()
+        if lot_row and given_lot and given_lot.lower() != lot_row["lot"].lower():
+            raise MonitorError("lot_changed", f"this station runs lot {lot_row['lot']} now, not {given_lot}: refresh the screen", 409, lot=lot_row["lot"])
+        if first:
+            tags = {**tags, "lot": lot_row["lot"], "first_article": "1"}  # the sample is the first article of the lot, whatever the screen sent
         if monitor["require_ack"] and not self.store.has_ack(monitor_id, user.id, monitor["ocap_rev"]):
             raise MonitorError("ocap_not_acknowledged", "confirm that you know the action plan of this monitor first", 403)
         with self.db.tx():
@@ -678,24 +685,45 @@ class MonitorService:
             if monitor["kind"] == TREND_KIND:
                 point["trend"] = self._trend_info(limits, point, self.store.cycle_marks(monitor_id))
             incident_now = self.store.incident(incident_id) if incident_id else None
+            first_article = None
+            if first:
+                if not alarms and not warnings:
+                    self.store.release_lot(lot_row["id"], seq, _label(user))
+                    self._log("monitor_first_article_released", user, monitor["name"], {"id": monitor_id, "lot": lot_row["lot"], "point": seq, "attempts": lot_row["attempts"] + 1})
+                    first_article = {"lot": lot_row["lot"], "result": "passed", "attempt": lot_row["attempts"] + 1}
+                else:
+                    attempts = self.store.lot_attempt(lot_row["id"])
+                    self._log("monitor_first_article_failed", user, monitor["name"], {"id": monitor_id, "lot": lot_row["lot"], "point": seq, "attempt": attempts,
+                                                                                       "rules": [f"{a['chart']}:{a['rule']}" for a in alarms] + [f"warning:{w}" if isinstance(w, str) else "warning" for w in warnings]})
+                    first_article = {"lot": lot_row["lot"], "result": "failed", "attempt": attempts}
         if opened:
             self._notify({"type": "incident_opened", "at": now_iso(), "monitor": {"id": monitor_id, "name": monitor["name"], "line": monitor["line"],
                                                                                    "characteristic": monitor["characteristic"]},
                           "incident_id": opened, "point_seq": seq, "rules": alarms, "entered_by": _label(user)})
         status = "alarm" if alarms else ("warning" if warnings else "ok")
         return {"point": point, "status": status, "incident": incident_now, "instructions": self._instructions(monitor, alarms),
-                "verification": bool(incident and not alarms), "msa": msa_state}
+                "verification": bool(incident and not alarms), "msa": msa_state, "first_article": first_article}
 
     def record_context(self, monitor_id: int, shift: str, lot: str, note: str, user) -> dict:
-        """A shift or lot change at the station, written into the audit chain (who, when, which monitor, the new shift and lot). The points that follow carry the shift and the lot as tags."""
+        """A shift or lot change at the station, written into the audit chain (who, when, which monitor, the new shift and lot). The points that follow carry the shift and the lot as tags.
+        A new lot (a lot number that is not the running one) waits for its first article: the first sample after the change must meet all criteria before the lot counts as released
+        (monitors with `first_article` switched off release it at once). A change of shift alone keeps the lot."""
         monitor = self.store.get(monitor_id)
         shift, lot, note = shift.strip(), lot.strip(), note.strip()
         if not shift and not lot:
             raise MonitorError("invalid_input", "give the shift or the lot")
         if len(shift) > 40 or len(lot) > 40 or len(note) > 500:
             raise MonitorError("invalid_input", "the shift and the lot are up to 40 characters, the note up to 500")
-        self._log("monitor_context_change", user, monitor["name"], {"id": monitor_id, "shift": shift, "lot": lot, "note": note})
-        return {"monitor": monitor["name"], "shift": shift, "lot": lot, "note": note, "by": _label(user)}
+        required = bool(monitor.get("first_article", True))
+        with self.db.tx():
+            current = self.store.current_lot(monitor_id)
+            new_lot = bool(lot) and (current is None or current["lot"].lower() != lot.lower())
+            row = current
+            if new_lot:
+                row = self.store.start_lot(monitor_id, lot, shift, note, _label(user), required)
+            self._log("monitor_context_change", user, monitor["name"], {"id": monitor_id, "shift": shift, "lot": lot, "note": note, "new_lot": new_lot,
+                                                                         "first_article": ("pending" if required else "not_required") if new_lot else ""})
+        return {"monitor": monitor["name"], "shift": shift, "lot": lot, "note": note, "by": _label(user), "new_lot": new_lot, "lot_state": row}
 
     def invalidate_point(self, monitor_id: int, seq: int, reason: str, user) -> dict:
         if not reason or not reason.strip():
@@ -709,6 +737,10 @@ class MonitorService:
         with self.db.tx():
             self.store.invalidate(monitor_id, seq, reason.strip(), _label(user))
             self._log("monitor_point_invalid", user, monitor["name"], {"id": monitor_id, "point": seq, "reason": reason.strip()})
+            released = self.store.lot_released_by(monitor_id, seq)
+            if released:  # the sample that released the lot is not valid: the lot waits for a new first article
+                self.store.reopen_lot(released["id"])
+                self._log("monitor_first_article_withdrawn", user, monitor["name"], {"id": monitor_id, "lot": released["lot"], "point": seq})
             inc = self.store.incident(point["incident_id"]) if point["incident_id"] else None
             if inc and inc["status"] == "open" and inc["point_seq"] == seq:
                 # draft 10.2.3: the sample is repeated to make sure it is valid. An invalid sample ends the incident.
@@ -806,6 +838,7 @@ class MonitorService:
             "points": self._with_bands(monitor, self.store.points(monitor_id, limit=limit)),
             "incident": None if inc is None else self.incident_view(monitor, inc),
             "acknowledged": self.store.has_ack(monitor_id, user.id, monitor["ocap_rev"]),
+            "lot_state": self.store.current_lot(monitor_id),
             "qualification": self._qualification(monitor) if monitor["kind"] == PRE_KIND else None,
             "msa": self._gate(monitor, enforce=False),
         }

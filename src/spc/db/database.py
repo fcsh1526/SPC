@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 SCHEMA = """
 CREATE TABLE users (
@@ -255,7 +255,22 @@ CREATE TABLE import_templates (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     created_by INTEGER REFERENCES users(id)
-)
+);
+CREATE TABLE monitor_lots (
+    id          INTEGER PRIMARY KEY,
+    monitor_id  INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    lot         TEXT NOT NULL,
+    shift       TEXT NOT NULL DEFAULT '',
+    started_at  TEXT NOT NULL,
+    started_by  TEXT NOT NULL,
+    note        TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL CHECK (status IN ('pending', 'released', 'superseded')),
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    first_seq   INTEGER,
+    released_at TEXT NOT NULL DEFAULT '',
+    released_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX monitor_lots_monitor ON monitor_lots(monitor_id, id)
 """
 
 
@@ -300,6 +315,25 @@ CREATE TABLE import_templates (
     created_by INTEGER REFERENCES users(id)
 )
 """
+
+
+MIGRATION_13_TO_14 = """
+CREATE TABLE monitor_lots (
+    id          INTEGER PRIMARY KEY,
+    monitor_id  INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    lot         TEXT NOT NULL,
+    shift       TEXT NOT NULL DEFAULT '',
+    started_at  TEXT NOT NULL,
+    started_by  TEXT NOT NULL,
+    note        TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL CHECK (status IN ('pending', 'released', 'superseded')),
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    first_seq   INTEGER,
+    released_at TEXT NOT NULL DEFAULT '',
+    released_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX monitor_lots_monitor ON monitor_lots(monitor_id, id)
+"""  # the lots of a monitor station: a new lot waits for a first article that passes
 
 
 MIGRATION_12_TO_13 = "ALTER TABLE monitor_points ADD COLUMN cycle TEXT NOT NULL DEFAULT ''"  # a note: this point starts a new cycle (trend monitors)
@@ -434,7 +468,7 @@ class Database:
                     self._conn.execute(statement)
             self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.execute("COMMIT")
-        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
+        elif version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13):
             if version == 1:  # version 2 adds the customer profiles
                 self._conn.execute("BEGIN IMMEDIATE")
                 self._conn.execute(MIGRATION_1_TO_2)
@@ -493,10 +527,18 @@ class Database:
                 self._conn.execute(MIGRATION_11_TO_12)
                 self._conn.execute("PRAGMA user_version = 12")
                 self._conn.execute("COMMIT")
-            self._conn.execute("BEGIN IMMEDIATE")  # version 13 adds the cycle marks of the trend monitors
-            if "cycle" not in [r[1] for r in self._conn.execute("PRAGMA table_info(monitor_points)")]:  # a database made by version 3 to 12 of this schema text has it already
-                self._conn.execute(MIGRATION_12_TO_13)
-            self._conn.execute("PRAGMA user_version = 13")
+            if version <= 12:
+                self._conn.execute("BEGIN IMMEDIATE")  # version 13 adds the cycle marks of the trend monitors
+                if "cycle" not in [r[1] for r in self._conn.execute("PRAGMA table_info(monitor_points)")]:  # a database made by version 3 to 12 of this schema text has it already
+                    self._conn.execute(MIGRATION_12_TO_13)
+                self._conn.execute("PRAGMA user_version = 13")
+                self._conn.execute("COMMIT")
+            self._conn.execute("BEGIN IMMEDIATE")  # version 14 adds the lots of the monitor stations (first article after a change of lot)
+            if not self._conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'monitor_lots'").fetchone():
+                for statement in MIGRATION_13_TO_14.split(";"):
+                    if statement.strip():
+                        self._conn.execute(statement)
+            self._conn.execute("PRAGMA user_version = 14")
             self._conn.execute("COMMIT")
         elif version != SCHEMA_VERSION:
             raise RuntimeError(f"database schema version {version} is not supported (expected {SCHEMA_VERSION})")

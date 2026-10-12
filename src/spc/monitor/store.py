@@ -89,6 +89,8 @@ class MonitorStore:
             m["unacknowledged"] = self.db.one(
                 "SELECT COUNT(*) AS n FROM monitor_incidents WHERE monitor_id = ? AND status = 'open' AND acked_by = ''", (r["id"],))["n"]
             m["points"] = self.db.one("SELECT COUNT(*) AS n FROM monitor_points WHERE monitor_id = ?", (r["id"],))["n"]
+            lot = self.current_lot(r["id"])
+            m["lot_state"] = None if lot is None else {"lot": lot["lot"], "status": lot["status"]}
             out.append(m)
         return out
 
@@ -233,6 +235,43 @@ class MonitorStore:
                         (now_iso(), by, outcome, text, incident_id))
 
     # ------------------------------------------------------------------ acknowledgement of the action plan
+    # ------------------------------------------------------------------ lots of a station (first article)
+    @staticmethod
+    def _lot_row(r) -> dict | None:
+        return None if r is None else {k: r[k] for k in r.keys()}
+
+    def current_lot(self, monitor_id: int) -> dict | None:
+        """The lot that is running: the newest row that was not replaced by a newer lot."""
+        return self._lot_row(self.db.one("SELECT * FROM monitor_lots WHERE monitor_id = ? AND status != 'superseded' ORDER BY id DESC LIMIT 1", (monitor_id,)))
+
+    def lot_rows(self, monitor_id: int, limit: int = 20) -> list[dict]:
+        return [self._lot_row(r) for r in self.db.all("SELECT * FROM monitor_lots WHERE monitor_id = ? ORDER BY id DESC LIMIT ?", (monitor_id, limit))]
+
+    def lots_named(self, monitor_id: int, lot: str) -> list[dict]:
+        return [self._lot_row(r) for r in self.db.all("SELECT * FROM monitor_lots WHERE monitor_id = ? AND lot = ? COLLATE NOCASE ORDER BY id", (monitor_id, lot))]
+
+    def start_lot(self, monitor_id: int, lot: str, shift: str, note: str, by: str, required: bool) -> dict:
+        now = now_iso()
+        with self.db.tx():
+            self.db.execute("UPDATE monitor_lots SET status = 'superseded' WHERE monitor_id = ? AND status = 'pending'", (monitor_id,))
+            cur = self.db.execute(
+                "INSERT INTO monitor_lots (monitor_id, lot, shift, started_at, started_by, note, status, released_at, released_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (monitor_id, lot, shift, now, by, note, "pending" if required else "released", "" if required else now, "" if required else by))
+            return self._lot_row(self.db.one("SELECT * FROM monitor_lots WHERE id = ?", (cur.lastrowid,)))
+
+    def lot_attempt(self, lot_id: int) -> int:
+        self.db.execute("UPDATE monitor_lots SET attempts = attempts + 1 WHERE id = ?", (lot_id,))
+        return self.db.one("SELECT attempts FROM monitor_lots WHERE id = ?", (lot_id,))["attempts"]
+
+    def release_lot(self, lot_id: int, seq: int, by: str) -> None:
+        self.db.execute("UPDATE monitor_lots SET status = 'released', first_seq = ?, released_at = ?, released_by = ?, attempts = attempts + 1 WHERE id = ?", (seq, now_iso(), by, lot_id))
+
+    def lot_released_by(self, monitor_id: int, seq: int) -> dict | None:
+        return self._lot_row(self.db.one("SELECT * FROM monitor_lots WHERE monitor_id = ? AND first_seq = ? AND status = 'released'", (monitor_id, seq)))
+
+    def reopen_lot(self, lot_id: int) -> None:
+        self.db.execute("UPDATE monitor_lots SET status = 'pending', first_seq = NULL, released_at = '', released_by = '' WHERE id = ?", (lot_id,))
+
     def has_ack(self, monitor_id: int, user_id: int, ocap_rev: int) -> bool:
         return self.db.one("SELECT 1 FROM monitor_acks WHERE monitor_id = ? AND user_id = ? AND ocap_rev = ?", (monitor_id, user_id, ocap_rev)) is not None
 

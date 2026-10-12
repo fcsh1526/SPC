@@ -157,3 +157,21 @@ def test_the_record_is_checked(env):
     parent = lot(c, lot_no="L-parent").json()["id"]
     child = lot(c, lot_no="L-child", parent_lot_id=parent, quantity=22)
     assert child.status_code == 200 and child.json()["parent_lot_id"] == parent
+
+
+def test_a_lot_started_at_the_station_cannot_be_released_before_its_first_article_passed(env):
+    app, c = env
+    mid = make_monitor(c["eng"])
+    ack(c["oper"], mid)
+    c["oper"].post(f"/api/monitors/{mid}/context", json={"shift": "Day", "lot": "L-777"})
+    # the lot has a sample in its range, but the first article did not pass (it alarms)
+    first = enter(c["oper"], mid, [10.2, 10.3, 10.25, 10.28, 10.22])
+    lid = lot(c, lot_no="L-777", monitor_id=mid, seq_from=first["point"]["seq"], seq_to=first["point"]["seq"]).json()["id"]
+    ev = c["view"].get(f"/api/lots/{lid}").json()["evidence"]
+    codes = [b["code"] for b in ev["blocking"]]
+    assert "first_article_pending" in codes and not ev["clean"]
+    assert err(decide(c, lid, decision="release"))["code"] == "release_blocked"
+    # a lot number that the station never started: a remark, not a block
+    other = lot(c, lot_no="L-OLD", monitor_id=mid, seq_from=1, seq_to=1).json()["id"]
+    ev2 = c["view"].get(f"/api/lots/{other}").json()["evidence"]
+    assert "first_article_pending" not in [b["code"] for b in ev2["blocking"]] and "first_article_untracked" in [r["code"] for r in ev2["remarks"]]
