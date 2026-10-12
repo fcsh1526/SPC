@@ -19,6 +19,7 @@
       <button id="pw-btn" data-i18n="user.change_password"></button>
       <button id="logout-btn" data-i18n="user.logout"></button>
     </div>
+    <button id="fs-btn" type="button" data-i18n="app.fullscreen"></button>
     <label class="lang">
       <span data-i18n="app.language"></span>
       <select id="lang">
@@ -50,23 +51,33 @@
 <div id="app" hidden>
 <p class="notice" data-i18n="app.notice"></p>
 
-<nav class="tabs" role="tablist">
-  <button role="tab" data-tab="import" data-needs="engineer" aria-selected="true" data-i18n="nav.import"></button>
-  <button role="tab" data-tab="data" aria-selected="false" aria-disabled="true" data-i18n="nav.data"></button>
-  <button role="tab" data-tab="analysis" aria-selected="false" aria-disabled="true" data-i18n="nav.analysis"></button>
+<nav class="tabs" role="tablist" aria-orientation="vertical">
+  <div class="navgroup" role="presentation"><div class="navtitle" data-i18n="nav.group_floor"></div>
   <button role="tab" data-tab="monitor" aria-selected="false"><span data-i18n="nav.monitor"></span> <span id="alert-badge" class="badge" hidden></span></button>
   <button role="tab" data-tab="lots" aria-selected="false" data-i18n="nav.lots"></button>
   <button role="tab" data-tab="improve" aria-selected="false" data-i18n="nav.improve"></button>
   <button role="tab" data-tab="plan" aria-selected="false" data-i18n="nav.plan"></button>
-  <button role="tab" data-tab="roles" aria-selected="false" data-i18n="nav.roles"></button>
-  <button role="tab" data-tab="msa" aria-selected="false" data-i18n="nav.msa"></button>
-  <button role="tab" data-tab="equipment" aria-selected="false" data-i18n="nav.equipment"></button>
-  <button role="tab" data-tab="validation" aria-selected="false" data-i18n="nav.validation"></button>
+  </div>
+  <div class="navgroup" role="presentation"><div class="navtitle" data-i18n="nav.group_analysis"></div>
+  <button role="tab" data-tab="import" data-needs="engineer" aria-selected="true" data-i18n="nav.import"></button>
+  <button role="tab" data-tab="data" aria-selected="false" aria-disabled="true" data-i18n="nav.data"></button>
+  <button role="tab" data-tab="analysis" aria-selected="false" aria-disabled="true" data-i18n="nav.analysis"></button>
   <button role="tab" data-tab="special" aria-selected="false" data-i18n="nav.special"></button>
   <button role="tab" data-tab="study" aria-selected="false" data-i18n="nav.study"></button>
   <button role="tab" data-tab="saved" aria-selected="false" data-i18n="nav.saved"></button>
   <button role="tab" data-tab="tools" aria-selected="false" data-i18n="nav.tools"></button>
+  </div>
+  <div class="navgroup" role="presentation"><div class="navtitle" data-i18n="nav.group_msa"></div>
+  <button role="tab" data-tab="msa" aria-selected="false" data-i18n="nav.msa"></button>
+  <button role="tab" data-tab="equipment" aria-selected="false" data-i18n="nav.equipment"></button>
+  </div>
+  <div class="navgroup" role="presentation"><div class="navtitle" data-i18n="nav.group_quality"></div>
+  <button role="tab" data-tab="validation" aria-selected="false" data-i18n="nav.validation"></button>
+  <button role="tab" data-tab="roles" aria-selected="false" data-i18n="nav.roles"></button>
+  </div>
+  <div class="navgroup" role="presentation" data-needs="admin"><div class="navtitle" data-i18n="nav.group_system"></div>
   <button role="tab" data-tab="admin" data-needs="admin" aria-selected="false" data-i18n="nav.admin"></button>
+  </div>
 </nav>
 
 <main>

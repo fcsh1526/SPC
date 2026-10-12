@@ -30,6 +30,64 @@ def app():
     return make_app(max_upload=20 * 1024 * 1024)
 
 
+# A long screen is split into pages with a bar of buttons (see subnav in app.js). A person clicks the page button; the tests do it for the element they are about to use:
+# every action on an element first opens the page that holds the element.
+_REVEAL = """async (e) => {
+  const u = e.closest('[data-sub-key]');
+  if (!u || !u.classList.contains('sub-off')) return;
+  const bar = u.closest('section').querySelector(':scope > .subnav');
+  const b = bar && bar.querySelector('[data-sub="' + u.dataset.subKey + '"]');
+  if (!b) return;
+  for (let i = 0; i < 100 && b.disabled; i++) await new Promise((r) => setTimeout(r, 100));  // the buttons are off while a request runs
+  if (!b.disabled) b.click();
+}"""
+
+
+def _reveal(locator):
+    try:
+        locator.first.wait_for(state="attached", timeout=15000)  # it may be made by the answer to the click before
+        locator.first.evaluate(_REVEAL)
+    except Exception:  # an element that is gone, or a page that is closing: the action itself reports it
+        pass
+
+
+def show(page, selector):
+    """Open the page of the screen that holds `selector` (what a person does with the page button) before a check on it."""
+    _reveal(page.locator(selector))
+
+
+def _install_page_reveal():
+    from playwright.sync_api import Locator, Page
+
+    def wrap_page(name):
+        orig = getattr(Page, name)
+
+        def method(self, selector, *a, **k):
+            if isinstance(selector, str):
+                _reveal(self.locator(selector))
+            return orig(self, selector, *a, **k)
+
+        setattr(Page, name, method)
+
+    def wrap_locator(name):
+        orig = getattr(Locator, name)
+
+        def method(self, *a, **k):
+            _reveal(self)
+            return orig(self, *a, **k)
+
+        setattr(Locator, name, method)
+
+    for n in ("click", "fill", "select_option", "check", "uncheck", "set_input_files", "dblclick", "press", "type"):
+        wrap_page(n)
+    for n in ("click", "fill", "select_option", "check", "uncheck", "set_input_files", "dblclick", "press", "type"):
+        wrap_locator(n)
+
+
+if playwright_sync is not None:
+    _install_page_reveal()
+
+
 def sign_in(page, user="eng", password=PASSWORD, wait=True):
     page.fill("#login-user", user)
     page.fill("#login-pass", password)
@@ -521,6 +579,7 @@ def test_excel_downloads_in_the_browser(server, browser, tmp_path):
     assert any(c.value == "turning" for row in report["Report elements"].iter_rows() for c in row)
 
     page.click("nav.tabs button[data-tab=saved]")
+    show(page, "#saved-reports a")
     expect(page.locator("#saved-reports a", has_text="Excel").first).to_be_visible()  # earlier tests made reports too
     ctx.close()
 
@@ -591,6 +650,7 @@ def test_customer_profile_from_editor_to_report(server, browser, tmp_path):
     expect(page.locator("#r-targets")).to_contain_text("1.81")
     expect(page.locator("#r-targets")).not_to_contain_text("1.33")
 
+    show(page, "#rp-extra")
     expect(page.locator("#rp-extra")).to_be_visible()
     expect(page.locator("label.required", has_text="Part no.")).to_have_count(1)
     expect(page.locator("label.required", has_text="Drawing number")).to_have_count(1)
@@ -1679,6 +1739,7 @@ def test_special_cases_multistage_and_gdt_in_the_browser(server, browser, tmp_pa
     page.goto(server)
     sign_in(page)
     page.click("nav.tabs button[data-tab=special]")
+    show(page, "#sp-comb-none")
     expect(page.locator("#sp-comb-none")).to_be_visible()
 
     # the scope of the draft's example 2: 3 machines, 7 pallets
@@ -1701,6 +1762,7 @@ def test_special_cases_multistage_and_gdt_in_the_browser(server, browser, tmp_pa
     page.click("#import-btn")
     expect(page.locator("#data-counts")).to_contain_text("60 values", timeout=20000)
     page.click("nav.tabs button[data-tab=special]")
+    show(page, "#sp-comb-form")
     expect(page.locator("#sp-comb-form")).to_be_visible()
     page.locator("#sp-factors input[value=pallet]").check()
     page.fill("#sp-lsl", "9.5")
@@ -1795,6 +1857,7 @@ def test_multivariate_nested_and_trend_in_the_browser(server, browser, tmp_path)
     expect(page.locator("#a-model-rec")).to_contain_text("Shewhart chart", timeout=20000)
     page.select_option("#a-class", "major")
     page.click("#run-btn")
+    show(page, "#rp-special-wrap")
     expect(page.locator("#rp-special-wrap")).to_be_visible(timeout=40000)
     page.locator("#rp-special input[value=trend]").check()
     page.locator("#rp-special input[value=nested]").check()

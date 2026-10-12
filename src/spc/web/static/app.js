@@ -136,6 +136,7 @@
         $("#busy").hidden = true;
         busyButtons.forEach((b) => { b.disabled = b.dataset.wasDisabled === "1"; });
         busyButtons = [];
+        Object.keys(subState).forEach(refreshSubnav);  // the page buttons depend on the state of the screen, not on what they were before the request
       }
     }
   }
@@ -174,6 +175,81 @@
     if (name === "roles") loadRoles();
     if (name === "admin") loadAdmin();
     if (name === "password") renderPasswordPanel();
+  }
+  // ---------------------------------------------------------------- pages inside a screen
+  // A long screen is split into pages with a bar of buttons, so nothing has to be scrolled to find. The parts are hidden with a class (sub-off), because the program
+  // uses `hidden` on the same elements for its own purposes. Screens with a list and a detail view already work like pages and are left alone.
+  const SUBNAV = { analysis: "analysis", tools: "blocks", special: "blocks", admin: "blocks", validation: "blocks", saved: "blocks", roles: "blocks" };
+  const subState = {};
+  function subUnits(section, mode) {
+    const kids = [...section.children].filter((e) => e.tagName !== "H2" && !e.classList.contains("subnav"));
+    if (mode === "analysis") {
+      const result = $("#result"), report = $("#report-card");
+      if (report && report.parentElement === result) section.appendChild(report);  // the report is a page of its own
+      return [
+        { key: "settings", label: () => t("analysis.sub_settings"), els: kids.filter((e) => e !== result && e !== report) },
+        { key: "result", label: () => t("analysis.sub_result"), els: [result], needs: () => !result.hidden },
+        { key: "report", label: () => t("analysis.sub_report"), els: [report], needs: () => !result.hidden },
+      ];
+    }
+    const useH3 = kids.some((e) => e.tagName === "H3");
+    const units = [], lead = [];  // what comes before the first heading (an introduction, a button) belongs to the first page
+    kids.forEach((e) => {
+      if (useH3 ? e.tagName === "H3" : e.classList.contains("card")) units.push({ els: [] });
+      (units.length ? units[units.length - 1].els : lead).push(e);
+    });
+    if (units.length) units[0].els.unshift(...lead);
+    units.forEach((u, i) => {
+      u.key = "p" + i;
+      u.label = () => {
+        const h = u.els.map((e) => (e.matches("h3, h4, summary") ? e : e.querySelector("h3, h4, summary"))).find(Boolean);
+        return h ? h.textContent.trim() : String(i + 1);
+      };
+    });
+    return units;
+  }
+  function buildSubnav(name) {
+    const section = $("#tab-" + name);
+    if (!section || section.querySelector(":scope > .subnav")) return;
+    const units = subUnits(section, SUBNAV[name]);
+    if (units.length < 2) return;
+    const bar = el("div", "subnav");
+    bar.setAttribute("role", "tablist");
+    units.forEach((u) => {
+      const b = el("button", "", "");
+      b.type = "button"; b.setAttribute("role", "tab"); b.dataset.sub = u.key;
+      b.addEventListener("click", () => selectSub(name, u.key));
+      bar.appendChild(b);
+    });
+    section.insertBefore(bar, section.querySelector("h2").nextSibling);
+    units.forEach((u) => u.els.forEach((e) => { e.dataset.subKey = u.key; }));  // which page an element is on
+    subState[name] = { units, bar, current: units[0].key };
+    selectSub(name, units[0].key);
+  }
+  function selectSub(name, key) {
+    const st = subState[name];
+    if (!st) return;
+    const unit = st.units.find((u) => u.key === key);
+    if (!unit || (unit.needs && !unit.needs())) return;
+    st.current = key;
+    st.units.forEach((u) => u.els.forEach((e) => e.classList.toggle("sub-off", u.key !== key)));
+    refreshSubnav(name);
+    const main = $("main"); if (main) main.scrollTop = 0;
+  }
+  function refreshSubnav(name) {  // labels follow the language; a page that needs a result is off until there is one
+    const st = subState[name];
+    if (!st) return;
+    st.units.forEach((u) => {
+      const b = st.bar.querySelector(`[data-sub="${u.key}"]`);
+      b.textContent = u.label();
+      b.setAttribute("aria-selected", String(u.key === st.current));
+      b.disabled = !!(u.needs && !u.needs());
+    });
+  }
+  function initSubnav() {
+    Object.keys(SUBNAV).forEach(buildSubnav);
+    const result = $("#result");
+    if (result) new MutationObserver(() => refreshSubnav("analysis")).observe(result, { attributes: true, attributeFilter: ["hidden"] });
   }
   function unlockTabs() { $$("nav.tabs button").forEach((b) => b.removeAttribute("aria-disabled")); }
 
@@ -727,6 +803,7 @@
       state.reportOut = null;
       renderReportOut();
       renderResult();
+      selectSub("analysis", "result");
     });
   }
 
@@ -4214,6 +4291,7 @@
   function rerender() {
     setExcelLink();
     applyStatic();
+    syncSpecialChartForm();  // its data label is made by code and follows the language
     if (state.preview) { const keep = {}; ROLE_SELECTS.forEach((s) => { keep[s] = $(s).value; }); fillSelects(keep); renderDetected(); renderImportSource(); refreshImportForm(); }
     if (state.dataset) renderData();
     if (state.result) renderResult();
@@ -4238,6 +4316,7 @@
   }
   async function setLanguage(lang) {
     await loadMessages(lang);
+    Object.keys(subState).forEach(refreshSubnav);
     store("spc.lang", lang);
     $("#lang").value = lang;
     if (!state.reportLangTouched) $("#rp-language").value = lang;
@@ -4245,6 +4324,8 @@
   }
   function wire() {
     $("#lang").addEventListener("change", (e) => setLanguage(e.target.value));
+    $("#fs-btn").addEventListener("click", () => { if (document.fullscreenElement) document.exitFullscreen(); else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen(); });
+    document.addEventListener("fullscreenchange", () => { $("#fs-btn").textContent = t(document.fullscreenElement ? "app.exit_fullscreen" : "app.fullscreen"); });
     $$("nav.tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
     $("#file").addEventListener("change", (e) => importSerial(() => onFileChosen(e.target.files[0])));
     ROLE_SELECTS.forEach((s) => $(s).addEventListener("change", refreshImportForm));
@@ -4306,6 +4387,7 @@
   }
   async function start() {
     wire();
+    initSubnav();
     try {
       await setLanguage(pickLanguage());
       const meta = await api("/api/meta");

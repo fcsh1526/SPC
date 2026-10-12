@@ -168,3 +168,55 @@ tr.invalid-point td { color: var(--muted); text-decoration: line-through; }
 #st-items td:nth-child(5) { white-space: nowrap; }
 #st-items input[type=text] { width: 14rem; max-width: 100%; }
 #st-items tr.blocking td:first-child { border-left: 3px solid var(--alarm); }
+
+/* ------------------------------------------------------------------ application frame
+   A fixed frame like a desktop program: top bar, tool column on the left, one screen at a time on the right, status line at the bottom.
+   The page itself never scrolls; only the screen area does, and the long screens are split into pages with a bar of buttons (see subnav in app.js). */
+html, body { height: 100%; }
+body { overflow: hidden; display: flex; flex-direction: column; }
+header.top { max-width: none; margin: 0; width: 100%; padding: 8px 16px; flex: 0 0 auto; align-items: center; flex-wrap: nowrap; background: var(--surface); border-bottom: 1px solid var(--line); }
+.brand { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.brand h1 { font-size: 1.3rem; }
+.brand p { font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.userbar { align-items: center; flex-wrap: nowrap; gap: 10px; flex: 0 0 auto; }
+.userbar .row { align-items: center; flex-wrap: nowrap; gap: 8px; }
+.lang { white-space: nowrap; }
+.lang > span { display: none; }
+#errors, #busy { max-width: none; margin: 0; padding: 6px 16px; flex: 0 0 auto; }
+#login { align-self: center; margin-top: 8vh; width: 100%; }
+#app { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 224px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+#app[hidden] { display: none !important; }
+nav.tabs { grid-row: 1 / 3; grid-column: 1; display: block; max-width: none; margin: 0; padding: 8px 0 12px; overflow-y: auto; border-bottom: 0; border-right: 1px solid var(--line); background: var(--surface); }
+.navgroup { padding: 4px 0 8px; }
+.navgroup + .navgroup { border-top: 1px solid var(--line); padding-top: 8px; }
+.navtitle { padding: 2px 16px 4px; font-size: 0.78rem; letter-spacing: 0.04em; color: var(--muted); }
+nav.tabs button { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 38px; text-align: left; border: 0; border-left: 4px solid transparent; border-radius: 0; padding: 8px 14px 8px 12px; white-space: normal; }
+nav.tabs button:hover:not([aria-disabled="true"]) { background: var(--bg); }
+nav.tabs button[aria-selected="true"] { background: var(--bg); border-left-color: var(--primary); border-bottom-color: transparent; font-weight: 700; }
+main { grid-row: 1; grid-column: 2; max-width: none; margin: 0; width: 100%; overflow-y: auto; padding: 12px 20px 24px; min-width: 0; position: relative; }
+.notice { grid-row: 2; grid-column: 2; max-width: none; margin: 0; padding: 4px 20px; border-top: 1px solid var(--line); background: var(--surface); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel h2 { margin: 0 0 8px; font-size: 1.3rem; }
+.subnav { display: flex; gap: 6px; flex-wrap: wrap; position: sticky; top: -12px; z-index: 5; margin: 0 -20px 12px; padding: 8px 20px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.subnav button { min-height: 40px; padding: 6px 16px; border-radius: 20px; }
+.subnav button[aria-selected="true"] { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 600; }
+.subnav button:disabled { opacity: 0.4; }
+.sub-off { display: none !important; }
+@media (pointer: coarse) {
+  nav.tabs button { min-height: 44px; }
+  button, label.filebtn span, a.button { min-height: 44px; }
+  input[type="text"], input[type="number"], input[type="password"], select { min-height: 44px; }
+}
+@media (max-width: 860px) {
+  #app { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) auto; }
+  nav.tabs { grid-row: 1; grid-column: 1; display: flex; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 0; }
+  .navgroup, .navgroup + .navgroup { display: flex; border-top: 0; padding: 0; }
+  .navtitle { display: none; }
+  nav.tabs button { width: auto; white-space: nowrap; border-left: 0; border-bottom: 3px solid transparent; }
+  nav.tabs button[aria-selected="true"] { border-bottom-color: var(--primary); }
+  main { grid-row: 2; grid-column: 1; padding: 12px; }
+  .notice { grid-row: 3; grid-column: 1; }
+  .brand p { display: none; }
+  header.top, .userbar, .userbar .row { flex-wrap: wrap; }
+  .userbar { flex: 1 1 100%; justify-content: flex-start; }
+  .subnav { margin: 0 -12px 12px; padding: 8px 12px; }
+}
