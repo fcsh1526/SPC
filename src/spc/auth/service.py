@@ -32,6 +32,7 @@ MAX_FAILURES = 5
 LOCK_SECONDS = 15 * 60
 IDLE_SECONDS = 2 * 60 * 60
 MAX_AGE_SECONDS = 12 * 60 * 60
+MAX_ATTEMPT_ROWS = 10_000  # counters of failed logins kept at most; beyond, the expired ones are dropped
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.@-]{3,64}$")
 
 
@@ -85,6 +86,7 @@ class AuthService:
         self.clock = clock
         self.cost = cost or DEFAULT_COST
         self._dummy = hash_password("not-a-real-password", self.cost)  # same work for names that do not exist
+        self._blocked_logged: dict[str, float] = {}  # a locked name is written to the audit trail once per lock, not at every try
 
     # ------------------------------------------------------------------ users
 
@@ -189,7 +191,12 @@ class AuthService:
         key = username.strip().lower()[:64]
         wait = self._retry_after(key)
         if wait:
-            self._log("login_blocked", None, key, {})
+            until = self.clock() + wait
+            if abs(self._blocked_logged.get(key, 0) - until) > 2:
+                self._blocked_logged[key] = until
+                if len(self._blocked_logged) > MAX_ATTEMPT_ROWS:
+                    self._blocked_logged.clear()
+                self._log("login_blocked", None, key, {})
             raise AuthError(429, "login_locked", retry_after=wait)
         row = self.db.one("SELECT * FROM users WHERE username = ?", (username.strip(),))
         ok = verify_password(password, row["password_hash"] if row else self._dummy)
@@ -213,7 +220,13 @@ class AuthService:
                 " ON CONFLICT(username) DO UPDATE SET failures = excluded.failures, locked_until = excluded.locked_until",
                 (key, failures, locked),
             )
-            self._log("login_failed", None, key, {"locked": bool(locked)})
+            # the audit trail gets the failures of real accounts and every lock; tries with names that do not exist are only counted,
+            # so that nobody can fill the trail from the login page without an account
+            known = self.db.one("SELECT 1 FROM users WHERE lower(username) = ?", (key,)) is not None
+            if known or locked:
+                self._log("login_failed", None, key, {"locked": bool(locked), "known_user": known})
+            if self.db.one("SELECT COUNT(*) AS n FROM login_attempts")["n"] > MAX_ATTEMPT_ROWS:
+                self.db.execute("DELETE FROM login_attempts WHERE locked_until < ?", (self.clock(),))
 
     # ------------------------------------------------------------------ sessions
 

@@ -107,7 +107,7 @@ class Ingest:
             st["buffer"] = st["buffer"][n:]
             try:
                 user = self.auth.get_user(link["enabled_by"])
-                point = self.monitors.add_point(node["monitor_id"], values, "OPC UA", {"source": "opcua", "link": link["name"][:100]}, taken, user)
+                point = self.monitors.add_point(node["monitor_id"], values, "OPC UA", {"source": "opcua", "link": link["name"][:100]}, taken, user, automatic=True)
             except MonitorError as exc:  # the subgroup is dropped, not kept for later: it would be a different subgroup
                 return reject(exc.code, str(exc))
             st["points"] += 1

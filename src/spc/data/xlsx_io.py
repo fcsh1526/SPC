@@ -32,6 +32,8 @@ from spc.data.csv_io import (
 from spc.data.dataset import Dataset
 
 MAX_ROWS = 500_000
+MAX_UNPACKED = 300 * 1024 * 1024  # an *.xlsx is a zip: what it unpacks to is checked before it is opened
+MAX_RATIO = 200
 MAX_COLUMNS = 200
 ZIP_MAGIC = b"PK\x03\x04"
 
@@ -62,11 +64,24 @@ def _cell(v, decimal: str) -> str:
     return " ".join(str(v).split())  # a line break in a cell would shift the row numbers
 
 
+def _check_zip(raw: bytes) -> None:
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            unpacked = sum(i.file_size for i in z.infolist())
+    except zipfile.BadZipFile:
+        raise _fail("xlsx_unreadable", "the file is not a readable Excel workbook (BadZipFile)") from None
+    if unpacked > MAX_UNPACKED or unpacked > MAX_RATIO * max(len(raw), 1):
+        raise _fail("xlsx_too_large", f"the workbook unpacks to {unpacked // (1024 * 1024)} MB: too large to read safely")
+
+
 def _workbook(raw: bytes):
     try:
         from openpyxl import load_workbook
     except ImportError:  # pragma: no cover - openpyxl is part of the web extra
         raise _fail("xlsx_unavailable", "reading Excel files needs the 'openpyxl' package (pip install spc[excel])") from None
+    _check_zip(raw)
     try:
         return load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
     except Exception as exc:  # openpyxl raises several kinds (zip, xml, key) for a damaged file

@@ -1165,8 +1165,8 @@
   "msa.res.grr.warn": "量具 R&R 為{basis}的 {pct} %，ndc {ndc}：條件接受",
   "msa.res.grr.fail": "量具 R&R 為{basis}的 {pct} %，ndc {ndc}：沒有能力",
   "msa.res.grr.missing": "沒有量具 R&R 研究",
-  "msa.res.type1.pass": "Cg {cg}，Cgk {cgk}",
-  "msa.res.type1.fail": "Cg {cg}，Cgk {cgk}：低於下限",
+  "msa.res.type1.pass": "Cg {cg}，Cgk {cgk}（{spread} s）",
+  "msa.res.type1.fail": "Cg {cg}，Cgk {cgk}：低於下限（{spread} s）",
   "msa.res.type1.not_done": "沒有 Type 1 研究（可選）",
   "msa.res.validity.pass": "量具 R&R 有效到 {until}",
   "msa.res.validity.fail": "量具 R&R 已於 {until} 到期：請重做",
@@ -1192,7 +1192,7 @@
   "msa.verdict_fail": "沒有能力",
   "msa.verdict_unusable": "無法評估",
   "msa.sum_grr": "{n}：量具 R&R 為{basis}的 {pct} %，ndc {ndc}；重複性 {ev}，再現性 {av}",
-  "msa.sum_type1": "{n} 個量測值：Cg {cg}，Cgk {cgk}，偏差 {bias}",
+  "msa.sum_type1": "{n} 個量測值：Cg {cg}，Cgk {cgk}，偏差 {bias}（{spread} s 散布）",
   "msa.sum_stability": "{n} 個量測值，{signals} 個訊號",
   "msa.monitor_banner": "量測系統 {name}：{status}",
   "msa.monitor_conditional": "量測系統 {name} 附備註通過閘門。這個樣本已接受並標示。",
@@ -2660,5 +2660,9 @@
   "mc.cp_note_process": "GRR 相對於觀察到的製程變異：Cp_obs ＝ Cp_act × √(1 − GRR²)。",
   "mc.cp_note_tolerance": "GRR 相對於公差：σ_obs² ＝ σ_act² ＋ σ_meas²，所以 Cp_obs ＝ Cp_act / √(1 ＋ (Cp_act GRR)²)。手冊的表 B 1 這一列印的是別的數字（它在式 (7) 該放 Cp_obs 的地方放了 Cp_act）；程式解的是式 (7)。",
   "mc.out_pv": "K3 ＝ {k3}。零件變異 R_P × K3 ＝ {pv0}；扣掉設備變異後 {pv}（少 {diff} %）。",
-  "mc.pv_note": "PV ＝ √((R_P × K3)² − EV² / (k r))，K3 ＝ 1 / d2*（依零件數）。一般的 PV 含有設備變異，大約一兩個百分點。"
+  "mc.pv_note": "PV ＝ √((R_P × K3)² − EV² / (k r))，K3 ＝ 1 / d2*（依零件數）。一般的 PV 含有設備變異，大約一兩個百分點。",
+  "error.first_article_before_lot": "首件的時間早於換批時間（{started_at}）。首件要在換批之後量。",
+  "error.busy": "另一個長時間的計算正在進行，請稍後再試。",
+  "issue.xlsx_too_large": "這個活頁簿解壓後的資料過大，無法安全讀取。",
+  "lot.ev_before_release_points": "有 {count} 筆量具自動樣本是在本批首件放行之前量的。"
 }

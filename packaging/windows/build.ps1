@@ -42,7 +42,11 @@ Expand-Archive -Path $zip -DestinationPath (Join-Path $app "python")
 $pth = Get-ChildItem (Join-Path $app "python") -Filter "python*._pth" | Select-Object -First 1
 Add-Content -Path $pth.FullName -Value "..\site-packages"
 $extras = if ($WithOpcUa) { "web,sign,opcua" } else { "web,sign" }
-& py "-$minor" -m pip install --no-warn-script-location --only-binary=:all: --target (Join-Path $app "site-packages") "$root[$extras]"
+# the program itself is built into a wheel first; then it and its packages are installed from wheels only (no package is compiled on the build machine)
+$wheels = Join-Path $build "wheels"
+& py "-$minor" -m pip wheel --no-deps --wheel-dir $wheels "$root"
+if ($LASTEXITCODE -ne 0) { throw "the wheel of the program could not be built" }
+& py "-$minor" -m pip install --no-warn-script-location --only-binary=:all: --find-links $wheels --target (Join-Path $app "site-packages") "spc[$extras]==$version"
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 
 # 3. the manifest of the release (SHA-256 of every file, locked package versions)

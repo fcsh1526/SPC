@@ -926,6 +926,72 @@ def test_an_operator_works_a_station_from_measurement_to_alarm_and_shift_change(
     ctx.close()
 
 
+def test_long_screens_are_split_into_the_intended_pages(server, browser):
+    """The pages of the long screens hold what belongs together. The tests open a page by themselves before they use an element (see _reveal), so the
+    place of the elements is checked here on its own: an element on a wrong page would otherwise go unnoticed."""
+    ctx = browser.new_context(viewport={"width": 1366, "height": 900}, locale="en")
+    page = ctx.new_page()
+    page.goto(server)
+    sign_in(page)
+    where = page.evaluate("""() => Object.fromEntries(['#analysis-form', '#run-btn', '#a-lsl', '#chart-loc', '#r-names', '#report-card', '#rp-create',
+        '#sc-card', '#doe-card', '#mc-card', '#rpl-card', '#dfd-card', '#guide-card', '#va-run', '#va-runs', '#va-iso', '#va-new', '#saved-datasets', '#saved-reports']
+        .map((s) => { const e = document.querySelector(s); const u = e && e.closest('[data-sub-key]'); return [s, u ? u.closest('section').id + ':' + u.dataset.subKey : null]; }))""")
+    assert where["#analysis-form"] == where["#run-btn"] == where["#a-lsl"] == "tab-analysis:settings"
+    assert where["#chart-loc"] == where["#r-names"] == "tab-analysis:result"
+    assert where["#report-card"] == where["#rp-create"] == "tab-analysis:report"
+    tools = [where[k] for k in ("#sc-card", "#doe-card", "#mc-card", "#rpl-card", "#dfd-card", "#guide-card")]
+    assert all(t and t.startswith("tab-tools:") for t in tools) and len(set(tools)) == len(tools)  # every tool on a page of its own
+    assert where["#va-run"] == where["#va-runs"] != where["#va-iso"]  # the button that makes a run is on the page of the runs
+    assert where["#saved-datasets"] != where["#saved-reports"]
+    ctx.close()
+
+
+def test_a_station_follows_a_change_of_lot_made_at_another_screen(server, browser, app):
+    from tests.conftest import logged_in_client
+    from tests.test_monitor import CONFIG, OK_SAMPLE, PARAMS
+
+    expect = playwright_sync.expect
+    if "oper" not in {u.username for u in app.state.auth.list_users()}:
+        app.state.auth.create_user("oper", PASSWORD, "operator", "Olga Operator")
+    eng = logged_in_client(app, "eng")
+    name = "Two screens " + str(len(eng.get("/api/monitors").json()["monitors"]))
+    mid = eng.post("/api/monitors", json={"config": {**CONFIG, "name": name, "first_article_approval": False}, "source": PARAMS}).json()["monitor"]["id"]
+    other = logged_in_client(app, "oper")
+    other.post(f"/api/monitors/{mid}/ack")
+    ctx = browser.new_context(viewport={"width": 1366, "height": 768}, locale="en")
+    page = ctx.new_page()
+    page.goto(server)
+    sign_in(page, "oper")
+    page.locator("#fl-tiles .fl-tile", has_text=name).click()
+    expect(page.locator("#fl-title")).to_have_text(name, timeout=20000)
+    page.click("#fl-ctx-btn")
+    page.fill("#fl-lot", "L-1")
+    page.click("#fl-ctx-ok")
+    expect(page.locator("#fl-ctx-label")).to_contain_text("L-1", timeout=20000)
+
+    def send(values):
+        for k, v in enumerate(values):
+            page.click(f"#fl-values label:nth-child({k + 1}) input")
+            for ch in str(v):
+                page.click(f"#fl-keypad button[data-key='{ch}']")
+        page.click("#fl-submit")
+
+    send(OK_SAMPLE)  # the first article of L-1 (released at once: no approval on this monitor)
+    expect(page.locator("#fl-result")).to_contain_text("First article passed", timeout=20000)
+    # another screen changes the lot; this screen still shows L-1 and sends L-1
+    other.post(f"/api/monitors/{mid}/context", json={"lot": "L-2"})
+    send(OK_SAMPLE)
+    expect(page.locator("#errors")).to_contain_text("L-2", timeout=20000)
+    page.click("#errors button")
+    # the screen took the state of the server: it shows L-2 and the next sample is its first article
+    expect(page.locator("#fl-ctx-label")).to_contain_text("L-2", timeout=20000)
+    expect(page.locator("#fl-banner")).to_contain_text("FIRST ARTICLE")
+    send(OK_SAMPLE)
+    expect(page.locator("#fl-result")).to_contain_text("First article passed", timeout=20000)
+    assert eng.get(f"/api/monitors/{mid}").json()["points"][-1]["tags"]["lot"] == "L-2"
+    ctx.close()
+
+
 def test_count_chart_monitor_with_limits_that_follow_the_sample_size(server, browser, app):
     expect = playwright_sync.expect
     problems = []

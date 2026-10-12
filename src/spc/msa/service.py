@@ -110,7 +110,7 @@ class MsaService:
         if study["kind"] == "type1":
             if not tol:
                 raise msa.MsaError("a type 1 study needs the tolerance of the measurement system")
-            r = msa.type1(inp["values"], inp["reference"], tol, pol["cg_min"], int(pol.get("cg_spread", 4)))
+            r = msa.type1(inp["values"], inp["reference"], tol, pol["cg_min"], int(pol.get("cg_spread", 6)))  # a policy stored before the setting existed keeps the 6 s it was judged with
         elif study["kind"] == "grr":
             r = msa.grr(inp["data"], tol, pol["grr_pass"], pol["grr_conditional"], pol["ndc_min"])
         elif study["kind"] == "grr_nested":

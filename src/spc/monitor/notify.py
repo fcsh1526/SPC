@@ -4,6 +4,12 @@ The program always keeps the incident and shows it on the monitor page. A notifi
 event somewhere else. `WebhookNotifier` posts the event as JSON to a URL that the administrator sets when the
 server starts (never a URL that a user can type). Sending runs in its own thread, so a slow receiver cannot
 hold up the entry of a measurement, and a failure is logged and never raised.
+
+Events (a receiver must ignore types and fields it does not know; more may come):
+  incident_opened                  {"type", "at", "monitor": {"id", "name", "line", "characteristic"}, "incident_id", "point_seq",
+                                    "rules": [{"chart", "rule", ...}], "entered_by"}
+  first_article_awaiting_approval  {"type", "at", "monitor": {"id", "name", "line", "characteristic"}, "lot", "point_seq", "entered_by"}
+`at` is the UTC time of sending (ISO 8601); `entered_by` is "display name (user name)" of the person who entered the sample.
 """
 
 from __future__ import annotations

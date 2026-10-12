@@ -99,6 +99,12 @@ begin
   OqCheck.Left := 0; OqCheck.Top := AdminPage.Edits[2].Top + AdminPage.Edits[2].Height + ScaleY(14); OqCheck.Width := AdminPage.SurfaceWidth;
 end;
 
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  // an existing installation keeps its settings (address, port, certificate): spc-setup does not overwrite them, so the page would change nothing
+  Result := (PageID = NetPage.ID) and FileExists(DataPage.Values[0] + '\spc.json');
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   Port: Integer;
@@ -135,6 +141,7 @@ var
   Py, Data, Pw, Args, Log: String;
 begin
   Data := DataPage.Values[0];
+  Pw := '';
   Py := ExpandConstant('{app}\python\python.exe');
   if CurStep = ssInstall then begin
     // an upgrade: stop the server and make a checked copy of the database before any file is replaced
@@ -157,7 +164,9 @@ begin
       SaveStringToFile(Pw, AdminPage.Values[1] + #13#10, False);
       Args := Args + ' --admin "' + Trim(AdminPage.Values[0]) + '" --password-file "' + Pw + '"';
     end;
-    if not Run(Py, Args, Code) or (Code <> 0) then begin
+    if not Run(Py, Args, Code) then Code := -1;
+    if Pw <> '' then DeleteFile(Pw);  // the password never stays on the disk, also when the setup failed
+    if Code <> 0 then begin
       MsgBox('The first setup failed (code ' + IntToStr(Code) + '). The server was not started.', mbError, MB_OK);
       Exit;
     end;

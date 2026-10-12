@@ -574,7 +574,10 @@ class MonitorService:
             out.append({"rule": a["rule"], **ocap_for(monitor, a["rule"])})
         return out
 
-    def add_point(self, monitor_id: int, values, label: str, tags: dict, taken_at: str | None, user, part: str | None = None, cycle: str | None = None) -> dict:
+    def add_point(self, monitor_id: int, values, label: str, tags: dict, taken_at: str | None, user, part: str | None = None, cycle: str | None = None,
+                  automatic: bool = False) -> dict:
+        """`automatic`: the sample comes from a gauge or a PLC (OPC UA), not from a person. It is never a first article and is kept while the lot is not released,
+        marked with the tag `lot_released` = 'no' (dropping it would lose SPC data; the lot release shows it)."""
         monitor = self.store.get(monitor_id)
         if not monitor["active"]:
             raise MonitorError("monitor_inactive", "this monitor is switched off", 409)
@@ -594,18 +597,28 @@ class MonitorService:
         if len(tags) > count or any(not isinstance(k, str) or not isinstance(v, str) or not 0 < len(k) <= klen or len(v) > vlen for k, v in tags.items()):
             raise MonitorError("invalid_input", f"at most {count} tags, key up to {klen} and value up to {vlen} characters")
         when = _parse_time(taken_at)
-        lot_row = self.store.current_lot(monitor_id)
-        if lot_row and lot_row["status"] == "approval" and monitor.get("first_article", True):
-            raise MonitorError("first_article_approval_pending", f"the first article of lot {lot_row['lot']} waits for the confirmation of the leader: no sample before that", 409, lot=lot_row["lot"])
-        first = bool(lot_row and lot_row["status"] == "pending" and monitor.get("first_article", True))
-        given_lot = (tags.get("lot") or "").strip()
-        if lot_row and given_lot and given_lot.lower() != lot_row["lot"].lower():
-            raise MonitorError("lot_changed", f"this station runs lot {lot_row['lot']} now, not {given_lot}: refresh the screen", 409, lot=lot_row["lot"])
-        if first:
-            tags = {**({"shift": lot_row["shift"]} if lot_row["shift"] else {}), **tags, "lot": lot_row["lot"], "first_article": "1"}  # the sample is the first article of the lot, whatever the screen sent
         if monitor["require_ack"] and not self.store.has_ack(monitor_id, user.id, monitor["ocap_rev"]):
             raise MonitorError("ocap_not_acknowledged", "confirm that you know the action plan of this monitor first", 403)
         with self.db.tx():
+            # the state of the lot is read and changed in the same transaction: two stations, or a station and a leader, cannot act on the same state
+            lot_row = self.store.current_lot(monitor_id) if monitor.get("first_article", True) else None
+            first = False
+            if lot_row and automatic:
+                if lot_row["status"] != "released":
+                    tags = {**tags, "lot": lot_row["lot"], "lot_released": "no"}
+            elif lot_row:
+                if lot_row["status"] == "approval":
+                    raise MonitorError("first_article_approval_pending", f"the first article of lot {lot_row['lot']} waits for the confirmation of the leader: no sample before that",
+                                       409, lot=lot_row["lot"])
+                given_lot = (tags.get("lot") or "").strip()
+                if given_lot and given_lot.lower() != lot_row["lot"].lower():
+                    raise MonitorError("lot_changed", f"this station runs lot {lot_row['lot']} now, not {given_lot}: refresh the screen", 409, lot=lot_row["lot"])
+                first = lot_row["status"] == "pending"
+                if first and when < lot_row["started_at"]:
+                    raise MonitorError("first_article_before_lot", "the first article of a lot is taken after the change of lot: the time given lies before it", 409,
+                                       lot=lot_row["lot"], started_at=lot_row["started_at"])
+                if first:  # the sample is the first article of the lot, whatever the screen sent
+                    tags = {**({"shift": lot_row["shift"]} if lot_row["shift"] else {}), **tags, "lot": lot_row["lot"], "first_article": "1"}
             limits = self.store.limits(monitor_id)
             if limits is None:
                 raise MonitorError("no_limits", "this monitor has no limits yet", 409)
@@ -729,10 +742,12 @@ class MonitorService:
             current = self.store.current_lot(monitor_id)
             new_lot = bool(lot) and (current is None or current["lot"].lower() != lot.lower())
             row = current
+            replaced = current["status"] if new_lot and current and current["status"] in ("pending", "approval") else ""
             if new_lot:
                 row = self.store.start_lot(monitor_id, lot, shift, note, _label(user), required)
             self._log("monitor_context_change", user, monitor["name"], {"id": monitor_id, "shift": shift, "lot": lot, "note": note, "new_lot": new_lot,
-                                                                         "first_article": ("pending" if required else "not_required") if new_lot else ""})
+                                                                         "first_article": ("pending" if required else "not_required") if new_lot else "",
+                                                                         "replaced_lot": current["lot"] if replaced else "", "replaced_state": replaced})
         return {"monitor": monitor["name"], "shift": shift, "lot": lot, "note": note, "by": _label(user), "new_lot": new_lot, "lot_state": row}
 
     def _lot_awaiting(self, monitor_id: int) -> tuple[dict, dict]:
@@ -742,25 +757,28 @@ class MonitorService:
         return monitor, lot
 
     def approve_first_article(self, monitor_id: int, user) -> dict:
-        """The leader confirms the first article of the running lot and the lot is released. Another person than the one who measured it: the sample was not checked by its maker alone."""
-        monitor, lot = self._lot_awaiting(monitor_id)
-        if lot["first_user_id"] == user.id:
-            raise MonitorError("same_person", "the first article is confirmed by another person than the one who measured it", 409)
-        point = self.store.point(monitor_id, lot["first_seq"])
-        if point is None or not point["valid"]:
-            raise MonitorError("first_article_invalid", "the first article was declared invalid: a new first article is needed", 409)
+        """The leader confirms the first article of the running lot and the lot is released. Another person than the one who measured it: the sample was not checked by its maker alone.
+        The check and the change are one transaction, and the change only applies to a lot that still waits (a rejection at the same moment wins, never both)."""
         with self.db.tx():
-            self.store.approve_lot(lot["id"], _label(user))
+            monitor, lot = self._lot_awaiting(monitor_id)
+            if lot["first_user_id"] == user.id:
+                raise MonitorError("same_person", "the first article is confirmed by another person than the one who measured it", 409)
+            point = self.store.point(monitor_id, lot["first_seq"])
+            if point is None or not point["valid"]:
+                raise MonitorError("first_article_invalid", "the first article was declared invalid: a new first article is needed", 409)
+            if not self.store.approve_lot(lot["id"], _label(user), lot["first_seq"]):
+                raise MonitorError("no_first_article_to_approve", "the first article was handled by somebody else at the same time", 409)
             self._log("monitor_first_article_released", user, monitor["name"], {"id": monitor_id, "lot": lot["lot"], "point": lot["first_seq"], "measured_by": lot["first_by"],
                                                                                  "approved_by": _label(user), "attempts": lot["attempts"]})
         return self.store.current_lot(monitor_id)
 
     def reject_first_article(self, monitor_id: int, reason: str, user) -> dict:
-        monitor, lot = self._lot_awaiting(monitor_id)
         if not reason or not reason.strip():
             raise MonitorError("reason_required", "say why the first article is not accepted")
         with self.db.tx():
-            self.store.reopen_lot(lot["id"])
+            monitor, lot = self._lot_awaiting(monitor_id)
+            if not self.store.reopen_lot(lot["id"], expect="approval", first_seq=lot["first_seq"]):
+                raise MonitorError("no_first_article_to_approve", "the first article was handled by somebody else at the same time", 409)
             self._log("monitor_first_article_rejected", user, monitor["name"], {"id": monitor_id, "lot": lot["lot"], "point": lot["first_seq"], "measured_by": lot["first_by"],
                                                                                  "rejected_by": _label(user), "reason": reason.strip()})
         return self.store.current_lot(monitor_id)

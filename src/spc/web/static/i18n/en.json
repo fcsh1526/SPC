@@ -1165,8 +1165,8 @@
   "msa.res.grr.warn": "gauge R&R {pct} % of the {basis}, ndc {ndc}: conditional",
   "msa.res.grr.fail": "gauge R&R {pct} % of the {basis}, ndc {ndc}: not capable",
   "msa.res.grr.missing": "no gauge R&R study",
-  "msa.res.type1.pass": "Cg {cg}, Cgk {cgk}",
-  "msa.res.type1.fail": "Cg {cg}, Cgk {cgk}: below the limit",
+  "msa.res.type1.pass": "Cg {cg}, Cgk {cgk} ({spread} s)",
+  "msa.res.type1.fail": "Cg {cg}, Cgk {cgk} ({spread} s): below the limit",
   "msa.res.type1.not_done": "no type 1 study (optional)",
   "msa.res.validity.pass": "the gauge R&R is valid until {until}",
   "msa.res.validity.fail": "the gauge R&R was valid until {until}: repeat it",
@@ -1192,7 +1192,7 @@
   "msa.verdict_fail": "not capable",
   "msa.verdict_unusable": "cannot be evaluated",
   "msa.sum_grr": "{n}: gauge R&R {pct} % of the {basis}, ndc {ndc}; repeatability {ev}, reproducibility {av}",
-  "msa.sum_type1": "{n} measurements: Cg {cg}, Cgk {cgk}, bias {bias}",
+  "msa.sum_type1": "{n} measurements: Cg {cg}, Cgk {cgk}, bias {bias} ({spread} s spread)",
   "msa.sum_stability": "{n} measurements, {signals} signal(s)",
   "msa.monitor_banner": "Measurement system {name}: {status}",
   "msa.monitor_conditional": "The measurement system {name} passes the gate with remarks. This sample is accepted and flagged.",
@@ -2660,5 +2660,9 @@
   "mc.cp_note_process": "GRR against the observed process variation: Cp_obs = Cp_act × sqrt(1 - GRR²).",
   "mc.cp_note_tolerance": "GRR against the tolerance: sigma_obs² = sigma_act² + sigma_meas², so Cp_obs = Cp_act / sqrt(1 + (Cp_act GRR)²). The manual's Table B 1 prints other values for this row (it puts Cp_act where equation (7) has Cp_obs); the program solves equation (7).",
   "mc.out_pv": "K3 = {k3}. Part variation R_P × K3 = {pv0}; without the equipment variation {pv} ({diff} % less).",
-  "mc.pv_note": "PV = sqrt((R_P × K3)² - EV² / (k r)), K3 = 1 / d2* for the number of parts. The usual PV contains the equipment variation, to the extent of a percentage point or two."
+  "mc.pv_note": "PV = sqrt((R_P × K3)² - EV² / (k r)), K3 = 1 / d2* for the number of parts. The usual PV contains the equipment variation, to the extent of a percentage point or two.",
+  "error.first_article_before_lot": "The time of the first article lies before the change of lot ({started_at}). The first article is taken after the change.",
+  "error.busy": "Another long calculation is running. Try again in a moment.",
+  "issue.xlsx_too_large": "The workbook unpacks to too much data to be read safely.",
+  "lot.ev_before_release_points": "{count} gauge sample(s) were taken before the first article of the lot was released."
 }

@@ -184,6 +184,14 @@
   const F = { list: [], id: null, view: null, last: null, mode: "entry", active: null, timer: null };
   const floorCtxKey = (id) => "spc.floor.ctx." + id;
   const floorCtx = () => { try { return JSON.parse(localStorage.getItem(floorCtxKey(F.id)) || "{}"); } catch (e) { return {}; } };
+  function floorContext(v) {  // the lot is the one the server runs; the shift is the one set at this screen (or the last sample's)
+    const ctx = { ...floorLastTags(v), ...floorCtx() };
+    if (v.lot_state && v.monitor.first_article !== false && ctx.lot !== v.lot_state.lot) {
+      ctx.lot = v.lot_state.lot;
+      try { localStorage.setItem(floorCtxKey(F.id), JSON.stringify({ shift: ctx.shift || "", lot: ctx.lot })); } catch (e) { /* the server keeps the lot anyway */ }
+    }
+    return ctx;
+  }
   function floorLastTags(v) {  // without a saved context the last point tells which shift and lot were running
     const p = [...v.points].reverse().find((x) => x.tags && (x.tags.lot || x.tags.shift));
     return p ? { shift: p.tags.shift || "", lot: p.tags.lot || "" } : {};
@@ -254,7 +262,7 @@
     const v = F.view, m = v.monitor, lim = v.limits;
     $("#fl-title").textContent = m.name;
     $("#fl-sub").textContent = [m.line, m.characteristic, m.unit].filter(Boolean).join(" · ");
-    const ctx = { ...floorLastTags(v), ...floorCtx() };
+    const ctx = floorContext(v);
     const ls = v.lot_state;
     $("#fl-ctx-label").textContent = t("floor.ctx_line", { shift: ctx.shift || "–", lot: ctx.lot || "–" }) + (ls && m.first_article !== false ? " · " + t(ls.status === "pending" ? "floor.lot_pending" : ls.status === "approval" ? "floor.lot_approval" : "floor.lot_released") : "");
     const st = stationState(v), last = [...v.points].reverse().find((p) => p.valid);
@@ -362,7 +370,7 @@
     const v = F.view, m = v.monitor, inputs = $$("#fl-values input");
     const values = inputs.map((i) => Number(i.value.trim().replace(",", ".")));
     if (inputs.some((i) => i.value.trim() === "") || values.some((x) => !Number.isFinite(x))) return showError({ code: "wrong_value_count", message: "", params: { n: inputs.length } });
-    const ctx = { ...floorLastTags(v), ...floorCtx() };
+    const ctx = floorContext(v);
     const body = { values, label: ctx.lot || "", tags: {} };
     if (ctx.lot) body.tags.lot = ctx.lot;
     if (ctx.shift) body.tags.shift = ctx.shift;
@@ -372,8 +380,10 @@
       if (!note) return showError({ code: "cycle_note_required", message: "", params: {} });
       body.cycle = note;
     }
+    let sent = false;
     await guarded(async () => {
       F.last = await post(`/api/monitors/${F.id}/points`, body);
+      sent = true;
       inputs.forEach((i) => { i.value = ""; });
       $("#fl-cycle").checked = false; $("#fl-cycle-note").value = "";
       F.view = await api(`/api/monitors/${F.id}`);
@@ -381,6 +391,7 @@
       renderStation(true);
       startAlertPolling();
     });
+    if (!sent) refreshStation();  // the lot may have changed at another screen: show the state of the server
   }
   function renderStationIncident() {
     const inc = F.view.incident, m = F.view.monitor;
@@ -433,7 +444,7 @@
     });
   }
   function openContextDialog() {
-    const ctx = { ...floorLastTags(F.view), ...floorCtx() };
+    const ctx = floorContext(F.view);
     $("#fl-shift").value = ctx.shift || ""; $("#fl-lot").value = ctx.lot || ""; $("#fl-ctx-note").value = "";
     const chips = $("#fl-shift-chips"); chips.replaceChildren();
     ["floor.shift_day", "floor.shift_evening", "floor.shift_night"].forEach((k) => {
@@ -2756,7 +2767,7 @@
     if (x.kind === "linearity") return t("msa.sum_linearity", { parts: r.parts, readings: r.readings, lin: sig(r.pct_linearity, 3), bias: sig(r.average_bias, 3) });
     if (x.kind === "budget") return t("msa.sum_budget", { n: r.components.length, U: sig(r.U, 4), q: sig(r.q_ms, 3) });
     if (x.kind === "grr") return t("msa.sum_grr", { pct: sig(r.pct_tol ?? r.pct_tv, 3), basis: t("msa.basis_" + r.basis), ndc: sig(r.ndc, 3), ev: sig(r.sigma.ev, 3), av: sig(r.sigma.av, 3), n: `${r.parts}×${r.operators}×${r.trials}` });
-    if (x.kind === "type1") return t("msa.sum_type1", { cg: sig(r.cg, 3), cgk: sig(r.cgk, 3), bias: sig(r.bias, 3), n: r.n });
+    if (x.kind === "type1") return t("msa.sum_type1", { cg: sig(r.cg, 3), cgk: sig(r.cgk, 3), bias: sig(r.bias, 3), n: r.n, spread: r.spread || 6 });
     return t("msa.sum_stability", { n: r.n, signals: r.n_signals });
   }
   function syncStudyForm() {
@@ -2929,7 +2940,7 @@
     $("#ms-editor-title").textContent = view ? t("msa.edit_title", { name: s.name }) : t("msa.new");
     ["name", "description", "characteristic", "unit"].forEach((k) => { $("#mse-" + k).value = s[k] || ""; });
     $("#mse-resolution").value = s.resolution ?? ""; $("#mse-tolerance").value = s.tolerance ?? "";
-    Object.entries({ ...DEFAULT_MSA_POLICY, ...s.policy }).forEach(([k, v]) => {
+    Object.entries({ ...DEFAULT_MSA_POLICY, ...(view && !("cg_spread" in (s.policy || {})) ? { cg_spread: 6 } : {}), ...s.policy }).forEach(([k, v]) => {
       const e = $("#msp-" + k);
       if (!e) return;
       if (e.type === "checkbox") e.checked = !!v; else e.value = POLICY_PCT.includes(k) ? v * 100 : v;

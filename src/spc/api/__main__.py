@@ -49,6 +49,12 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if bool(args.ssl_certfile) != bool(args.ssl_keyfile):
         raise SystemExit("give both --ssl-certfile and --ssl-keyfile")
+    from spc.db import serverlock
+
+    try:
+        lock = serverlock.acquire(args.db)  # noqa: F841 - held until the process ends; a restore checks it
+    except serverlock.ServerRunning as exc:
+        raise SystemExit(f"{exc}. Stop the other server first.")
     db = Database(args.db)
     notifiers = [WebhookNotifier(args.alert_webhook)] if args.alert_webhook else []
     app = create_app(db, secure_cookies=True if (args.secure_cookies or args.ssl_certfile) else None, notifiers=notifiers)

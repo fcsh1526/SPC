@@ -158,10 +158,14 @@ class LotService:
                 remarks.append({"code": "alarm_answered", "incident": inc["id"], "outcome": inc["outcome"], "point": inc["point_seq"]})
         if monitor.get("first_article", True):  # a lot that was started at the station needs a first article that passed
             rows = store.lots_named(mid, lot["lot_no"])
-            if rows and not any(r["status"] == "released" for r in rows):
-                blocking.append({"code": "first_article_pending", "lot": lot["lot_no"], "awaiting_approval": any(r["status"] == "approval" for r in rows)})
+            # the newest start of this lot number decides: a lot number that is started again (A, B, A) needs the first article of its new start
+            if rows and rows[-1]["status"] != "released":
+                blocking.append({"code": "first_article_pending", "lot": lot["lot_no"], "awaiting_approval": rows[-1]["status"] == "approval"})
             elif not rows:
                 remarks.append({"code": "first_article_untracked", "lot": lot["lot_no"]})
+            not_released = [p["seq"] for p in valid if (p.get("tags") or {}).get("lot_released") == "no"]
+            if not_released:  # gauge samples taken before the first article of the lot was released
+                remarks.append({"code": "before_release_points", "count": len(not_released), "seqs": not_released[:20]})
         msa_id = (monitor.get("specs") or {}).get("msa_id")
         gate_status = None
         if msa_id:

@@ -175,3 +175,16 @@ def test_a_lot_started_at_the_station_cannot_be_released_before_its_first_articl
     other = lot(c, lot_no="L-OLD", monitor_id=mid, seq_from=1, seq_to=1).json()["id"]
     ev2 = c["view"].get(f"/api/lots/{other}").json()["evidence"]
     assert "first_article_pending" not in [b["code"] for b in ev2["blocking"]] and "first_article_untracked" in [r["code"] for r in ev2["remarks"]]
+
+
+def test_a_lot_number_started_again_needs_the_first_article_of_its_new_start(env):
+    app, c = env
+    mid = make_monitor(c["eng"], {**CONFIG, "name": "Restart A", "first_article_approval": False})
+    ack(c["oper"], mid)
+    c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "L-A"})
+    first = enter(c["oper"], mid, OK_SAMPLE)  # released
+    c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "L-B"})
+    c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "L-A"})  # A again: its new first article is not measured yet
+    lid = lot(c, lot_no="L-A", monitor_id=mid, seq_from=first["point"]["seq"], seq_to=first["point"]["seq"]).json()["id"]
+    codes = [b["code"] for b in c["view"].get(f"/api/lots/{lid}").json()["evidence"]["blocking"]]
+    assert "first_article_pending" in codes

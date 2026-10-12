@@ -155,7 +155,8 @@ def evaluate(system: Mapping, today: date | None = None) -> dict[str, Any]:
     # type 1
     t = latest(system, "type1")
     checks["type1"] = ({"result": "not_done"} if t is None else
-                       {"result": "pass" if t["verdict"] == "pass" else "fail", "study": t["id"], "cg": t["result"]["cg"], "cgk": t["result"]["cgk"]})
+                       {"result": "pass" if t["verdict"] == "pass" else "fail", "study": t["id"], "cg": t["result"]["cg"], "cgk": t["result"]["cgk"],
+                        "spread": t["result"].get("spread", 6)})
     # stability
     if not pol["require_stability"]:
         checks["stability"] = {"result": "not_needed"}

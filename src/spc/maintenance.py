@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from spc.auth.audit import Audit
+from spc.db import serverlock
 from spc.db.database import SCHEMA_VERSION, Database
 
 SYSTEM_USER = "spc-maintenance"
@@ -66,7 +67,14 @@ def inspect_file(path: str | os.PathLike) -> dict:
 
 
 def backup(db_path: str | os.PathLike, dest_dir: str | os.PathLike) -> dict:
-    """Write `spc-backup-<UTC time>.sqlite3` and its `.sha256` into `dest_dir`; the event goes into the audit chain of the source database."""
+    """Write `spc-backup-<UTC time>.sqlite3` and its `.sha256` into `dest_dir`. The source is only read: a database that does not exist is an error (it is never created),
+    and an older database is copied as it is (it is not migrated). The event goes into the audit chain of the source when its schema is the one of this program."""
+    src = Path(db_path)
+    if not src.is_file():
+        raise MaintenanceError("file_not_found", f"{src} does not exist: check the path of the database")
+    before = inspect_file(src)
+    if before["integrity"] != "ok":
+        raise MaintenanceError("not_a_database", f"the database does not pass the integrity check: {before['integrity']}")
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     target = dest_dir / f"spc-backup-{_stamp()}.sqlite3"
@@ -74,33 +82,41 @@ def backup(db_path: str | os.PathLike, dest_dir: str | os.PathLike) -> dict:
     while target.exists():
         n += 1
         target = dest_dir / f"spc-backup-{_stamp()}-{n}.sqlite3"
-    db = Database(db_path)
+    conn = sqlite3.connect(str(src))  # SQLite's online backup: consistent while the server writes
     try:
-        with db._lock:
-            out = sqlite3.connect(str(target))
-            try:
-                db._conn.backup(out)
-            finally:
-                out.close()
+        conn.execute("PRAGMA busy_timeout = 5000")
+        out = sqlite3.connect(str(target))
         try:
-            os.chmod(target, 0o600)
-        except OSError:
-            pass
-        info = inspect_file(target)
-        if info["integrity"] != "ok" or not info["audit_ok"]:
-            target.unlink(missing_ok=True)
-            raise MaintenanceError("backup_failed", f"the copy did not pass the check: {info}")
-        digest = sha256_file(target)
-        (target.parent / (target.name + ".sha256")).write_text(f"{digest}  {target.name}\n", encoding="utf-8")
-        Audit(db).append("backup_made", username=SYSTEM_USER, target=target.name, detail={"sha256": digest, "audit_entries": info["audit_entries"], "schema_version": info["schema_version"]})
+            conn.backup(out)
+        finally:
+            out.close()
     finally:
-        db.close()
-    return {"file": str(target), "sha256": digest, **info}
+        conn.close()
+    try:
+        os.chmod(target, 0o600)
+    except OSError:
+        pass
+    info = inspect_file(target)
+    if info["integrity"] != "ok" or not info["audit_ok"]:
+        target.unlink(missing_ok=True)
+        raise MaintenanceError("backup_failed", f"the copy did not pass the check: {info}")
+    digest = sha256_file(target)
+    (target.parent / (target.name + ".sha256")).write_text(f"{digest}  {target.name}\n", encoding="utf-8")
+    recorded = info["schema_version"] == SCHEMA_VERSION
+    if recorded:
+        db = Database(src)
+        try:
+            Audit(db).append("backup_made", username=SYSTEM_USER, target=target.name, detail={"sha256": digest, "audit_entries": info["audit_entries"], "schema_version": info["schema_version"]})
+        finally:
+            db.close()
+    return {"file": str(target), "sha256": digest, "audit_recorded": recorded, **info}
 
 
 def restore(backup_file: str | os.PathLike, db_path: str | os.PathLike) -> dict:
     """Replace the database with a backup. The backup must pass the checks and must not be newer than this program; the replaced file is kept beside it."""
     src, dst = Path(backup_file), Path(db_path)
+    if serverlock.held(dst):
+        raise MaintenanceError("server_running", "a server uses this database: stop it first (Windows: Stop-ScheduledTask -TaskName 'SPC Server')")
     info = inspect_file(src)
     if info["integrity"] != "ok":
         raise MaintenanceError("backup_damaged", f"integrity check: {info['integrity']}")

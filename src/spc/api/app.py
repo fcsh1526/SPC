@@ -6,12 +6,14 @@ interface turns it into text in the user's language. The message is English, for
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
 import json
 import secrets
+import threading
 
 import numpy as np
 from fastapi import Depends, FastAPI, Query, Request
@@ -377,9 +379,13 @@ def create_app(
         declared = request.headers.get("content-length")
         if declared and declared.isdigit() and int(declared) > max_upload:
             raise ApiError(413, "file_too_large", "file is too large", limit_mb=max_upload // (1024 * 1024))
-        raw = await request.body()
-        if len(raw) > max_upload:
-            raise ApiError(413, "file_too_large", "file is too large", limit_mb=max_upload // (1024 * 1024))
+        chunks, size = [], 0
+        async for chunk in request.stream():  # read in pieces: a body without a length is stopped at the limit, not read whole first
+            size += len(chunk)
+            if size > max_upload:
+                raise ApiError(413, "file_too_large", "file is too large", limit_mb=max_upload // (1024 * 1024))
+            chunks.append(chunk)
+        raw = b"".join(chunks)
         if not raw:
             raise ApiError(400, "empty_file", "the request body is empty")
         return raw
@@ -994,11 +1000,23 @@ def create_app(
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 
+    heavy = threading.BoundedSemaphore(2)  # searches that take seconds to a minute: at most two at a time, the others are asked to wait
+
+    @contextmanager
+    def heavy_slot():
+        if not heavy.acquire(blocking=False):
+            raise ApiError(429, "busy", "another long calculation is running: try again in a moment")
+        try:
+            yield
+        finally:
+            heavy.release()
+
     @app.post("/api/doe/optimal")
     def doe_optimal_design(body: DoeOptimalBody):
         """A D-optimal design (Fedorov exchange): n runs of the allowed points that estimate the model best; optional linear limits on the coded factors."""
         try:
-            return doe_optimal.d_optimal(body.k, body.model, body.n_runs, body.levels, [c.model_dump() for c in body.constraints], body.seed, body.starts)
+            with heavy_slot():
+                return doe_optimal.d_optimal(body.k, body.model, body.n_runs, body.levels, [c.model_dump() for c in body.constraints], body.seed, body.starts)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None
 
@@ -1007,7 +1025,8 @@ def create_app(
         """The plan of a mixture experiment: simplex lattice, simplex centroid (with axial and centre runs), or D-optimal blends inside component limits."""
         try:
             if body.kind == "d_optimal":
-                return doe_optimal.mixture_d_optimal(body.q, body.model, body.n_runs, body.lower, body.upper, body.m, body.seed, body.starts)
+                with heavy_slot():
+                    return doe_optimal.mixture_d_optimal(body.q, body.model, body.n_runs, body.lower, body.upper, body.m, body.seed, body.starts)
             return doe_optimal.mixture_design(body.q, body.kind, body.degree, body.lower, body.center, body.axial, body.seed)
         except ValueError as exc:
             raise ApiError(400, "invalid_input", str(exc)) from None

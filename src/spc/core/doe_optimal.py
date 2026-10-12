@@ -26,6 +26,7 @@ MAX_FACTORS = 8
 MAX_RUNS = 200
 MAX_CANDIDATES = 20000
 MAX_COMPONENTS = 8
+MAX_WORK = 2e8  # starts x runs x candidates x terms: about a minute of search; larger requests are refused with a reason
 
 
 def _f(x):
@@ -58,7 +59,13 @@ def _clean(v: float) -> float:
     return 0.0 if v == 0 else v
 
 
-def _exchange(F: np.ndarray, n: int, rng: np.random.Generator, max_pass: int = 500) -> np.ndarray:
+def _check_work(starts: int, n: int, candidates: int, p: int) -> None:
+    work = float(starts) * n * candidates * p
+    if work > MAX_WORK:
+        raise ValueError(f"this search is too large ({starts} starts x {n} runs x {candidates} candidate points x {p} terms): use fewer starts, levels or runs")
+
+
+def _exchange(F: np.ndarray, n: int, rng: np.random.Generator, max_pass: int = 200) -> np.ndarray:
     """Fedorov exchange on the rows of the candidate model matrix F: swap the design point and candidate that raise det(M) most, until no swap helps."""
     c, p = F.shape
     idx = rng.choice(c, size=n, replace=n > c)
@@ -142,6 +149,7 @@ def d_optimal(k: int, model: str = "main", n_runs: int | None = None, levels: in
         raise ValueError(f"the model has {p} terms: give {p} to {MAX_RUNS} runs")
     if not 1 <= starts <= 200:
         raise ValueError("give 1 to 200 starts")
+    _check_work(starts, n, len(grid), p)
     rng = np.random.default_rng(0 if seed is None else seed)
     best_idx, best_ld, hits, found = None, -math.inf, 0, 0
     for _ in range(starts):
@@ -298,6 +306,7 @@ def mixture_d_optimal(q: int, model: str = "quadratic", n_runs: int | None = Non
         raise ValueError(f"the model has {p} terms: give {p} to {MAX_RUNS} runs")
     if not 1 <= starts <= 200:
         raise ValueError("give 1 to 200 starts")
+    _check_work(starts, n, len(grid), p)
     rng = np.random.default_rng(0 if seed is None else seed)
     best_idx, best_ld, hits, found = None, -math.inf, 0, 0
     for _ in range(starts):

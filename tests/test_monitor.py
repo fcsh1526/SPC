@@ -1489,3 +1489,102 @@ def test_without_the_approval_rule_a_first_article_that_passes_releases_the_lot(
     assert r["first_article"]["result"] == "passed"
     assert c["oper"].get(f"/api/monitors/{mid}").json()["lot_state"]["status"] == "released"
     assert enter(c["oper"], mid, OK_SAMPLE)["first_article"] is None
+
+
+# ------------------------------------------------------------------ review findings: the state of a lot under changes and at the same moment
+
+def _users(app):
+    return {u.username: u for u in app.state.auth.list_users()}
+
+
+def test_a_lot_waiting_for_the_leader_is_replaced_by_a_new_lot_and_never_released(env):
+    app, c = env
+    mid = make_monitor(c["eng"])
+    ack(c["oper"], mid)
+    c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "A"})
+    assert enter(c["oper"], mid, OK_SAMPLE)["first_article"]["result"] == "awaiting_approval"
+    assert c["lead"].get("/api/alerts").json()["approvals"] == 1
+    r = c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "B"}).json()
+    assert r["new_lot"] and r["lot_state"]["lot"] == "B"
+    rows = app.state.monitors.store.lot_rows(mid)
+    assert [(x["lot"], x["status"]) for x in rows] == [("B", "pending"), ("A", "superseded")]
+    assert c["lead"].get("/api/alerts").json()["approvals"] == 0  # nothing waits for the leader any more
+    entry = [e for e in c["admin"].get("/api/audit?limit=50").json()["entries"] if e["action"] == "monitor_context_change"][0]
+    assert entry["detail"]["replaced_lot"] == "A" and entry["detail"]["replaced_state"] == "approval"
+
+
+def test_a_confirmation_and_a_rejection_at_the_same_moment_never_release_a_lot_without_a_first_article(env):
+    app, c = env
+    mid = make_monitor(c["eng"])
+    ack(c["oper"], mid)
+    c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "A"})
+    enter(c["oper"], mid, OK_SAMPLE)
+    store = app.state.monitors.store
+    lot = store.current_lot(mid)
+    # the leader's request read the lot as waiting, then a rejection came first: the confirmation finds nothing to confirm
+    assert store.reopen_lot(lot["id"], expect="approval", first_seq=lot["first_seq"])
+    assert not store.approve_lot(lot["id"], "late leader", lot["first_seq"])
+    assert store.current_lot(mid)["status"] == "pending"
+    # the same through the API, one after the other
+    enter(c["oper"], mid, OK_SAMPLE)
+    assert c["lead"].post(f"/api/monitors/{mid}/lot/reject", json={"reason": "burr"}).status_code == 200
+    late = c["admin"].post(f"/api/monitors/{mid}/lot/approve")
+    assert late.status_code == 409 and err(late)["code"] == "no_first_article_to_approve"
+    assert store.current_lot(mid)["status"] == "pending" and store.current_lot(mid)["first_seq"] is None
+
+
+def test_two_stations_sending_at_the_same_moment_give_one_first_article(env):
+    import threading
+
+    app, c = env
+    mid = make_monitor(c["eng"])
+    ack(c["oper"], mid)
+    ack(c["oper2"], mid)
+    c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "A"})
+    users, svc = _users(app), app.state.monitors
+    results, start = [], threading.Barrier(4)
+
+    def send(name):
+        start.wait()
+        try:
+            results.append(svc.add_point(mid, OK_SAMPLE, "", {}, None, users[name])["first_article"])
+        except Exception as exc:  # the second one is refused while the first article waits for the leader
+            results.append(getattr(exc, "code", repr(exc)))
+
+    threads = [threading.Thread(target=send, args=(n,)) for n in ("oper", "oper2", "oper", "oper2")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    firsts = [r for r in results if isinstance(r, dict)]
+    assert len(firsts) == 1 and firsts[0]["result"] == "awaiting_approval"
+    assert sorted(r for r in results if not isinstance(r, dict)) == ["first_article_approval_pending"] * 3
+    assert len([p for p in svc.store.points(mid) if p["tags"].get("first_article")]) == 1
+
+
+def test_a_first_article_dated_before_the_change_of_lot_is_refused(env):
+    app, c = env
+    mid = make_monitor(c["eng"])
+    ack(c["oper"], mid)
+    c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "A"})
+    r = c["oper"].post(f"/api/monitors/{mid}/points", json={"values": OK_SAMPLE, "taken_at": "2020-01-01T00:00:00Z"})
+    assert r.status_code == 409 and err(r)["code"] == "first_article_before_lot"
+    assert app.state.monitors.store.current_lot(mid)["status"] == "pending"
+
+
+def test_gauge_samples_are_kept_while_the_lot_is_not_released_and_are_never_the_first_article(env):
+    app, c = env
+    mid = make_monitor(c["eng"])
+    ack(c["oper"], mid)
+    ack(c["eng"], mid)
+    c["oper"].post(f"/api/monitors/{mid}/context", json={"lot": "A"})
+    users, svc = _users(app), app.state.monitors
+    auto = svc.add_point(mid, OK_SAMPLE, "OPC UA", {"source": "opcua"}, None, users["eng"], automatic=True)
+    assert auto["first_article"] is None and auto["point"]["tags"] == {"source": "opcua", "lot": "A", "lot_released": "no"}
+    assert svc.store.current_lot(mid)["status"] == "pending"
+    assert enter(c["oper"], mid, OK_SAMPLE)["first_article"]["result"] == "awaiting_approval"
+    auto2 = svc.add_point(mid, OK_SAMPLE, "OPC UA", {"source": "opcua"}, None, users["eng"], automatic=True)  # kept while the leader has not confirmed
+    assert auto2["point"]["tags"]["lot_released"] == "no"
+    c["lead"].post(f"/api/monitors/{mid}/lot/approve")
+    auto3 = svc.add_point(mid, OK_SAMPLE, "OPC UA", {"source": "opcua"}, None, users["eng"], automatic=True)
+    assert "lot_released" not in auto3["point"]["tags"]

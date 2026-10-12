@@ -253,7 +253,8 @@ class MonitorStore:
     def start_lot(self, monitor_id: int, lot: str, shift: str, note: str, by: str, required: bool) -> dict:
         now = now_iso()
         with self.db.tx():
-            self.db.execute("UPDATE monitor_lots SET status = 'superseded' WHERE monitor_id = ? AND status = 'pending'", (monitor_id,))
+            # a lot that never got its first article released (waiting for it, or for the leader) is replaced: it is never released
+            self.db.execute("UPDATE monitor_lots SET status = 'superseded' WHERE monitor_id = ? AND status IN ('pending', 'approval')", (monitor_id,))
             cur = self.db.execute(
                 "INSERT INTO monitor_lots (monitor_id, lot, shift, started_at, started_by, note, status, released_at, released_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (monitor_id, lot, shift, now, by, note, "pending" if required else "released", "" if required else now, "" if required else by))
@@ -273,14 +274,23 @@ class MonitorStore:
     def await_approval(self, lot_id: int, seq: int, user_id: int, by: str) -> None:
         self.db.execute("UPDATE monitor_lots SET status = 'approval', first_seq = ?, first_user_id = ?, first_by = ?, attempts = attempts + 1 WHERE id = ?", (seq, user_id, by, lot_id))
 
-    def approve_lot(self, lot_id: int, by: str) -> None:
-        self.db.execute("UPDATE monitor_lots SET status = 'released', released_at = ?, released_by = ?, approved_by = ? WHERE id = ?", (now_iso(), by, by, lot_id))
+    def approve_lot(self, lot_id: int, by: str, first_seq: int) -> bool:
+        """Only a lot that still waits for this first article is released. False when it was changed in between."""
+        cur = self.db.execute("UPDATE monitor_lots SET status = 'released', released_at = ?, released_by = ?, approved_by = ? WHERE id = ? AND status = 'approval' AND first_seq = ?",
+                              (now_iso(), by, by, lot_id, first_seq))
+        return cur.rowcount == 1
 
     def approvals_waiting(self) -> int:
         return self.db.one("SELECT COUNT(*) AS n FROM monitor_lots WHERE status = 'approval'")["n"]
 
-    def reopen_lot(self, lot_id: int) -> None:
-        self.db.execute("UPDATE monitor_lots SET status = 'pending', first_seq = NULL, first_user_id = NULL, first_by = '', released_at = '', released_by = '', approved_by = '' WHERE id = ?", (lot_id,))
+    def reopen_lot(self, lot_id: int, expect: str | None = None, first_seq: int | None = None) -> bool:
+        """Back to waiting for a first article. With `expect` only from that state (and that first article): False when it was changed in between."""
+        sql = "UPDATE monitor_lots SET status = 'pending', first_seq = NULL, first_user_id = NULL, first_by = '', released_at = '', released_by = '', approved_by = '' WHERE id = ?"
+        args: tuple = (lot_id,)
+        if expect is not None:
+            sql += " AND status = ? AND first_seq IS ?"
+            args = (lot_id, expect, first_seq)
+        return self.db.execute(sql, args).rowcount == 1
 
     def has_ack(self, monitor_id: int, user_id: int, ocap_rev: int) -> bool:
         return self.db.one("SELECT 1 FROM monitor_acks WHERE monitor_id = ? AND user_id = ? AND ocap_rev = ?", (monitor_id, user_id, ocap_rev)) is not None
