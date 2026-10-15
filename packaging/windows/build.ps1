@@ -17,11 +17,13 @@ param(
   [Parameter(Mandatory = $true)][string]$PythonZipSha256,
   [string]$OutDir = (Join-Path $PSScriptRoot "..\..\dist"),
   [string]$Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+  [string]$BuildPython = "",  # python.exe of the same minor version that builds the wheels; empty: the py launcher ("py -3.11")
   [switch]$WithOpcUa
 )
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $minor = ($PythonVersion -split "\.")[0..1] -join "."
+function Invoke-BuildPython { if ($BuildPython) { & $BuildPython @args } else { & py "-$minor" @args } }
 $build = Join-Path $root "build\windows"
 $app = Join-Path $build "app"
 if (Test-Path $build) { Remove-Item -Recurse -Force $build }
@@ -44,9 +46,9 @@ Add-Content -Path $pth.FullName -Value "..\site-packages"
 $extras = if ($WithOpcUa) { "web,sign,opcua" } else { "web,sign" }
 # the program itself is built into a wheel first; then it and its packages are installed from wheels only (no package is compiled on the build machine)
 $wheels = Join-Path $build "wheels"
-& py "-$minor" -m pip wheel --no-deps --wheel-dir $wheels "$root"
+Invoke-BuildPython -m pip wheel --no-deps --wheel-dir $wheels "$root"
 if ($LASTEXITCODE -ne 0) { throw "the wheel of the program could not be built" }
-& py "-$minor" -m pip install --no-warn-script-location --only-binary=:all: --find-links $wheels --target (Join-Path $app "site-packages") "spc[$extras]==$version"
+Invoke-BuildPython -m pip install --no-warn-script-location --only-binary=:all: --find-links $wheels --target (Join-Path $app "site-packages") "spc[$extras]==$version"
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 
 # 3. the manifest of the release (SHA-256 of every file, locked package versions)

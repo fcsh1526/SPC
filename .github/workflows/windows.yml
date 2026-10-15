@@ -1,0 +1,181 @@
+# Windows test of SPC on a GitHub-hosted Windows Server machine.
+#   tests:     the whole test suite (unit, API, browser e2e) on Windows.
+#   installer: build the installer with build.ps1 (embedded Python, release manifest, IQ/OQ of the build, Inno Setup),
+#              install it unattended, check the running server, the qualification record, the server lock, backup and restore,
+#              install it again over the data (the upgrade path), uninstall it and check that the data stay.
+# The installer, the setup logs and the qualification records are kept as artifacts of the run.
+name: Windows
+
+on:
+  push:
+    branches: [main, master, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11.9"   # the embedded Python of the installer; the build Python has the same minor version
+  PYTHONUTF8: "1"
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the program and the test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" playwright
+          python -m playwright install chromium
+      - name: Test suite
+        run: python -m pytest -q -p no:cacheprovider --junitxml=test-results.xml
+      - name: Keep the test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-results
+          path: test-results.xml
+
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DATA: C:\SPC-Data
+      APP: C:\Program Files\SPC
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        id: py
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Inno Setup
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup 6 is not installed" }
+
+      - name: SHA-256 of the embedded Python
+        # Set the repository variable PYTHON_EMBED_SHA256 to the value published by python.org. Without it the hash of this download is taken
+        # as it is (trust on first use): good enough to test the build, not for a release.
+        run: |
+          $h = "${{ vars.PYTHON_EMBED_SHA256 }}"
+          if (-not $h) {
+            $zip = Join-Path $env:RUNNER_TEMP "embed.zip"
+            Invoke-WebRequest "https://www.python.org/ftp/python/$env:PYTHON_VERSION/python-$env:PYTHON_VERSION-embed-amd64.zip" -OutFile $zip
+            $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+            Write-Host "::warning::PYTHON_EMBED_SHA256 is not set; the downloaded embedded Python ($h) was not checked against python.org. Not for a release."
+          }
+          "PY_SHA=$h" >> $env:GITHUB_ENV
+
+      - name: Build the installer (includes IQ/OQ of the build)
+        run: .\packaging\windows\build.ps1 -PythonVersion $env:PYTHON_VERSION -PythonZipSha256 $env:PY_SHA -BuildPython "${{ steps.py.outputs.python-path }}"
+
+      - name: Install unattended
+        run: |
+          $pw = Join-Path $env:RUNNER_TEMP "pw.txt"
+          "Ci-$([guid]::NewGuid().ToString('N'))" | Set-Content $pw -Encoding ascii
+          "SPC_PW_FILE=$pw" >> $env:GITHUB_ENV
+          $exe = (Get-ChildItem dist\SPC-Setup-*.exe | Select-Object -First 1).FullName
+          "SPC_SETUP=$exe" >> $env:GITHUB_ENV
+          $log = Join-Path $env:RUNNER_TEMP "setup-1-install.log"
+          $p = Start-Process $exe -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$log`"", "/DATADIR=`"$env:DATA`"", "/ADMINPWFILE=`"$pw`""
+          Get-Content $log | Select-String "SPC:" | ForEach-Object { $_.Line }
+          if ($p.ExitCode -ne 0) { throw "setup ended with code $($p.ExitCode)" }
+          if (-not (Select-String -Path $log -Pattern "SPC: result ok" -Quiet)) { throw "setup did not finish its steps (see the log)" }
+          if (Test-Path "$env:RUNNER_TEMP\spc-first-password.txt") { throw "a password file was left behind" }
+
+      - name: Check the installed program
+        run: |
+          # the server task answers
+          $ok = $false
+          foreach ($i in 1..60) {
+            try { $meta = Invoke-RestMethod "http://127.0.0.1:8000/api/meta"; $ok = $true; break } catch { Start-Sleep -Seconds 2 }
+          }
+          if (-not $ok) { Get-ScheduledTask -TaskName "SPC Server" | Format-List *; throw "the server does not answer" }
+          Write-Host "server version $($meta.version)"
+          # the administrator can sign in
+          $pw = (Get-Content $env:SPC_PW_FILE -TotalCount 1)
+          $s = $null
+          $r = Invoke-WebRequest "http://127.0.0.1:8000/api/auth/login" -Method Post -ContentType "application/json" -Body (@{ username = "admin"; password = $pw } | ConvertTo-Json) -SessionVariable s
+          if ($r.StatusCode -ne 200) { throw "login failed" }
+          # the qualification record of the installation: passed and unchanged
+          $rec = Get-ChildItem "$env:DATA\qualification\IQOQ-*.json" | Select-Object -First 1
+          if (-not $rec) { throw "no IQ/OQ record in $env:DATA\qualification" }
+          $verdict = (Get-Content $rec.FullName -Raw | ConvertFrom-Json).verdict
+          Write-Host "IQ/OQ record $($rec.Name): $verdict"
+          if ($verdict -eq "fail") { throw "the qualification failed" }
+          & "$env:APP\bin\spc-qualify.cmd" verify $rec.FullName
+          if ($LASTEXITCODE -ne 0) { throw "the record does not verify" }
+
+      - name: Server lock, backup and restore
+        run: |
+          $db = "$env:DATA\spc.sqlite3"
+          $bk = Join-Path $env:RUNNER_TEMP "backup"
+          & "$env:APP\bin\spc-admin.cmd" --db $db backup --to $bk
+          if ($LASTEXITCODE -ne 0) { throw "backup failed" }
+          $file = (Get-ChildItem "$bk\*.sqlite3" | Select-Object -First 1).FullName
+          # the running server holds the lock: a restore must be refused
+          & "$env:APP\bin\spc-admin.cmd" --db $db restore $file --yes
+          if ($LASTEXITCODE -eq 0) { throw "restore was not refused while the server runs" }
+          # a second server on the same database must not start
+          $p = Start-Process "$env:APP\bin\spc-serve.cmd" -ArgumentList "--config", "`"$env:DATA\spc.json`"", "--port", "8011" -PassThru -NoNewWindow
+          if (-not $p.WaitForExit(60000)) { taskkill /T /F /PID $p.Id | Out-Null; throw "a second server started on the same database" }
+          if ($p.ExitCode -eq 0) { throw "a second server started on the same database" }
+          # with the server stopped the restore works
+          Stop-ScheduledTask -TaskName "SPC Server"
+          Start-Sleep -Seconds 5
+          & "$env:APP\bin\spc-admin.cmd" --db $db restore $file --yes
+          if ($LASTEXITCODE -ne 0) { throw "restore failed with the server stopped" }
+          Start-ScheduledTask -TaskName "SPC Server"
+
+      - name: Install again over the data (upgrade path)
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "setup-2-upgrade.log"
+          $p = Start-Process $env:SPC_SETUP -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$log`"", "/DATADIR=`"$env:DATA`""
+          Get-Content $log | Select-String "SPC:" | ForEach-Object { $_.Line }
+          if ($p.ExitCode -ne 0) { throw "setup ended with code $($p.ExitCode)" }
+          if (-not (Select-String -Path $log -Pattern "SPC: backup before the upgrade, code 0" -Quiet)) { throw "no backup before the upgrade" }
+          if (-not (Select-String -Path $log -Pattern "SPC: result ok" -Quiet)) { throw "setup did not finish its steps" }
+          if (-not (Get-ChildItem "$env:DATA\backup\*.sqlite3")) { throw "the backup is missing" }
+          $ok = $false
+          foreach ($i in 1..60) { try { Invoke-RestMethod "http://127.0.0.1:8000/api/meta" | Out-Null; $ok = $true; break } catch { Start-Sleep -Seconds 2 } }
+          if (-not $ok) { throw "the server does not answer after the upgrade" }
+          $pw = (Get-Content $env:SPC_PW_FILE -TotalCount 1)
+          Invoke-WebRequest "http://127.0.0.1:8000/api/auth/login" -Method Post -ContentType "application/json" -Body (@{ username = "admin"; password = $pw } | ConvertTo-Json) | Out-Null
+
+      - name: Uninstall; the data stay
+        run: |
+          $p = Start-Process "$env:APP\unins000.exe" -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          Start-Sleep -Seconds 5
+          if (Get-ScheduledTask -TaskName "SPC Server" -ErrorAction SilentlyContinue) { throw "the server task was not removed" }
+          if (-not (Test-Path "$env:DATA\spc.sqlite3")) { throw "the uninstaller removed the database" }
+
+      - name: Collect the records
+        if: always()
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "records"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\setup-*.log" $out -ErrorAction SilentlyContinue
+          if (Test-Path "$env:DATA\qualification") { Copy-Item -Recurse "$env:DATA\qualification" (Join-Path $out "site-qualification") -ErrorAction SilentlyContinue }
+          "RECORDS=$out" >> $env:GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-installer
+          path: |
+            dist/
+            ${{ env.RECORDS }}

@@ -95,6 +95,8 @@ cd packaging\windows
 > 6. https 自簽憑證與防火牆選項。
 > 發現的問題先修再交付客戶。
 
+**Windows 自動測試（GitHub Actions，`.github/workflows/windows.yml`）**：每次推送在 GitHub 的 Windows Server 虛擬機上：跑完整測試；用 `build.ps1` 建置安裝程式（含建置時的 IQ/OQ）；無人值守安裝；檢查伺服器回應、管理員登入、IQ/OQ 記錄通過且未被更改；伺服器運行中還原被拒、同一資料庫無法啟動第二個伺服器、停止後可還原；再安裝一次（升級路徑：先備份、資料保留）；解除安裝後資料仍在、工作已移除。安裝檔、安裝記錄與確認記錄保存為該次執行的 artifact。上面第 3 項（重開機）、第 6 項（https 與防火牆）與實際操作畫面仍需人工在實機確認。內嵌 Python 的 SHA-256 請設為 repository variable `PYTHON_EMBED_SHA256`（取 python.org 公布的值）；未設定時測試流程採用下載當下的值並發出警告，該次產物不可作為正式版。
+
 ## 9. Linux
 
 沒有安裝程式；用 pip 安裝後同一組指令：
@@ -112,6 +114,7 @@ python3 -m venv /opt/spc && /opt/spc/bin/pip install "spc[web,sign]"
 
 - 伺服器是排程工作，不是 Windows 服務：功能足夠（開機啟動、自動重啟），但不出現在「服務」清單。
 - 安裝程式的介面是英文（Inno Setup 預設）；文件與軟體介面有繁體中文。
-- 沒有無人值守（`/SILENT`）安裝模式、沒有自動更新、沒有授權機制、安裝程式**沒有程式碼簽章**（Windows SmartScreen 會警告「未知的發行者」，需要簽章憑證才能消除）。
+- 無人值守安裝：`SPC-Setup-<版本>.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="setup.log" /DATADIR="D:\SPC" /PORT=8000 /ADMIN=admin /ADMINPWFILE="pw.txt" [/HOST=0.0.0.0] [/TLS] [/FIREWALL] [/NOOQ]`。密碼檔第一行是第一位管理員的密碼（只有資料夾裡還沒有資料庫時需要），安裝程式不會刪除你給的檔案，請自行刪除。記錄檔中每個步驟有一行 `SPC: …`，最後一行是 `SPC: result ok` 或 `SPC: result failed …`。
+- 沒有沒有自動更新、沒有授權機制、安裝程式**沒有程式碼簽章**（Windows SmartScreen 會警告「未知的發行者」，需要簽章憑證才能消除）。
 - 單機 SQLite：適合單一廠區、數十位同時使用者；多廠區或大量連續寫入時需要 PostgreSQL（架構已預留，尚未實作）。
 - IQ 的「套件版本鎖定」比對的是建置時安裝的所有套件版本；若客戶端另外裝了套件，只會標示差異，不會失敗。
