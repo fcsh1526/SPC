@@ -119,20 +119,23 @@ var
   Port: Integer;
 begin
   Result := True;
+  // an unattended installation passes the pages too: a refusal here would stop it for ever without a word, so the values are checked
+  // after the files are copied, where a missing password or a wrong port ends with "SPC: result failed ..." in the log
+  if WizardSilent then Exit;
   if CurPageID = NetPage.ID then begin
     Port := StrToIntDef(NetPage.Values[1], 0);
     if (Port < 1) or (Port > 65535) then begin
-      MsgBox('The port must be a number from 1 to 65535.', mbError, MB_OK);
+      SuppressibleMsgBox('The port must be a number from 1 to 65535.', mbError, MB_OK, IDOK);
       Result := False;
     end;
   end;
   if CurPageID = AdminPage.ID then begin
     if not FileExists(DataPage.Values[0] + '\spc.sqlite3') then begin
       if (Trim(AdminPage.Values[0]) = '') or (AdminPage.Values[1] = '') then begin
-        MsgBox('Give the name and the password of the first administrator.', mbError, MB_OK);
+        SuppressibleMsgBox('Give the name and the password of the first administrator.', mbError, MB_OK, IDOK);
         Result := False;
       end else if AdminPage.Values[1] <> AdminPage.Values[2] then begin
-        MsgBox('The two passwords differ.', mbError, MB_OK);
+        SuppressibleMsgBox('The two passwords differ.', mbError, MB_OK, IDOK);
         Result := False;
       end;
     end;
