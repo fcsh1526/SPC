@@ -3,7 +3,8 @@
 
     python3 tools/extract_iso11462_3.py docs/757270310-ISO-TR-11462-3-2020.pdf src/spc/validation/data/iso_tr_11462_3.json
 
-Needs `pdftotext` (poppler). The values of Annex A are taken as printed. Every number that is read is kept as the text that was printed
+Needs `pdftotext` of poppler; the data file was read with poppler 24.02 (other versions, and the xpdf-based pdftotext, can lay out the tables of Annex A
+differently, and the script then stops with a message). The values of Annex A are taken as printed. Every number that is read is kept as the text that was printed
 (for example "14.066349"), because the number of printed decimals gives the tolerance of a comparison. The script checks what it can:
 that every data set has the printed total sample size and that every row of Annex A has the cells that the sizes of the sets require.
 The data sets may be used in their original format without modification for the purposes of the document (Annex A of the standard).

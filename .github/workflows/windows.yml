@@ -92,9 +92,7 @@ jobs:
           $exe = (Get-ChildItem dist\SPC-Setup-*.exe | Select-Object -First 1).FullName
           "SPC_SETUP=$exe" >> $env:GITHUB_ENV
           $log = Join-Path $env:RUNNER_TEMP "setup-1-install.log"
-          $p = Start-Process $exe -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$log`"", "/DATADIR=`"$env:DATA`"", "/ADMINPWFILE=`"$pw`""
-          Get-Content $log | Select-String "SPC:" | ForEach-Object { $_.Line }
-          if ($p.ExitCode -ne 0) { throw "setup ended with code $($p.ExitCode)" }
+          .\.github\scripts\run-setup.ps1 -Exe $exe -Log $log -Arguments "/DATADIR=`"$env:DATA`"", "/ADMINPWFILE=`"$pw`""
           if (-not (Select-String -Path $log -Pattern "SPC: result ok" -Quiet)) { throw "setup did not finish its steps (see the log)" }
           if (Test-Path "$env:RUNNER_TEMP\spc-first-password.txt") { throw "a password file was left behind" }
 
@@ -145,9 +143,7 @@ jobs:
       - name: Install again over the data (upgrade path)
         run: |
           $log = Join-Path $env:RUNNER_TEMP "setup-2-upgrade.log"
-          $p = Start-Process $env:SPC_SETUP -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$log`"", "/DATADIR=`"$env:DATA`""
-          Get-Content $log | Select-String "SPC:" | ForEach-Object { $_.Line }
-          if ($p.ExitCode -ne 0) { throw "setup ended with code $($p.ExitCode)" }
+          .\.github\scripts\run-setup.ps1 -Exe $env:SPC_SETUP -Log $log -Arguments "/DATADIR=`"$env:DATA`""
           if (-not (Select-String -Path $log -Pattern "SPC: backup before the upgrade, code 0" -Quiet)) { throw "no backup before the upgrade" }
           if (-not (Select-String -Path $log -Pattern "SPC: result ok" -Quiet)) { throw "setup did not finish its steps" }
           if (-not (Get-ChildItem "$env:DATA\backup\*.sqlite3")) { throw "the backup is missing" }
@@ -159,7 +155,7 @@ jobs:
 
       - name: Uninstall; the data stay
         run: |
-          $p = Start-Process "$env:APP\unins000.exe" -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          .\.github\scripts\run-setup.ps1 -Exe "$env:APP\unins000.exe" -Log (Join-Path $env:RUNNER_TEMP "setup-3-uninstall.log") -TimeoutMinutes 5
           Start-Sleep -Seconds 5
           if (Get-ScheduledTask -TaskName "SPC Server" -ErrorAction SilentlyContinue) { throw "the server task was not removed" }
           if (-not (Test-Path "$env:DATA\spc.sqlite3")) { throw "the uninstaller removed the database" }
@@ -170,6 +166,7 @@ jobs:
           $out = Join-Path $env:RUNNER_TEMP "records"
           New-Item -ItemType Directory -Force $out | Out-Null
           Copy-Item "$env:RUNNER_TEMP\setup-*.log" $out -ErrorAction SilentlyContinue
+          if (Test-Path "$env:DATA\logs\install.log") { Copy-Item "$env:DATA\logs\install.log" $out; Write-Host "---- install.log (last lines)"; Get-Content "$env:DATA\logs\install.log" -Tail 60 }
           if (Test-Path "$env:DATA\qualification") { Copy-Item -Recurse "$env:DATA\qualification" (Join-Path $out "site-qualification") -ErrorAction SilentlyContinue }
           "RECORDS=$out" >> $env:GITHUB_ENV
       - uses: actions/upload-artifact@v4

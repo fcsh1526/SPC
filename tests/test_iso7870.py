@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -104,7 +105,18 @@ def test_type_1_capability_of_a_multi_state_process():
         ms.type1_capability({"a": [1.0, 2.0]}, 0, 3)
 
 
-@pytest.mark.skipif(shutil.which("pdftotext") is None or not (ROOT / "docs" / "757270310-ISO-TR-11462-3-2020.pdf").exists(), reason="needs pdftotext and the PDF of the standard")
+def _poppler_version():
+    """The version of pdftotext when it is the one of poppler, else None. The layout of the tables of Annex A depends on it."""
+    if shutil.which("pdftotext") is None:
+        return None
+    r = subprocess.run(["pdftotext", "-v"], capture_output=True, text=True)
+    text = r.stdout + r.stderr
+    m = re.search(r"version (\d+)\.(\d+)", text)
+    return (int(m.group(1)), int(m.group(2))) if m and "poppler" in text.lower() else None
+
+
+@pytest.mark.skipif(_poppler_version() is None or _poppler_version()[0] != 24 or not (ROOT / "docs" / "757270310-ISO-TR-11462-3-2020.pdf").exists(),
+                    reason="needs the PDF of the standard and the pdftotext of poppler 24 that the data file was read with (another layout of Annex A is not an error of the program)")
 def test_the_data_file_is_what_the_extraction_tool_reads_from_the_pdf(tmp_path):
     out = tmp_path / "iso.json"
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "extract_iso11462_3.py"), str(ROOT / "docs" / "757270310-ISO-TR-11462-3-2020.pdf"), str(out)], capture_output=True, text=True)

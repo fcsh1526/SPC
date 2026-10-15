@@ -3,6 +3,7 @@
 ; Order of the steps: stop the server and back up an existing database -> copy the files -> first setup (folders, database, administrator, settings, certificate)
 ;   -> installation qualification (IQ) -> optional operational qualification (OQ) -> register the server task and start it. A failed qualification leaves the server stopped.
 ;
+; Messages after the wizard use SuppressibleMsgBox: a plain MsgBox is shown also with /SUPPRESSMSGBOXES and would hold an unattended installation for ever.
 ; Unattended installation (IT deployment, the Windows test of the build):
 ;   SPC-Setup-x.y.z.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="setup.log" /DATADIR="D:\SPC" /HOST=127.0.0.1 /PORT=8000 /ADMIN=admin /ADMINPWFILE="pw.txt" [/TLS] [/FIREWALL] [/NOOQ]
 ;   /ADMINPWFILE names a file whose first line is the password of the first administrator (needed only when the data folder has no database yet); the installer
@@ -154,9 +155,15 @@ begin
   if (Result = '') and (F <> '') and LoadStringsFromFile(F, Lines) and (GetArrayLength(Lines) > 0) then Result := Lines[0];
 end;
 
+// runs a step of the installation; what it prints goes to <data folder>\logs\install.log, so that a failed step can be read afterwards
 function Run(const Exe, Params: String; var Code: Integer): Boolean;
+var
+  Logs: String;
 begin
-  Result := Exec(Exe, Params, ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code);
+  Logs := DataPage.Values[0] + '\logs';
+  ForceDirectories(Logs);
+  SaveStringToFile(Logs + '\install.log', #13#10 + '== ' + GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':') + '  ' + ExtractFileName(Exe) + ' ' + Params + #13#10, True);
+  Result := Exec(ExpandConstant('{cmd}'), '/C ""' + Exe + '" ' + Params + ' >> "' + Logs + '\install.log" 2>&1"', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -176,7 +183,7 @@ begin
         if not Run(Py, '-m spc.admin --db "' + Data + '\spc.sqlite3" backup --to "' + Data + '\backup"', Code) then Code := -1;
         Report('backup before the upgrade, code ' + IntToStr(Code));
         if Code <> 0 then
-          if MsgBox('The backup of the existing database failed. Continue without it?', mbConfirmation, MB_YESNO) = IDNO then
+          if SuppressibleMsgBox('The backup of the existing database failed. Continue without it?', mbConfirmation, MB_YESNO, IDNO) = IDNO then
             RaiseException('Installation stopped: the backup failed.');
       end;
     end;
@@ -188,7 +195,7 @@ begin
     if not ExistingDb then begin
       if AdminPassword() = '' then begin
         Report('result failed: no password for the first administrator (give /ADMINPWFILE)');
-        MsgBox('No password for the first administrator. The server was not started.', mbError, MB_OK);
+        SuppressibleMsgBox('No password for the first administrator. The server was not started.', mbError, MB_OK, IDOK);
         Exit;
       end;
       Pw := ExpandConstant('{tmp}\spc-first-password.txt');
@@ -200,7 +207,7 @@ begin
     Report('first setup, code ' + IntToStr(Code));
     if Code <> 0 then begin
       Report('result failed: first setup');
-      MsgBox('The first setup failed (code ' + IntToStr(Code) + '). The server was not started.', mbError, MB_OK);
+      SuppressibleMsgBox('The first setup failed (code ' + IntToStr(Code) + '). The server was not started.', mbError, MB_OK, IDOK);
       Exit;
     end;
     // installation qualification (and operational qualification when asked); a failed check keeps the server stopped
@@ -211,7 +218,7 @@ begin
     Report('qualification, code ' + IntToStr(Code));
     if Code <> 0 then begin
       Report('result failed: qualification');
-      MsgBox('The qualification found a failed check. The server was not started. Read the record in ' + LogDir, mbError, MB_OK);
+      SuppressibleMsgBox('The qualification found a failed check. The server was not started. Read the record in ' + LogDir, mbError, MB_OK, IDOK);
       Exit;
     end;
     Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\register-task.ps1') + '" -AppDir "' + ExpandConstant('{app}') + '" -DataDir "' + Data + '" -Port ' + NetPage.Values[1];
@@ -220,7 +227,7 @@ begin
     Report('server task, code ' + IntToStr(Code));
     if Code <> 0 then begin
       Report('result failed: server task');
-      MsgBox('The server task could not be registered (code ' + IntToStr(Code) + ').', mbError, MB_OK);
+      SuppressibleMsgBox('The server task could not be registered (code ' + IntToStr(Code) + ').', mbError, MB_OK, IDOK);
       Exit;
     end;
     Exec('schtasks.exe', '/Run /TN "SPC Server"', '', SW_HIDE, ewWaitUntilTerminated, Code);
