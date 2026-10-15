@@ -73,7 +73,7 @@ def test_report_template_refuses_bad_settings(bad):
     "data:image/png;base64,!!!notbase64", "https://example.com/logo.png", "javascript:alert(1)",
     "data:image/png;base64," + base64.b64encode(b"GIF89a not a png").decode(),  # content does not match the type
     png_uri(extra=b"\x00" * (150 * 1024)),  # too large
-])
+], ids=["svg", "bad_base64", "url", "javascript", "wrong_content", "too_large"])  # short names: pytest puts the name into an environment variable, limited to 32767 characters on Windows
 def test_the_logo_must_be_a_real_small_png_or_jpeg(logo):
     with pytest.raises(ValueError):
         ReportTemplate.from_dict({"logo": logo})

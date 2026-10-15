@@ -24,7 +24,9 @@ FORMULA = {"11": "l1", "12": "l2", "13": "l3", "14": "l4", "15": "d1", "16": "d2
 
 
 def text_of(path: str) -> list[str]:
-    return subprocess.run(["pdftotext", "-layout", path, "-"], check=True, capture_output=True, text=True).stdout.split("\n")
+    # the same text on every system: UTF-8 and line ends of Unix also from the pdftotext of Windows (Git for Windows, MSYS2)
+    out = subprocess.run(["pdftotext", "-layout", "-enc", "UTF-8", "-eol", "unix", path, "-"], check=True, capture_output=True).stdout
+    return out.decode("utf-8").replace("\r\n", "\n").split("\n")
 
 
 def norm(s: str) -> str:

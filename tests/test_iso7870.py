@@ -107,5 +107,6 @@ def test_type_1_capability_of_a_multi_state_process():
 @pytest.mark.skipif(shutil.which("pdftotext") is None or not (ROOT / "docs" / "757270310-ISO-TR-11462-3-2020.pdf").exists(), reason="needs pdftotext and the PDF of the standard")
 def test_the_data_file_is_what_the_extraction_tool_reads_from_the_pdf(tmp_path):
     out = tmp_path / "iso.json"
-    subprocess.run([sys.executable, str(ROOT / "tools" / "extract_iso11462_3.py"), str(ROOT / "docs" / "757270310-ISO-TR-11462-3-2020.pdf"), str(out)], check=True, capture_output=True)
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "extract_iso11462_3.py"), str(ROOT / "docs" / "757270310-ISO-TR-11462-3-2020.pdf"), str(out)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-3000:]
     assert json.loads(out.read_text(encoding="utf-8")) == json.loads((ROOT / "src" / "spc" / "validation" / "data" / "iso_tr_11462_3.json").read_text(encoding="utf-8"))

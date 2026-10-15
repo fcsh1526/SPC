@@ -162,7 +162,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Code: Integer;
-  Py, Data, Pw, Args, Log: String;
+  Py, Data, Pw, Args, LogDir: String;
 begin
   Data := DataPage.Values[0];
   Pw := '';
@@ -204,14 +204,14 @@ begin
       Exit;
     end;
     // installation qualification (and operational qualification when asked); a failed check keeps the server stopped
-    Log := Data + '\qualification';
-    if OqCheck.Checked then Args := '-m spc.qualification all --quiet --out "' + Log + '" --db "' + Data + '\spc.sqlite3" --require-manifest'
-    else Args := '-m spc.qualification iq --out "' + Log + '" --db "' + Data + '\spc.sqlite3" --require-manifest';
+    LogDir := Data + '\qualification';
+    if OqCheck.Checked then Args := '-m spc.qualification all --quiet --out "' + LogDir + '" --db "' + Data + '\spc.sqlite3" --require-manifest'
+    else Args := '-m spc.qualification iq --out "' + LogDir + '" --db "' + Data + '\spc.sqlite3" --require-manifest';
     if not Run(Py, Args, Code) then Code := -1;
     Report('qualification, code ' + IntToStr(Code));
     if Code <> 0 then begin
       Report('result failed: qualification');
-      MsgBox('The qualification found a failed check. The server was not started. Read the record in ' + Log, mbError, MB_OK);
+      MsgBox('The qualification found a failed check. The server was not started. Read the record in ' + LogDir, mbError, MB_OK);
       Exit;
     end;
     Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\register-task.ps1') + '" -AppDir "' + ExpandConstant('{app}') + '" -DataDir "' + Data + '" -Port ' + NetPage.Values[1];
