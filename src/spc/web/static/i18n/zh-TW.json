@@ -2664,5 +2664,9 @@
   "error.first_article_before_lot": "首件的時間早於換批時間（{started_at}）。首件要在換批之後量。",
   "error.busy": "另一個長時間的計算正在進行，請稍後再試。",
   "issue.xlsx_too_large": "這個活頁簿解壓後的資料過大，無法安全讀取。",
-  "lot.ev_before_release_points": "有 {count} 筆量具自動樣本是在本批首件放行之前量的。"
+  "lot.ev_before_release_points": "有 {count} 筆量具自動樣本是在本批首件放行之前量的。",
+  "floor.sum_ok": "受控",
+  "floor.sum_alarm": "警報未結案",
+  "floor.sum_first": "待量首件",
+  "floor.sum_approval": "待組長確認"
 }

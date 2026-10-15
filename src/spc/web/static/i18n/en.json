@@ -2664,5 +2664,9 @@
   "error.first_article_before_lot": "The time of the first article lies before the change of lot ({started_at}). The first article is taken after the change.",
   "error.busy": "Another long calculation is running. Try again in a moment.",
   "issue.xlsx_too_large": "The workbook unpacks to too much data to be read safely.",
-  "lot.ev_before_release_points": "{count} gauge sample(s) were taken before the first article of the lot was released."
+  "lot.ev_before_release_points": "{count} gauge sample(s) were taken before the first article of the lot was released.",
+  "floor.sum_ok": "In control",
+  "floor.sum_alarm": "Open alarms",
+  "floor.sum_first": "First article to measure",
+  "floor.sum_approval": "Waiting for the leader"
 }

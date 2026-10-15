@@ -212,16 +212,27 @@
   function renderFloorTiles() {
     const box = $("#fl-tiles"); box.replaceChildren();
     $("#fl-none").hidden = F.list.length > 0;
+    const counts = { ok: 0, alarm: 0, first: 0, approval: 0 };
     F.list.forEach((m) => {
       const lotOn = m.active && !m.open_incidents && m.first_article !== false && m.lot_state;
       const state = !m.active ? "off" : m.open_incidents ? "alarm" : lotOn && m.lot_state.status === "approval" ? "approval" : lotOn && m.lot_state.status === "pending" ? "first" : "ok";
+      if (state in counts) counts[state] += 1;
       const b = el("button", "fl-tile fl-" + state); b.type = "button";
       b.appendChild(el("span", "fl-tile-name", m.name));
       b.appendChild(el("span", "fl-tile-sub", [m.line, m.characteristic].filter(Boolean).join(" · ")));
-      b.appendChild(el("span", "fl-tile-state", t("floor.state_" + state, { n: m.open_incidents, lot: m.lot_state ? m.lot_state.lot : "" })));
+      const st = el("span", "fl-tile-state");
+      st.append(el("span", "fl-shape"), t("floor.state_" + state, { n: m.open_incidents, lot: m.lot_state ? m.lot_state.lot : "" }));
+      b.appendChild(st);
       b.appendChild(el("span", "fl-tile-last", m.last_point ? t("floor.last_at", { at: when(m.last_point.taken_at) }) : t("floor.no_points")));
       b.addEventListener("click", () => openStation(m.id));
       box.appendChild(b);
+    });
+    const sum = $("#fl-summary"); sum.replaceChildren();  // how many stations are in each state; the shape repeats the color for readers who cannot tell the colors apart
+    sum.hidden = F.list.length === 0;
+    Object.entries(counts).forEach(([k, n]) => {
+      const c = el("div", "fl-sum fl-" + k);
+      c.append(el("span", "fl-shape"), el("span", "", t("floor.sum_" + k)), el("b", "", String(n)));
+      sum.appendChild(c);
     });
   }
   async function openStation(id) {
@@ -447,11 +458,13 @@
     const ctx = floorContext(F.view);
     $("#fl-shift").value = ctx.shift || ""; $("#fl-lot").value = ctx.lot || ""; $("#fl-ctx-note").value = "";
     const chips = $("#fl-shift-chips"); chips.replaceChildren();
+    const mark = () => chips.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.textContent === $("#fl-shift").value.trim())));
     ["floor.shift_day", "floor.shift_evening", "floor.shift_night"].forEach((k) => {
       const b = el("button", "", t(k)); b.type = "button";
-      b.addEventListener("click", () => { $("#fl-shift").value = t(k); });
+      b.addEventListener("click", () => { $("#fl-shift").value = t(k); mark(); });
       chips.appendChild(b);
     });
+    $("#fl-shift").oninput = mark; mark();
     $("#fl-dialog").hidden = false;
     $("#fl-lot").focus();
   }
@@ -1131,6 +1144,16 @@
     const Y = (v) => mt + ((hi - v) * (H - mt - mb)) / (hi - lo);
     const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": title });
     root.appendChild(svg("title", {}, title));
+    if (part.ucl !== null && part.lcl !== null && part.ucl !== undefined && part.lcl !== undefined) {  // the zone between the control limits
+      const up = flat(part.ucl), dn = flat(part.lcl);
+      if (up.length === 1 && dn.length === 1) root.appendChild(svg("rect", { class: "zone", x: ml, y: Y(up[0]), width: W - ml - mr, height: Math.max(0, Y(dn[0]) - Y(up[0])) }));
+      else if (up.length === n && dn.length === n) {
+        const hx = n > 1 ? (W - ml - mr) / (n - 1) / 2 : 0, edge = (i, s) => (s < 0 ? Math.max(ml, X(i) - hx) : Math.min(W - mr, X(i) + hx));
+        const top = up.flatMap((v, i) => [`${edge(i, -1)},${Y(v)}`, `${edge(i, 1)},${Y(v)}`]);
+        const bottom = dn.map((v, i) => [`${edge(i, -1)},${Y(v)}`, `${edge(i, 1)},${Y(v)}`]).reverse().flatMap((p) => p.reverse());
+        root.appendChild(svg("polygon", { class: "zone", points: top.concat(bottom).join(" ") }));
+      }
+    }
     root.appendChild(svg("line", { class: "axis", x1: ml, y1: mt, x2: ml, y2: H - mb }));
     root.appendChild(svg("line", { class: "axis", x1: ml, y1: H - mb, x2: W - mr, y2: H - mb }));
     // Same number of decimals on every tick, chosen from the size of the range.
@@ -1182,6 +1205,7 @@
     }
     const alarmSet = new Set(part.alarms.map((a) => a.index));
     part.values.forEach((v, i) => {
+      if (alarmSet.has(i)) root.appendChild(svg("circle", { class: "ring", cx: X(i), cy: Y(v), r: n > 300 ? 4 : 7 }));
       const c = svg("circle", { class: "dot" + (alarmSet.has(i) ? " alarm" : ""), cx: X(i), cy: Y(v), r: n > 300 ? 1.8 : 3.2 });
       c.appendChild(svg("title", {}, t("result.point", { label: part.labels[i] || i + 1, value: sig(v) })));
       root.appendChild(c);
