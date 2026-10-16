@@ -80,6 +80,15 @@ begin
   end;
 end;
 
+// the port the server uses: the one in spc.json of an existing installation (an upgrade keeps it), else the one of the network page
+function ServerPort(): String;
+var
+  Config: AnsiString;
+begin
+  Result := NetPage.Values[1];
+  if LoadStringFromFile(DataPage.Values[0] + '\spc.json', Config) and (ConfigPort(Config) <> '') then Result := ConfigPort(Config);
+end;
+
 // the address of the start menu entry: the settings of an existing installation win (an upgrade skips the network page, so its fields hold
 // only the defaults), else what was chosen on the network page
 function BrowserUrl(Param: String): String;
@@ -88,9 +97,8 @@ var
   Config: AnsiString;
 begin
   if TlsCheck.Checked then Scheme := 'https' else Scheme := 'http';
-  Port := NetPage.Values[1];
+  Port := ServerPort();
   if LoadStringFromFile(DataPage.Values[0] + '\spc.json', Config) then begin
-    if ConfigPort(Config) <> '' then Port := ConfigPort(Config);
     if Pos('"ssl_certfile"', Config) > 0 then Scheme := 'https' else Scheme := 'http';
   end;
   Result := Scheme + '://localhost:' + Port + '/';
@@ -260,7 +268,7 @@ begin
       SuppressibleMsgBox('The qualification found a failed check. The server was not started. Read the record in ' + LogDir, mbError, MB_OK, IDOK);
       Exit;
     end;
-    Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\register-task.ps1') + '" -AppDir "' + ExpandConstant('{app}') + '" -DataDir "' + Data + '" -Port ' + NetPage.Values[1];
+    Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\register-task.ps1') + '" -AppDir "' + ExpandConstant('{app}') + '" -DataDir "' + Data + '" -Port ' + ServerPort();  // after the first setup: spc.json holds the port in use
     if FirewallCheck.Checked then Args := Args + ' -OpenFirewall';
     if not Run('powershell.exe', Args, Code) then Code := -1;
     Report('server task, code ' + IntToStr(Code));

@@ -162,6 +162,10 @@ jobs:
           $target = if ($entry.Extension -eq ".url") { (Get-Content $entry.FullName | Select-String "^URL=").Line } else { (New-Object -ComObject WScript.Shell).CreateShortcut($entry.FullName).TargetPath }
           Write-Host "start menu entry: $target"
           if ($target -notmatch ":$env:PORT/") { throw "the start menu entry does not open port $env:PORT" }
+          # the server task was registered again with the port of spc.json, not the default of the skipped network page
+          $up = Get-Content (Join-Path $env:DATA "logs\install.log") | Select-String "register-task.ps1" | Select-Object -Last 1
+          Write-Host $up.Line
+          if ($up.Line -notmatch "-Port $env:PORT\b") { throw "the upgrade registered the server task with another port" }
 
       - name: Uninstall; the data stay
         run: |
