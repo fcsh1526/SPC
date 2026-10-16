@@ -7,7 +7,8 @@ param(
   [Parameter(Mandatory = $true)][string]$Exe,
   [Parameter(Mandatory = $true)][string]$Log,
   [string[]]$Arguments = @(),
-  [int]$TimeoutMinutes = 15
+  [int]$TimeoutMinutes = 15,
+  [int]$ExpectExitCode = 0
 )
 $ErrorActionPreference = "Stop"
 $all = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$Log`"") + $Arguments
@@ -21,7 +22,8 @@ if (-not $p.WaitForExit($TimeoutMinutes * 60 * 1000)) {
   throw "setup timed out"
 }
 if (Test-Path $Log) { Get-Content $Log | Select-String "SPC:" | ForEach-Object { $_.Line } }
-if ($p.ExitCode -ne 0) {
+Write-Host "setup exit code $($p.ExitCode)"
+if ($p.ExitCode -ne $ExpectExitCode) {
   if (Test-Path $Log) { Get-Content $Log -Tail 40 }
-  throw "setup ended with code $($p.ExitCode)"
+  throw "setup ended with code $($p.ExitCode), expected $ExpectExitCode"
 }

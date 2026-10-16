@@ -44,12 +44,22 @@ Expand-Archive -Path $zip -DestinationPath (Join-Path $app "python")
 $pth = Get-ChildItem (Join-Path $app "python") -Filter "python*._pth" | Select-Object -First 1
 Add-Content -Path $pth.FullName -Value "..\site-packages"
 $extras = if ($WithOpcUa) { "web,sign,opcua" } else { "web,sign" }
-# the program itself is built into a wheel first; then it and its packages are installed from wheels only (no package is compiled on the build machine)
+# the packages come from the lock file: exact versions and the SHA-256 of every wheel (pip --require-hashes stops at any other file,
+# and at a dependency that the lock file does not hold);
+# the lock files are written by tools/lock_windows.py and change only on purpose. Wheels only: nothing is compiled on the build machine.
+$lock = Join-Path $PSScriptRoot ("requirements-" + ($extras -replace ",", "-") + ".lock")
+if (-not (Test-Path $lock)) { throw "lock file not found: $lock" }
+$site = Join-Path $app "site-packages"
+Invoke-BuildPython -m pip install --no-warn-script-location --only-binary=:all: --require-hashes --target $site -r $lock
+if ($LASTEXITCODE -ne 0) { throw "pip install of the locked packages failed" }
+# then the program itself, built into a wheel, without its dependencies (they are the locked ones above)
 $wheels = Join-Path $build "wheels"
 Invoke-BuildPython -m pip wheel --no-deps --wheel-dir $wheels "$root"
 if ($LASTEXITCODE -ne 0) { throw "the wheel of the program could not be built" }
-Invoke-BuildPython -m pip install --no-warn-script-location --only-binary=:all: --find-links $wheels --target (Join-Path $app "site-packages") "spc[$extras]==$version"
-if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
+$wheel = (Get-ChildItem $wheels -Filter "spc-$version-*.whl" | Select-Object -First 1).FullName
+Invoke-BuildPython -m pip install --no-warn-script-location --no-deps --target $site $wheel
+if ($LASTEXITCODE -ne 0) { throw "pip install of the program failed" }
+# the IQ of step 4 checks that every package the program needs is there in the required version
 
 # 3. the manifest of the release (SHA-256 of every file, locked package versions)
 $py = Join-Path $app "python\python.exe"

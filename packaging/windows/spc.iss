@@ -6,6 +6,8 @@
 ; Messages after the wizard use SuppressibleMsgBox: a plain MsgBox is shown also with /SUPPRESSMSGBOXES and would hold an unattended installation for ever.
 ; Unattended installation (IT deployment, the Windows test of the build):
 ;   SPC-Setup-x.y.z.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="setup.log" /DATADIR="D:\SPC" /HOST=127.0.0.1 /PORT=8000 /ADMIN=admin /ADMINPWFILE="pw.txt" [/TLS] [/FIREWALL] [/NOOQ]
+;   Exit code 0: installed, qualified and started. A step after the copy of the files that fails ends with 11 (no administrator password),
+;   12 (first setup), 13 (qualification), 14 (server task); Inno Setup's own codes (1 to 8) mean the setup did not run or was stopped.
 ;   /ADMINPWFILE names a file whose first line is the password of the first administrator (needed only when the data folder has no database yet); the installer
 ;   copies it and does not delete the given file: delete it yourself. Each step writes "SPC: ..." into the setup log, and the last line is "SPC: result ok" or "SPC: result failed ...".
 
@@ -53,21 +55,52 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 [Code]
 var
   DataPage, NetPage, AdminPage: TInputQueryWizardPage;
-  DataDirEdit: TNewEdit;
   TlsCheck, OqCheck, FirewallCheck: TNewCheckBox;
   ExistingDb: Boolean;
+  FailCode: Integer;  // the exit code of an installation whose files were copied but a step after it failed (0: none failed)
 
 function DataDir(Param: String): String;
 begin
   Result := DataPage.Values[0];
 end;
 
+// the port written in spc.json ('"port": 8000'), or '' when the file or the key is missing
+function ConfigPort(const Text: String): String;
+var
+  I: Integer;
+begin
+  Result := '';
+  I := Pos('"port":', Text);
+  if I = 0 then Exit;
+  I := I + Length('"port":');
+  while (I <= Length(Text)) and (Text[I] = ' ') do I := I + 1;
+  while (I <= Length(Text)) and (Text[I] >= '0') and (Text[I] <= '9') do begin
+    Result := Result + Text[I];
+    I := I + 1;
+  end;
+end;
+
+// the address of the start menu entry: the settings of an existing installation win (an upgrade skips the network page, so its fields hold
+// only the defaults), else what was chosen on the network page
 function BrowserUrl(Param: String): String;
 var
-  Scheme: String;
+  Scheme, Port: String;
+  Config: AnsiString;
 begin
   if TlsCheck.Checked then Scheme := 'https' else Scheme := 'http';
-  Result := Scheme + '://localhost:' + NetPage.Values[1] + '/';
+  Port := NetPage.Values[1];
+  if LoadStringFromFile(DataPage.Values[0] + '\spc.json', Config) then begin
+    if ConfigPort(Config) <> '' then Port := ConfigPort(Config);
+    if Pos('"ssl_certfile"', Config) > 0 then Scheme := 'https' else Scheme := 'http';
+  end;
+  Result := Scheme + '://localhost:' + Port + '/';
+end;
+
+// a failed step after the files were copied ends the setup with this code, also in an unattended installation:
+// 11 no password for the first administrator, 12 first setup, 13 qualification (IQ/OQ), 14 server task
+function GetCustomSetupExitCode: Integer;
+begin
+  Result := FailCode;
 end;
 
 procedure InitializeWizard;
@@ -198,6 +231,7 @@ begin
     if not ExistingDb then begin
       if AdminPassword() = '' then begin
         Report('result failed: no password for the first administrator (give /ADMINPWFILE)');
+        FailCode := 11;
         SuppressibleMsgBox('No password for the first administrator. The server was not started.', mbError, MB_OK, IDOK);
         Exit;
       end;
@@ -210,6 +244,7 @@ begin
     Report('first setup, code ' + IntToStr(Code));
     if Code <> 0 then begin
       Report('result failed: first setup');
+      FailCode := 12;
       SuppressibleMsgBox('The first setup failed (code ' + IntToStr(Code) + '). The server was not started.', mbError, MB_OK, IDOK);
       Exit;
     end;
@@ -221,6 +256,7 @@ begin
     Report('qualification, code ' + IntToStr(Code));
     if Code <> 0 then begin
       Report('result failed: qualification');
+      FailCode := 13;
       SuppressibleMsgBox('The qualification found a failed check. The server was not started. Read the record in ' + LogDir, mbError, MB_OK, IDOK);
       Exit;
     end;
@@ -230,6 +266,7 @@ begin
     Report('server task, code ' + IntToStr(Code));
     if Code <> 0 then begin
       Report('result failed: server task');
+      FailCode := 14;
       SuppressibleMsgBox('The server task could not be registered (code ' + IntToStr(Code) + ').', mbError, MB_OK, IDOK);
       Exit;
     end;

@@ -12,6 +12,7 @@ import http.cookiejar
 import json
 import math
 import tempfile
+import secrets
 import threading
 import time
 import urllib.error
@@ -23,7 +24,6 @@ import numpy as np
 
 from spc.qualification.iq import check
 
-PASSWORD = "Oq-Check#2026-secret"
 LSL, USL = 9.5, 10.5
 
 
@@ -116,8 +116,9 @@ def run_oq(workdir: str | Path | None = None, progress=None, artifacts: dict | N
     try:
         db = Database(db_file)
         auth = AuthService(db)
+        password = "Oq-" + secrets.token_urlsafe(18)  # new for every run: the throwaway accounts of the check never share a known password
         for name, role in (("oq-admin", "admin"), ("oq-engineer", "engineer"), ("oq-viewer", "viewer")):
-            auth.create_user(name, PASSWORD, role, "")
+            auth.create_user(name, password, role, "")
         app = create_app(db, auth=auth)
         values = np.array(reference_values())
         with Server(app) as srv:
@@ -129,7 +130,7 @@ def run_oq(workdir: str | Path | None = None, progress=None, artifacts: dict | N
             out.append(check("oq_requires_login", "an API call without login is refused", f"HTTP {anon.request('GET', '/api/datasets')[0]}", "pass" if anon.request("GET", "/api/datasets")[0] == 401 else "fail"))
             bad = Client(srv.base).login("oq-admin", "wrong password")[0]
             out.append(check("oq_wrong_password", "a wrong password is refused", f"HTTP {bad}", "pass" if bad == 401 else "fail"))
-            codes = [c.login(u, PASSWORD)[0] for c, u in ((admin, "oq-admin"), (eng, "oq-engineer"), (view, "oq-viewer"))]
+            codes = [c.login(u, password)[0] for c, u in ((admin, "oq-admin"), (eng, "oq-engineer"), (view, "oq-viewer"))]
             out.append(check("oq_login", "three users sign in", str(codes), "pass" if codes == [200, 200, 200] else "fail"))
             params = {"value": "diameter", "subgroup": "lot", "filename": "oq.csv"}
             deny = view.request("POST", "/api/datasets", raw=reference_csv(), params=params)[0]

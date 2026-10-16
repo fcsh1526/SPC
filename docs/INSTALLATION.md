@@ -84,9 +84,11 @@ cd packaging\windows
 .\build.ps1 -PythonVersion 3.11.9 -PythonZipSha256 <python-3.11.9-embed-amd64.zip 的 SHA-256>
 ```
 
-建置步驟：下載內嵌 Python 並**核對 SHA-256**（不符即停止）→ 把程式與套件（`web`、`sign` 額外套件）裝進 `app\site-packages` → 寫入 **RELEASE.json** → 對建置結果跑 **IQ/OQ 自我測試**（失敗即停止）→ 打包安裝程式。輸出在 `dist\`：`SPC-Setup-<版本>.exe`、一份文字檔（安裝程式的 SHA-256 與發行清單摘要，給交貨單）、`build-qualification-<版本>\`（建置時的確認記錄）。
+鎖定檔由 `tools/lock_windows.py` 產生（用 Windows 的環境條件計算依賴），只有刻意更新套件版本時才重跑；重跑後要跑測試再提交，新的版本就是一次發行內容的變更。Windows 自動測試也用同一份鎖定檔安裝，所以測試的套件版本就是安裝程式裡的版本。
 
-> **重要：安裝程式的腳本（`build.ps1`、`spc.iss`、`register-task.ps1`）寫於 Linux 環境，沒有在 Windows 上實際執行過。** 測試只確認它們呼叫的指令與選項存在（`tests/test_qualification.py`）。第一次在 Windows 建置時請逐項確認：
+建置步驟：下載內嵌 Python 並**核對 SHA-256**（不符即停止）→ 從**鎖定檔**安裝套件（`packaging\windows\requirements-web-sign.lock`，`-WithOpcUa` 時用 `requirements-web-sign-opcua.lock`：每個套件的確切版本與 wheel 的 SHA-256，`pip --require-hashes`，任何不同的檔案或鎖定檔沒有列的依賴都會停止建置），再裝程式本身 → 寫入 **RELEASE.json** → 對建置結果跑 **IQ/OQ 自我測試**（失敗即停止）→ 打包安裝程式。輸出在 `dist\`：`SPC-Setup-<版本>.exe`、一份文字檔（安裝程式的 SHA-256 與發行清單摘要，給交貨單）、`build-qualification-<版本>\`（建置時的確認記錄）。
+
+> **狀態：** 建置、無人值守安裝、IQ/OQ、伺服器鎖、備份還原、升級與解除安裝已在 GitHub 的 Windows Server 虛擬機上自動執行並通過（見下方「Windows 自動測試」）。**圖形精靈、重開機、https 與防火牆、Windows 11 實機尚未驗證**，交付前請在實機逐項確認：
 > 1. `build.ps1` 能跑完且自我測試通過。
 > 2. 在乾淨的 Windows 虛擬機安裝：頁面、IQ、OQ 都通過，工作「SPC Server」在執行，瀏覽器可登入。
 > 3. 重新開機後伺服器自動啟動。
@@ -95,7 +97,7 @@ cd packaging\windows
 > 6. https 自簽憑證與防火牆選項。
 > 發現的問題先修再交付客戶。
 
-**Windows 自動測試（GitHub Actions，`.github/workflows/windows.yml`）**：每次推送在 GitHub 的 Windows Server 虛擬機上：跑完整測試；用 `build.ps1` 建置安裝程式（含建置時的 IQ/OQ）；無人值守安裝；檢查伺服器回應、管理員登入、IQ/OQ 記錄通過且未被更改；伺服器運行中還原被拒、同一資料庫無法啟動第二個伺服器、停止後可還原；再安裝一次（升級路徑：先備份、資料保留）；解除安裝後資料仍在、工作已移除。安裝檔、安裝記錄與確認記錄保存為該次執行的 artifact。上面第 3 項（重開機）、第 6 項（https 與防火牆）與實際操作畫面仍需人工在實機確認。內嵌 Python 的 SHA-256 請設為 repository variable `PYTHON_EMBED_SHA256`（取 python.org 公布的值）；未設定時測試流程採用下載當下的值並發出警告，該次產物不可作為正式版。
+**Windows 自動測試（GitHub Actions，`.github/workflows/windows.yml`）**：每次推送在 GitHub 的 Windows Server 虛擬機上：跑完整測試；用 `build.ps1` 建置安裝程式（含建置時的 IQ/OQ）；無人值守安裝；檢查伺服器回應、管理員登入、IQ/OQ 記錄通過且未被更改；伺服器運行中還原被拒、同一資料庫無法啟動第二個伺服器、停止後可還原；再安裝一次（升級路徑：先備份、資料保留、開始功能表仍指向原連接埠）；解除安裝後資料仍在、工作已移除；缺少管理員密碼的安裝以結束代碼 11 結束且不啟動伺服器。安裝檔、安裝記錄與確認記錄保存為該次執行的 artifact。上面第 3 項（重開機）、第 6 項（https 與防火牆）與實際操作畫面仍需人工在實機確認。內嵌 Python 的 SHA-256 請設為 repository variable `PYTHON_EMBED_SHA256`（取 python.org 公布的值）；未設定時測試流程採用下載當下的值並發出警告，該次產物不可作為正式版。
 
 ## 9. Linux
 
@@ -114,7 +116,7 @@ python3 -m venv /opt/spc && /opt/spc/bin/pip install "spc[web,sign]"
 
 - 伺服器是排程工作，不是 Windows 服務：功能足夠（開機啟動、自動重啟），但不出現在「服務」清單。
 - 安裝程式的介面是英文（Inno Setup 預設）；文件與軟體介面有繁體中文。
-- 無人值守安裝：`SPC-Setup-<版本>.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="setup.log" /DATADIR="D:\SPC" /PORT=8000 /ADMIN=admin /ADMINPWFILE="pw.txt" [/HOST=0.0.0.0] [/TLS] [/FIREWALL] [/NOOQ]`。密碼檔第一行是第一位管理員的密碼（只有資料夾裡還沒有資料庫時需要），安裝程式不會刪除你給的檔案，請自行刪除。記錄檔中每個步驟有一行 `SPC: …`，最後一行是 `SPC: result ok` 或 `SPC: result failed …`。
+- 無人值守安裝：`SPC-Setup-<版本>.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="setup.log" /DATADIR="D:\SPC" /PORT=8000 /ADMIN=admin /ADMINPWFILE="pw.txt" [/HOST=0.0.0.0] [/TLS] [/FIREWALL] [/NOOQ]`。密碼檔第一行是第一位管理員的密碼（只有資料夾裡還沒有資料庫時需要），安裝程式不會刪除你給的檔案，請自行刪除。記錄檔中每個步驟有一行 `SPC: …`，最後一行是 `SPC: result ok` 或 `SPC: result failed …`。**結束代碼**：0 = 已安裝、確認通過並啟動；11 = 沒有第一位管理員的密碼；12 = 首次設定失敗；13 = IQ/OQ 未通過；14 = 伺服器工作無法註冊（後四種情況伺服器不會啟動）；1–8 是 Inno Setup 本身的代碼（安裝沒有執行或被中止）。每個步驟的完整輸出寫在 `<資料資料夾>\logs\install.log`。升級時開始功能表的「SPC (open in browser)」依 `spc.json` 的連接埠與 https 設定建立。
 - 沒有沒有自動更新、沒有授權機制、安裝程式**沒有程式碼簽章**（Windows SmartScreen 會警告「未知的發行者」，需要簽章憑證才能消除）。
 - 單機 SQLite：適合單一廠區、數十位同時使用者；多廠區或大量連續寫入時需要 PostgreSQL（架構已預留，尚未實作）。
 - IQ 的「套件版本鎖定」比對的是建置時安裝的所有套件版本；若客戶端另外裝了套件，只會標示差異，不會失敗。
