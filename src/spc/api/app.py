@@ -159,8 +159,13 @@ def create_app(
     secure_cookies: bool | None = None,
     auth: AuthService | None = None,
     notifiers: list[Notifier] | None = None,
+    display_timezone: str = "UTC",
 ) -> FastAPI:
-    """`db` defaults to a private in-memory database. `secure_cookies` None means: Secure when the request is https."""
+    """`db` defaults to a private in-memory database. `secure_cookies` None means: Secure when the request is https.
+    `display_timezone` is the zone in which the screens show times (IANA name); the data stay in UTC."""
+    from spc import timezone as tz
+
+    display_timezone = tz.validate(display_timezone)
     db = Database() if db is None else db
     audit = Audit(db)
     auth = AuthService(db, audit) if auth is None else auth
@@ -198,6 +203,7 @@ def create_app(
     profiles = ProfileStore(db)
     app.state.db, app.state.auth, app.state.audit, app.state.store, app.state.reports = db, auth, audit, store, reports
     app.state.profiles = profiles
+    app.state.display_timezone = display_timezone
     msa_systems = MsaService(db, audit)
     app.state.msa = msa_systems
     monitors = MonitorService(db, audit, store, notifiers or [], msa_systems)
@@ -398,6 +404,7 @@ def create_app(
         info = auth.session(request.cookies.get("spc_session"))
         return {"version": __version__, "languages": list(LANGUAGES), "max_upload_mb": max_upload // (1024 * 1024),
                 "setup_needed": auth.user_count() == 0, "default_targets": default_target_table(),
+                "display_timezone": app.state.display_timezone,
                 "session": None if info is None else {"user": info.user.to_json(), "csrf": info.csrf}}
 
     add_account_routes(app, auth, audit, admin, secure_cookies)

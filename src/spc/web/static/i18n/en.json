@@ -454,7 +454,7 @@
   "admin.audit_verify": "Check the chain",
   "admin.audit_ok": "Chain intact: {n} entries. Last hash: {hash}",
   "admin.audit_broken": "Chain broken at entry {id}.",
-  "admin.audit_col_time": "Time (UTC)",
+  "admin.audit_col_time": "Time",
   "admin.audit_col_user": "User",
   "admin.audit_col_action": "Action",
   "admin.audit_col_target": "Target",
@@ -2668,5 +2668,9 @@
   "floor.sum_ok": "In control",
   "floor.sum_alarm": "Open alarms",
   "floor.sum_first": "First article to measure",
-  "floor.sum_approval": "Waiting for the leader"
+  "floor.sum_approval": "Waiting for the leader",
+  "app.timezone": "Times: {zone} ({offset})",
+  "app.timezone_input": "in {zone} ({offset}); stored in UTC",
+  "app.timezone_utc": "Times: {zone}",
+  "app.timezone_input_utc": "in {zone}"
 }

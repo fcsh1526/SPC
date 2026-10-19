@@ -424,3 +424,5 @@ table.grid td.num, .fl-value input, .fl-keypad button { font-family: var(--mono)
   .fl-first-note { background: var(--warn-bg); color: var(--warn-text); }
 }
 .fl-chips button[aria-pressed="true"] { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 700; }
+header.top .tz-label { color: var(--shell-muted); font-size: 0.85rem; white-space: nowrap; }
+@media (max-width: 860px) { header.top .tz-label { display: none; } }

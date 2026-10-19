@@ -52,7 +52,7 @@ def self_signed(cert: Path, key: Path, host: str | None = None, days: int = 825)
 
 
 def setup(data_dir: Path, admin: str | None = None, password: str | None = None, host: str = "127.0.0.1", port: int = 8000, tls: str = "none",
-          cert: str | None = None, key: str | None = None, force_config: bool = False) -> dict:
+          cert: str | None = None, key: str | None = None, force_config: bool = False, display_timezone: str | None = None) -> dict:
     data_dir = Path(data_dir)
     for sub in ("", "backup", "qualification", "certs"):
         (data_dir / sub).mkdir(parents=True, exist_ok=True)
@@ -71,7 +71,10 @@ def setup(data_dir: Path, admin: str | None = None, password: str | None = None,
     config_path = data_dir / CONFIG_NAME
     wrote = False
     if force_config or not config_path.exists():
-        config = {"db": str(db_path), "host": host, "port": port}
+        from spc import timezone as tz
+
+        config = {"db": str(db_path), "host": host, "port": port,
+                  "display_timezone": tz.validate(display_timezone) if display_timezone else tz.detect()}
         if tls == "self-signed":
             cert_path, key_path = data_dir / "certs" / "spc.crt", data_dir / "certs" / "spc.key"
             if force_config or not cert_path.exists():
@@ -99,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cert", default=None)
     parser.add_argument("--key", default=None)
     parser.add_argument("--force-config", action="store_true")
+    parser.add_argument("--display-timezone", default=None,
+                        help="zone in which the screens show times, an IANA name such as Asia/Taipei (default: the zone of this computer, else UTC)")
     args = parser.parse_args(argv)
     password = None
     if args.password_file:
@@ -117,9 +122,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.admin and sys.stdin.isatty():
         password = getpass.getpass("Password of the administrator: ")
     try:
-        r = setup(Path(args.data_dir), args.admin, password, args.host, args.port, args.tls, args.cert, args.key, args.force_config)
+        r = setup(Path(args.data_dir), args.admin, password, args.host, args.port, args.tls, args.cert, args.key, args.force_config, args.display_timezone)
     except AuthError as exc:
         print(f"error: {exc.code} {exc.params or ''}", file=sys.stderr)
+        return 1
+    except ValueError as exc:  # an unknown --display-timezone
+        print(f"error: {exc}", file=sys.stderr)
         return 1
     print(f"data folder {r['data_dir']}\ndatabase {r['database']} ({'created' if r['created_database'] else 'existing'})")
     print("administrator created" if r["created_admin"] else "users exist: none created")

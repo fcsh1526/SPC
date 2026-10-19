@@ -14,7 +14,7 @@ from spc.db import Database
 from spc.monitor.notify import WebhookNotifier
 
 
-CONFIG_KEYS = {"db": str, "host": str, "port": int, "secure_cookies": bool, "alert_webhook": str, "ssl_certfile": str, "ssl_keyfile": str}
+CONFIG_KEYS = {"db": str, "host": str, "port": int, "secure_cookies": bool, "alert_webhook": str, "ssl_certfile": str, "ssl_keyfile": str, "display_timezone": str}
 
 
 def read_config(path: str) -> dict:
@@ -41,6 +41,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--db", default=os.environ.get("SPC_DB", "spc.sqlite3"), help="SQLite file (env SPC_DB)")
     parser.add_argument("--secure-cookies", action="store_true",
                         help="mark the session cookie Secure. Use it when the site is served over https (also behind a proxy)")
+    parser.add_argument("--display-timezone", default=os.environ.get("SPC_DISPLAY_TIMEZONE", "UTC"),
+                        help="zone in which the screens show times, an IANA name such as Asia/Taipei (env SPC_DISPLAY_TIMEZONE); data stay in UTC")
     parser.add_argument("--alert-webhook", default=os.environ.get("SPC_ALERT_WEBHOOK", ""),
                         help="URL that receives a JSON POST when an SPC monitor opens an incident (env SPC_ALERT_WEBHOOK)")
     pre, _ = parser.parse_known_args(argv)
@@ -49,6 +51,12 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if bool(args.ssl_certfile) != bool(args.ssl_keyfile):
         raise SystemExit("give both --ssl-certfile and --ssl-keyfile")
+    from spc import timezone as tz
+
+    try:
+        display_timezone = tz.validate(args.display_timezone)
+    except tz.InvalidTimezone as exc:
+        raise SystemExit(f"display_timezone: {exc}")
     from spc.db import serverlock
 
     try:
@@ -57,7 +65,9 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"{exc}. Stop the other server first.")
     db = Database(args.db)
     notifiers = [WebhookNotifier(args.alert_webhook)] if args.alert_webhook else []
-    app = create_app(db, secure_cookies=True if (args.secure_cookies or args.ssl_certfile) else None, notifiers=notifiers)
+    app = create_app(db, secure_cookies=True if (args.secure_cookies or args.ssl_certfile) else None, notifiers=notifiers,
+                     display_timezone=display_timezone)
+    tz.record_change(app.state.audit, display_timezone)  # a new zone of the screens is a change that the audit trail shows
     try:  # the OPC UA links that are enabled connect now and reconnect by themselves
         app.state.equipment.runner.start()
     except Exception as exc:

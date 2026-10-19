@@ -7,6 +7,7 @@ Each check is a dict: id, expected, actual, status ('pass', 'fail', 'warn', 'inf
 from __future__ import annotations
 
 import getpass
+import json
 import os
 import platform
 import shutil
@@ -98,9 +99,29 @@ def run_iq(db_path: str | os.PathLike | None = None, manifest_path: str | os.Pat
     except OSError as exc:
         out.append(check("disk_free", f">= {MIN_FREE_BYTES >> 20} MiB", f"unknown ({exc})", "warn"))
     now = datetime.now(timezone.utc)
+    if db_path:  # the zone of the screens, from spc.json beside the database
+        out.append(_display_timezone_check(Path(db_path).parent / "spc.json"))
     out.append(check("clock", "UTC time and zone recorded", f"{now.strftime('%Y-%m-%d %H:%M:%S')} UTC, zone {datetime.now().astimezone().tzname()}", "info",
                      "the audit trail and reports use UTC; check the computer's clock against a time source"))
     return out
+
+
+def _display_timezone_check(config: Path) -> dict:
+    from spc import timezone as tz
+
+    try:
+        name = json.loads(config.read_text(encoding="utf-8")).get("display_timezone") or "UTC"
+    except (OSError, ValueError):
+        return check("display_timezone", "zone of the screens recorded", "no spc.json: UTC", "info")
+    try:
+        tz.validate(name)
+    except tz.InvalidTimezone as exc:
+        return check("display_timezone", "a known IANA zone", str(exc), "fail", "the server does not start with an unknown zone")
+    local = tz.detect()
+    note = "the screens show times in this zone with its offset; records stay in UTC"
+    if local != name:
+        note += f"; the computer's zone is {local}"
+    return check("display_timezone", "zone of the screens recorded", name, "info", note)
 
 
 def struct_size() -> int:

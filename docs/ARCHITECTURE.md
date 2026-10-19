@@ -769,6 +769,12 @@
 - **通知事件**：`incident_opened`、`first_article_awaiting_approval` 的欄位寫在 `spc.monitor.notify`。
 - **介面結構測試**：e2e 檢查長畫面各分頁放的元素（分析的設定／結果／報告、工具各卡片各一頁、驗證）。
 
+## 10.30 外部安裝測試後的修正
+
+- **使用者角色**：建立與修改使用者的 API 原本只接受 viewer、engineer、admin，畫面上選操作員或組長會被拒（422）。現在 API 的角色清單和 `spc.auth.ROLES` 相同，程式載入時檢查兩者一致，測試也檢查；API 與畫面都可建立或改成全部五種角色。
+- **時區**：資料一律以 UTC 儲存；畫面以 `spc.json` 的 `display_timezone`（廠區時區）顯示並附偏移量，時間輸入也以廠區時區解讀（`spc.timezone`、前端 `when()` 與 `zonedInputToUtc()`）。時區變更寫入稽核鏈，IQ 記錄時區。Windows 沒有內建時區資料庫，因此 `tzdata` 列入 `web` 套件與鎖定檔。
+- **管制圖 X 軸標籤**：不再固定截成 8 個字，依兩個標籤之間的空間決定長度，放不下才以「…」縮短，完整文字放在 `<title>`。
+
 ## 10.1 資料庫與登入（已實作第一版）
 
 **儲存**：SQLite 單檔（`--db` 或環境變數 `SPC_DB`，預設 `spc.sqlite3`，建立時權限 0600）。一條連線加一把鎖，所有存取走 `spc.db`，日後換 PostgreSQL 只改 `database.py` 與 `stores.py`。結構版本（目前 8）放在 `PRAGMA user_version`，版本不符時拒絕啟動。

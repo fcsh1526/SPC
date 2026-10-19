@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,18 +42,32 @@ class PasswordBody(Strict):
     new: str = Field(max_length=1024)
 
 
+# the login roles; spc.auth.service.ROLES is the same list (checked here and by a test), so a new role reaches the API too
+Role = Literal["viewer", "operator", "leader", "engineer", "admin"]
+
+
 class NewUserBody(Strict):
     username: str = Field(max_length=64)
     password: str = Field(max_length=1024)
-    role: Literal["viewer", "engineer", "admin"] = "engineer"
+    role: Role = "engineer"
     display_name: str = Field(default="", max_length=200)
     must_change: bool = True
 
 
 class UpdateUserBody(Strict):
-    role: Literal["viewer", "engineer", "admin"] | None = None
+    role: Role | None = None
     active: bool | None = None
     display_name: str | None = Field(default=None, max_length=200)
+
+
+def _same_roles() -> None:
+    from spc.auth.service import ROLES
+
+    if set(get_args(Role)) != set(ROLES):
+        raise RuntimeError(f"the roles of the API {get_args(Role)} differ from spc.auth {ROLES}")
+
+
+_same_roles()
 
 
 class ResetPasswordBody(Strict):

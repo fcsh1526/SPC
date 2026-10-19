@@ -19,6 +19,7 @@
       <button id="pw-btn" data-i18n="user.change_password"></button>
       <button id="logout-btn" data-i18n="user.logout"></button>
     </div>
+    <span id="tz-label" class="tz-label"></span>
     <button id="fs-btn" type="button" data-i18n="app.fullscreen"></button>
     <label class="lang">
       <span data-i18n="app.language"></span>
@@ -1002,7 +1003,7 @@
       <div id="md-values" class="row"></div>
       <div class="form-grid">
         <label><span data-i18n="mon.label"></span><input id="md-label" type="text" maxlength="100"></label>
-        <label><span data-i18n="mon.taken_at"></span><input id="md-taken" type="datetime-local"></label>
+        <label><span data-i18n="mon.taken_at"></span><input id="md-taken" type="datetime-local"><small id="md-taken-zone" class="note"></small></label>
         <label id="md-cycle-label" class="check wide" hidden><input id="md-cycle" type="checkbox"><span data-i18n="mon.cycle_new"></span></label>
         <label id="md-cycle-note-label" class="wide" hidden><span data-i18n="mon.cycle_note"></span><input id="md-cycle-note" type="text" maxlength="200"></label>
       </div>

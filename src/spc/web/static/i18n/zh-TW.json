@@ -454,7 +454,7 @@
   "admin.audit_verify": "檢查雜湊鏈",
   "admin.audit_ok": "雜湊鏈完整：共 {n} 筆。最後雜湊值：{hash}",
   "admin.audit_broken": "雜湊鏈在第 {id} 筆中斷。",
-  "admin.audit_col_time": "時間（UTC）",
+  "admin.audit_col_time": "時間",
   "admin.audit_col_user": "使用者",
   "admin.audit_col_action": "動作",
   "admin.audit_col_target": "對象",
@@ -2668,5 +2668,9 @@
   "floor.sum_ok": "受控",
   "floor.sum_alarm": "警報未結案",
   "floor.sum_first": "待量首件",
-  "floor.sum_approval": "待組長確認"
+  "floor.sum_approval": "待組長確認",
+  "app.timezone": "時間：{zone}（{offset}）",
+  "app.timezone_input": "以 {zone}（{offset}）輸入；記錄以 UTC 保存",
+  "app.timezone_utc": "時間：{zone}",
+  "app.timezone_input_utc": "以 {zone} 輸入"
 }

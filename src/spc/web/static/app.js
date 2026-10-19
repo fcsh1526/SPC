@@ -1131,6 +1131,14 @@
     });
   }
 
+  // the width of a label in the 11 px axis font, roughly: wide characters (CJK) count twice
+  const labelWidth = (text) => [...text].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x2e7f ? 11 : 6.6), 0);
+  function fitLabel(text, room) {
+    if (labelWidth(text) <= room) return text;
+    const chars = [...text];
+    while (chars.length > 1 && labelWidth(chars.join("") + "…") > room) chars.pop();
+    return chars.join("") + "…";
+  }
   function drawChart(container, part, title) {
     container.replaceChildren();
     const W = 960, H = 280, ml = 70, mr = 150, mt = 16, mb = 34;
@@ -1164,8 +1172,13 @@
       root.appendChild(svg("text", { x: ml - 8, y: Y(v) + 4, "text-anchor": "end" }, v.toFixed(decimals)));
     }
     const step = Math.max(1, Math.ceil(n / 10));
+    // a label gets the room between two labels; a longer one is shortened with "…" and shows in full when pointed at (<title>)
+    const room = n > 1 ? ((W - ml - mr) / (n - 1)) * step - 6 : W - ml - mr;
     for (let i = 0; i < n; i += step) {
-      root.appendChild(svg("text", { x: X(i), y: H - mb + 16, "text-anchor": "middle" }, String(part.labels[i] || i + 1).slice(0, 8)));
+      const full = String(part.labels[i] || i + 1), short = fitLabel(full, room);
+      const label = svg("text", { x: X(i), y: H - mb + 16, "text-anchor": "middle" }, short);
+      if (short !== full) label.appendChild(svg("title", {}, full));
+      root.appendChild(label);
     }
     const half = n > 1 ? (W - ml - mr) / (n - 1) / 2 : 0;
     const phaseSet = new Set(part.phases || []);
@@ -1480,7 +1493,40 @@
 
   // ---------------------------------------------------------------- login, password, roles
   const userLabel = () => (state.user.display_name ? `${state.user.display_name} (${state.user.username})` : state.user.username);
-  const when = (s) => String(s || "").replace("T", " ").replace("Z", "");
+  // Times are stored in UTC. The screens show them in the plant's zone (display_timezone of spc.json, from /api/meta), always with
+  // its offset ("2026-10-19 10:10:39 UTC+8"), so a time on a screen matches its record. Text that is not a full time stays as it is.
+  const STAMP = /^\d{4}-\d\d-\d\d[T ](\d\d:\d\d(?::\d\d)?)(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)$/;
+  const zoneFormats = {};
+  function zoneParts(date, zone) {
+    const f = zoneFormats[zone] || (zoneFormats[zone] = new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", year: "numeric", month: "2-digit",
+      day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "shortOffset" }));
+    const p = {};
+    f.formatToParts(date).forEach((x) => { p[x.type] = x.value; });
+    p.offset = (p.timeZoneName || "GMT").replace(/^GMT/, "UTC");  // "GMT+8" -> "UTC+8", "GMT" -> "UTC"
+    return p;
+  }
+  const displayZone = () => state.timezone || "UTC";
+  const when = (s) => {
+    const text = String(s || ""), m = STAMP.exec(text);
+    const d = m ? new Date(text) : null;
+    if (!m || isNaN(d)) return text.replace("T", " ").replace("Z", "");
+    const p = zoneParts(d, displayZone());
+    return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}${m[1].length > 5 ? ":" + p.second : ""} ${p.offset}`;
+  };
+  // a "YYYY-MM-DDTHH:MM" typed into a datetime-local field means that time in the plant's zone (not the browser's)
+  function zonedInputToUtc(value, zone) {
+    const [d, tm] = value.split("T"), [Y, Mo, D] = d.split("-").map(Number), [h, mi, se] = tm.split(":").map(Number);
+    const wall = Date.UTC(Y, Mo - 1, D, h, mi, se || 0);
+    const offsetAt = (ms) => { const p = zoneParts(new Date(ms), zone); return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ms; };
+    let utc = wall - offsetAt(wall);
+    utc = wall - offsetAt(utc);  // once more, for a time near a change of summer time
+    return new Date(utc).toISOString().replace(/\.\d{3}Z$/, "Z");
+  }
+  function showTimezone() {
+    const p = zoneParts(new Date(), displayZone()), plain = p.offset === displayZone();  // UTC needs no offset beside it
+    $("#tz-label").textContent = t(plain ? "app.timezone_utc" : "app.timezone", { zone: displayZone(), offset: p.offset });
+    $("#md-taken-zone").textContent = t(plain ? "app.timezone_input_utc" : "app.timezone_input", { zone: displayZone(), offset: p.offset });
+  }
 
   function showLogin(messageKey) {
     state.user = null; state.csrf = "";
@@ -2101,7 +2147,7 @@
       body.cycle = note;
     }
     const taken = $("#md-taken").value;
-    if (taken) body.taken_at = new Date(taken).toISOString();
+    if (taken) body.taken_at = zonedInputToUtc(taken, displayZone());
     await guarded(async () => {
       M.last = await post(`/api/monitors/${M.id}/points`, body);
       $$("#md-values input").forEach((i) => { i.value = ""; });
@@ -4658,6 +4704,7 @@
     $("#lang").value = lang;
     if (!state.reportLangTouched) $("#rp-language").value = lang;
     rerender();
+    if (state.timezone) showTimezone();
   }
   function wire() {
     $("#lang").addEventListener("change", (e) => setLanguage(e.target.value));
@@ -4731,6 +4778,8 @@
       const meta = await api("/api/meta");
       state.setupNeeded = meta.setup_needed;
       state.defaultTargets = meta.default_targets;
+      state.timezone = meta.display_timezone || "UTC";
+      showTimezone();
       if (meta.session) enterApp(meta.session); else showLogin();
     } catch (e) { showError({ code: "network", message: String(e && e.message || e.code), params: {} }); }
   }

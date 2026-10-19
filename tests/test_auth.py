@@ -304,6 +304,52 @@ def test_changing_role_or_disabling_ends_that_users_sessions_and_the_last_admin_
     assert admin.patch("/api/users/9999", json={"active": False}).status_code == 404
 
 
+def test_admin_creates_every_role_through_the_api(app):
+    from spc.auth.service import ROLES
+
+    admin = logged_in_client(app, "admin")
+    for role in ROLES:
+        r = admin.post("/api/users", json={"username": f"api-{role}", "password": "Every-Role-2610!x", "role": role, "must_change": False})
+        assert r.status_code == 200, r.text
+        assert r.json()["user"]["role"] == role
+    op = TestClient(app)
+    login(op, "api-operator", "Every-Role-2610!x")
+    assert op.get("/api/auth/me").json()["user"]["role"] == "operator"
+    created = [e for e in admin.get("/api/audit").json()["entries"] if e["action"] == "user_created" and e["target"].startswith("api-")]
+    assert {e["detail"]["role"] for e in created} == set(ROLES)
+
+
+def test_admin_changes_a_role_to_operator_and_leader(app):
+    admin = logged_in_client(app, "admin")
+    admin.post("/api/users", json={"username": "to-change", "password": "Role-Change-2610!x", "role": "viewer", "must_change": False})
+    uid = next(u["id"] for u in admin.get("/api/users").json()["users"] if u["username"] == "to-change")
+    for role in ("operator", "leader"):
+        user = TestClient(app)
+        login(user, "to-change", "Role-Change-2610!x")
+        r = admin.patch(f"/api/users/{uid}", json={"role": role})
+        assert r.status_code == 200 and r.json()["user"]["role"] == role
+        assert user.get("/api/auth/me").status_code == 401  # the new rights apply from the next login
+
+
+def test_an_unknown_role_is_refused(app):
+    admin = logged_in_client(app, "admin")
+    r = admin.post("/api/users", json={"username": "boss-1", "password": "Unknown-Role-2610!x", "role": "boss"})
+    assert r.status_code == 422 and err(r)["code"] == "validation"
+    uid = next(u["id"] for u in admin.get("/api/users").json()["users"] if u["username"] == "eng")
+    assert admin.patch(f"/api/users/{uid}", json={"role": "boss"}).status_code == 422
+
+
+def test_the_roles_of_the_api_are_the_roles_of_the_login():
+    from typing import get_args
+
+    from spc.api.schemas import NewUserBody, Role, UpdateUserBody
+    from spc.auth.service import ROLES
+
+    assert set(get_args(Role)) == set(ROLES)
+    assert NewUserBody.model_fields["role"].annotation == Role
+    assert set(get_args(UpdateUserBody.model_fields["role"].annotation)) == {Role, type(None)}
+
+
 def test_admin_resets_a_password(app):
     admin = logged_in_client(app, "admin")
     uid = next(u["id"] for u in admin.get("/api/users").json()["users"] if u["username"] == "eng")

@@ -5,7 +5,7 @@
 ;
 ; Messages after the wizard use SuppressibleMsgBox: a plain MsgBox is shown also with /SUPPRESSMSGBOXES and would hold an unattended installation for ever.
 ; Unattended installation (IT deployment, the Windows test of the build):
-;   SPC-Setup-x.y.z.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="setup.log" /DATADIR="D:\SPC" /HOST=127.0.0.1 /PORT=8000 /ADMIN=admin /ADMINPWFILE="pw.txt" [/TLS] [/FIREWALL] [/NOOQ]
+;   SPC-Setup-x.y.z.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="setup.log" /DATADIR="D:\SPC" /HOST=127.0.0.1 /PORT=8000 /ADMIN=admin /ADMINPWFILE="pw.txt" [/TIMEZONE=Asia/Taipei] [/TLS] [/FIREWALL] [/NOOQ]
 ;   Exit code 0: installed, qualified and started. A step after the copy of the files that fails ends with 11 (no administrator password),
 ;   12 (first setup), 13 (qualification), 14 (server task); Inno Setup's own codes (1 to 8) mean the setup did not run or was stopped.
 ;   /ADMINPWFILE names a file whose first line is the password of the first administrator (needed only when the data folder has no database yet); the installer
@@ -236,6 +236,7 @@ begin
     // first setup: folders, database, administrator, settings, certificate
     Args := '-m spc.setup --data-dir "' + Data + '" --host ' + NetPage.Values[0] + ' --port ' + NetPage.Values[1];
     if TlsCheck.Checked then Args := Args + ' --tls self-signed';
+    if ExpandConstant('{param:TIMEZONE|}') <> '' then Args := Args + ' --display-timezone "' + ExpandConstant('{param:TIMEZONE|}') + '"';
     if not ExistingDb then begin
       if AdminPassword() = '' then begin
         Report('result failed: no password for the first administrator (give /ADMINPWFILE)');

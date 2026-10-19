@@ -56,6 +56,17 @@ spc-qualify verify D:\記錄\IQOQ-….json
 
 **記錄怎麼用**：列印或另存 PDF，執行、審閱、核准人簽名後歸檔；把記錄摘要寫進交貨單（「這個版本的 RELEASE.json 摘要」也在建置輸出）。摘要不是簽章：要防止有權限的人同時改檔案與摘要，請把摘要用別的管道交給客戶。
 
+## 4.1 畫面時間與時區
+
+所有時間（樣本、事件、稽核鏈、報告封存、匯出）一律以 **UTC** 儲存，稽核雜湊與報告摘要都以 UTC 計算。畫面上的時間則以**廠區時區**顯示，並一律附上偏移量，例如「2026-10-19 10:10:39 UTC+8」；頂列會顯示「時間：Asia/Taipei（UTC+8）」。
+
+- 廠區時區是 `spc.json` 的 `display_timezone`（IANA 名稱，例如 `Asia/Taipei`）。首次設定時預設取這台電腦的時區，取不到就用 UTC；安裝時可用 `/TIMEZONE=Asia/Taipei` 指定，`spc-setup` 用 `--display-timezone`。
+- 時區由伺服器統一決定，不看各台瀏覽器的設定，所以同一筆記錄在每台電腦上顯示的時間都相同。
+- 監控頁「取樣時間」欄輸入的時間，也以廠區時區解讀，再換算成 UTC 儲存。
+- 修改時區：編輯 `spc.json` 的 `display_timezone` 後重新啟動伺服器。無效的名稱會讓伺服器拒絕啟動並說明原因；變更會寫入稽核鏈（`display_timezone_set`，記錄從哪個時區改成哪個）。
+- IQ 會記錄廠區時區與電腦時區，兩者不同時加以註明。伺服器電腦請用 NTP 對時。
+- 報告（HTML、Excel）與確認記錄上的時間保持 ISO 8601 的 UTC 格式（結尾的 `Z` 代表 UTC）。
+
 ## 5. 升級
 
 重新執行新版安裝程式，選**同一個資料資料夾**。安裝程式會先停止伺服器並做**有檢查的備份**（`資料資料夾\backup\`），再複製新檔案；資料庫在伺服器啟動時自動遷移到新結構。升級時已有 `spc.json` 的話，網路設定頁會略過、沿用原設定；首次設定用的暫存密碼檔在設定結束後立即刪除。升級後 IQ／OQ 會再跑一次，新記錄與舊記錄並存。備份失敗時會問是否繼續，**不建議繼續**。
@@ -116,7 +127,7 @@ python3 -m venv /opt/spc && /opt/spc/bin/pip install "spc[web,sign]"
 
 - 伺服器是排程工作，不是 Windows 服務：功能足夠（開機啟動、自動重啟），但不出現在「服務」清單。
 - 安裝程式的介面是英文（Inno Setup 預設）；文件與軟體介面有繁體中文。
-- 無人值守安裝：`SPC-Setup-<版本>.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="setup.log" /DATADIR="D:\SPC" /PORT=8000 /ADMIN=admin /ADMINPWFILE="pw.txt" [/HOST=0.0.0.0] [/TLS] [/FIREWALL] [/NOOQ]`。密碼檔第一行是第一位管理員的密碼（只有資料夾裡還沒有資料庫時需要），安裝程式不會刪除你給的檔案，請自行刪除。記錄檔中每個步驟有一行 `SPC: …`，最後一行是 `SPC: result ok` 或 `SPC: result failed …`。**結束代碼**：0 = 已安裝、確認通過並啟動；11 = 沒有第一位管理員的密碼；12 = 首次設定失敗；13 = IQ/OQ 未通過；14 = 伺服器工作無法註冊（後四種情況伺服器不會啟動）；1–8 是 Inno Setup 本身的代碼（安裝沒有執行或被中止）。每個步驟的完整輸出寫在 `<資料資料夾>\logs\install.log`。升級時開始功能表的「SPC (open in browser)」依 `spc.json` 的連接埠與 https 設定建立。
+- 無人值守安裝：`SPC-Setup-<版本>.exe /VERYSILENT /SUPPRESSMSGBOXES /LOG="setup.log" /DATADIR="D:\SPC" /PORT=8000 /ADMIN=admin /ADMINPWFILE="pw.txt" [/HOST=0.0.0.0] [/TIMEZONE=Asia/Taipei] [/TLS] [/FIREWALL] [/NOOQ]`。密碼檔第一行是第一位管理員的密碼（只有資料夾裡還沒有資料庫時需要），安裝程式不會刪除你給的檔案，請自行刪除。記錄檔中每個步驟有一行 `SPC: …`，最後一行是 `SPC: result ok` 或 `SPC: result failed …`。**結束代碼**：0 = 已安裝、確認通過並啟動；11 = 沒有第一位管理員的密碼；12 = 首次設定失敗；13 = IQ/OQ 未通過；14 = 伺服器工作無法註冊（後四種情況伺服器不會啟動）；1–8 是 Inno Setup 本身的代碼（安裝沒有執行或被中止）。每個步驟的完整輸出寫在 `<資料資料夾>\logs\install.log`。升級時開始功能表的「SPC (open in browser)」依 `spc.json` 的連接埠與 https 設定建立。
 - 沒有沒有自動更新、沒有授權機制、安裝程式**沒有程式碼簽章**（Windows SmartScreen 會警告「未知的發行者」，需要簽章憑證才能消除）。
 - 單機 SQLite：適合單一廠區、數十位同時使用者；多廠區或大量連續寫入時需要 PostgreSQL（架構已預留，尚未實作）。
 - IQ 的「套件版本鎖定」比對的是建置時安裝的所有套件版本；若客戶端另外裝了套件，只會標示差異，不會失敗。

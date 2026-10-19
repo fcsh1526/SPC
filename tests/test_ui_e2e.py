@@ -356,6 +356,46 @@ def test_a_viewer_can_read_saved_data_but_sees_no_way_to_change_it(server, brows
     ctx.close()
 
 
+def test_the_admin_creates_an_operator_and_makes_the_person_a_leader(server, browser, app):
+    expect = playwright_sync.expect
+    ctx = browser.new_context(locale="en")
+    admin = ctx.new_page()
+    errors = []
+    admin.on("dialog", lambda d: (errors.append(d.message), d.dismiss()))
+    admin.goto(server)
+    sign_in(admin, "admin")
+    admin.click("nav.tabs button[data-tab=admin]")
+    admin.fill("#nu-name", "line-op")
+    admin.fill("#nu-display", "Line Operator")
+    admin.select_option("#nu-role", "operator")
+    admin.fill("#nu-pass", "Line-Operator-2610!x")
+    admin.click("#nu-create")
+    expect(admin.locator("#admin-msg")).to_contain_text("User line-op created")
+    row = admin.locator("#admin-users tr", has_text="line-op")
+    expect(row.locator("select")).to_have_value("operator")
+    expect(admin.locator("#errors")).to_be_hidden()
+
+    # the operator signs in and lands on the station screen
+    uid = next(u.id for u in app.state.auth.list_users() if u.username == "line-op")
+    app.state.auth.reset_password(uid, "Line-Operator-2610!y", must_change=False)
+    op_ctx = browser.new_context(locale="en")
+    op = op_ctx.new_page()
+    op.goto(server)
+    sign_in(op, "line-op", "Line-Operator-2610!y")
+    expect(op.locator("#tab-floor")).to_be_visible()
+    op_ctx.close()
+
+    # the admin makes the person a leader; the change holds after a reload
+    row.locator("select").select_option("leader")
+    admin.wait_for_timeout(500)
+    expect(admin.locator("#errors")).to_be_hidden()
+    admin.reload()
+    admin.click("nav.tabs button[data-tab=admin]")
+    expect(admin.locator("#admin-users tr", has_text="line-op").locator("select")).to_have_value("leader")
+    assert not errors
+    ctx.close()
+
+
 def test_a_new_user_must_change_the_password_before_anything_else(server, browser):
     expect = playwright_sync.expect
     ctx = browser.new_context(locale="en")
@@ -2887,4 +2927,85 @@ def test_excel_import_saves_a_template_and_uses_it_for_the_next_file(server, bro
     page.click("#import-btn")
     expect(page.locator("#data-counts")).to_contain_text("共 50 筆")
     assert problems == []
+    ctx.close()
+
+
+# these two leave monitors behind in the shared app, so they run last
+def test_times_are_shown_in_the_plant_zone_whatever_the_browser_zone(server, browser, app):
+    """The screens show times in display_timezone with the offset, not in the browser's zone; a time typed in means that zone."""
+    from tests.conftest import logged_in_client
+    from tests.test_monitor import CONFIG, OK_SAMPLE, PARAMS
+
+    expect = playwright_sync.expect
+    eng = logged_in_client(app, "eng")
+    name = "Zone check " + str(len(eng.get("/api/monitors").json()["monitors"]))
+    mid = eng.post("/api/monitors", json={"config": {**CONFIG, "name": name, "first_article": False}, "source": PARAMS}).json()["monitor"]["id"]
+    eng.post(f"/api/monitors/{mid}/ack")
+    assert eng.post(f"/api/monitors/{mid}/points", json={"values": OK_SAMPLE, "taken_at": "2026-10-01T02:00:00Z"}).status_code == 200
+    app.state.display_timezone = "Asia/Taipei"
+    try:
+        ctx = browser.new_context(viewport={"width": 1366, "height": 900}, locale="en", timezone_id="America/New_York")
+        page = ctx.new_page()
+        page.goto(server)
+        sign_in(page, "eng")
+        expect(page.locator("#tz-label")).to_have_text("Times: Asia/Taipei (UTC+8)")
+        page.click("nav.tabs button[data-tab=floor]")
+        expect(page.locator("#fl-tiles .fl-tile", has_text=name)).to_contain_text("2026-10-01 10:00:00 UTC+8")
+        # a time typed in is a time of the plant's zone: 10:00 in Taipei is 02:00 UTC (the browser is in New York)
+        page.click("nav.tabs button[data-tab=monitor]")
+        page.locator("#mon-list tr", has_text=name).locator("button:has-text('Open')").click()
+        expect(page.locator("#md-taken-zone")).to_contain_text("Asia/Taipei (UTC+8)")
+        for i, v in enumerate(OK_SAMPLE):
+            page.fill(f"#md-v{i}", str(v))
+        page.fill("#md-taken", "2026-10-02T10:00")
+        page.click("#md-submit")
+        expect(page.locator("#md-result")).to_contain_text("within the limits", timeout=20000)
+        assert eng.get(f"/api/monitors/{mid}").json()["points"][-1]["taken_at"] == "2026-10-02T02:00:00Z"
+        ctx.close()
+    finally:
+        app.state.display_timezone = "UTC"
+    # without a zone set, every time says UTC
+    ctx = browser.new_context(viewport={"width": 1366, "height": 900}, locale="en", timezone_id="Asia/Tokyo")
+    page = ctx.new_page()
+    page.goto(server)
+    sign_in(page, "eng")
+    expect(page.locator("#tz-label")).to_have_text("Times: UTC")
+    page.click("nav.tabs button[data-tab=floor]")
+    expect(page.locator("#fl-tiles .fl-tile", has_text=name)).to_contain_text("2026-10-02 02:00:00 UTC")
+    ctx.close()
+
+
+def test_long_point_labels_are_not_cut_to_eight_characters(server, browser, app):
+    """A lot number of 13 characters shows in full on the axis when there is room, and in a <title> when it must be shortened."""
+    from tests.conftest import logged_in_client
+    from tests.test_monitor import CONFIG, OK_SAMPLE, PARAMS
+
+    expect = playwright_sync.expect
+    eng = logged_in_client(app, "eng")
+    name = "Long labels " + str(len(eng.get("/api/monitors").json()["monitors"]))
+    mid = eng.post("/api/monitors", json={"config": {**CONFIG, "name": name, "first_article": False}, "source": PARAMS}).json()["monitor"]["id"]
+    eng.post(f"/api/monitors/{mid}/ack")
+    for k in range(3):
+        eng.post(f"/api/monitors/{mid}/points", json={"values": OK_SAMPLE, "label": f"DEMO-2610-A0{k + 1}"})
+    ctx = browser.new_context(viewport={"width": 1366, "height": 900}, locale="en")
+    page = ctx.new_page()
+    page.goto(server)
+    sign_in(page, "eng")
+    page.click("nav.tabs button[data-tab=floor]")
+    page.locator("#fl-tiles .fl-tile", has_text=name).click()
+    axis = page.locator("#fl-chart-loc svg text", has_text="DEMO-2610-A0")
+    expect(axis).to_have_count(3)
+    assert sorted(axis.all_text_contents()) == ["DEMO-2610-A01", "DEMO-2610-A02", "DEMO-2610-A03"]
+    boxes = sorted((b["x"], b["x"] + b["width"]) for b in (t.bounding_box() for t in axis.all()))
+    assert all(a[1] <= b[0] for a, b in zip(boxes, boxes[1:])), boxes  # side by side, not on top of each other
+    for k in range(3, 40):
+        eng.post(f"/api/monitors/{mid}/points", json={"values": OK_SAMPLE, "label": f"DEMO-2610-A{k + 1:02d}"})
+    page.reload()
+    page.click("nav.tabs button[data-tab=floor]")
+    page.locator("#fl-tiles .fl-tile", has_text=name).click()
+    expect(page.locator("#fl-chart-loc svg text title").first).to_be_attached()
+    titles = page.locator("#fl-chart-loc svg text title").all_text_contents()
+    texts = page.locator("#fl-chart-loc svg text", has_text="DEMO").all_text_contents()
+    assert texts and all(t.startswith("DEMO") for t in texts)
+    assert all(t.startswith("DEMO-2610-A") and len(t) == 13 for t in titles)  # a shortened label keeps the full text
     ctx.close()

@@ -237,7 +237,11 @@ def test_setup_makes_the_folders_database_administrator_and_settings(tmp_path):
     d = tmp_path / "d"
     assert all((d / n).is_dir() for n in ("backup", "qualification", "certs"))
     cfg = json.loads((d / "spc.json").read_text())
-    assert cfg == {"db": str(d / "spc.sqlite3"), "host": "0.0.0.0", "port": 8443}
+    from spc import timezone as tz
+
+    zone = cfg.pop("display_timezone")  # the zone of this computer
+    assert tz.validate(zone) and cfg == {"db": str(d / "spc.sqlite3"), "host": "0.0.0.0", "port": 8443}
+    cfg["display_timezone"] = zone
     db = Database(d / "spc.sqlite3")
     assert [(u.username, u.role) for u in AuthService(db).list_users()] == [("boss", "admin")]
     db.close()
