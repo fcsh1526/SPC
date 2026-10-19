@@ -1502,7 +1502,7 @@
       day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "shortOffset" }));
     const p = {};
     f.formatToParts(date).forEach((x) => { p[x.type] = x.value; });
-    p.offset = (p.timeZoneName || "GMT").replace(/^GMT/, "UTC");  // "GMT+8" -> "UTC+8", "GMT" -> "UTC"
+    p.offset = (p.timeZoneName || "GMT").replace(/^GMT/, "UTC").replace(/^UTC[+-]0(?::00)?$/, "UTC");  // "GMT+8" -> "UTC+8"; "GMT", "GMT+0" -> "UTC"
     return p;
   }
   const displayZone = () => state.timezone || "UTC";
