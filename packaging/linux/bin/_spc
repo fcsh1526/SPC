@@ -1,0 +1,12 @@
+#!/bin/sh
+# Common part of the SPC commands: runs a module of the program with the Python of this release.
+# Started by root, a command runs as the service account "spc", so files it writes into the data folder (backups, records)
+# keep the owner the server needs. SPC_RUN_AS_ROOT=1 keeps root (only for repairs).
+module="$1"
+shift
+root="$(cd "$(dirname "$0")/.." && pwd)"
+py="$root/python/bin/python3"
+if [ "$(id -u)" = "0" ] && [ "${SPC_RUN_AS_ROOT:-0}" != "1" ] && id -u spc >/dev/null 2>&1; then
+  exec runuser -u spc -- "$py" -m "$module" "$@"
+fi
+exec "$py" -m "$module" "$@"

@@ -16,10 +16,10 @@
 
 ## 2. 系統需求
 
-- **作業系統**：Windows 10／11 或 Windows Server 2016 以上，64 位元（安裝程式針對此環境）。Linux 也能跑，見第 9 節。
+- **作業系統（伺服器）**：Windows 10／11 或 Windows Server 2016 以上，64 位元（安裝程式，第 3 節）；或 x86-64 Linux（glibc 2.28 以上、systemd，發行套件，第 9 節）。兩者都有自動測試。macOS 沒有發行套件。
 - **記憶體**：4 GB 以上。**磁碟**：程式約 400 MB，另加資料與備份（至少留 1 GB 空間，IQ 會檢查）。
 - **使用者端**：Edge、Chrome 或 Firefox 最新版，不必安裝任何東西。
-- **Python**：**不需要另外安裝**，安裝程式內含。
+- **Python**：**不需要另外安裝**，安裝程式（Windows）與發行套件（Linux）都內含。
 - **網路**：預設只接受本機（127.0.0.1）。要讓區網使用，安裝時選 0.0.0.0，並**使用 https**。
 - **時間**：稽核紀錄與報告用 UTC 時間；請讓電腦與公司時間來源同步。
 
@@ -95,7 +95,7 @@ cd packaging\windows
 .\build.ps1 -PythonVersion 3.11.9 -PythonZipSha256 <python-3.11.9-embed-amd64.zip 的 SHA-256>
 ```
 
-鎖定檔由 `tools/lock_windows.py` 產生（用 Windows 的環境條件計算依賴），只有刻意更新套件版本時才重跑；重跑後要跑測試再提交，新的版本就是一次發行內容的變更。Windows 自動測試也用同一份鎖定檔安裝，所以測試的套件版本就是安裝程式裡的版本。
+鎖定檔由 `tools/lock_packages.py --os windows` 產生（用 Windows 的環境條件計算依賴），只有刻意更新套件版本時才重跑；重跑後要跑測試再提交，新的版本就是一次發行內容的變更。Windows 自動測試也用同一份鎖定檔安裝，所以測試的套件版本就是安裝程式裡的版本。
 
 建置步驟：下載內嵌 Python 並**核對 SHA-256**（不符即停止）→ 從**鎖定檔**安裝套件（`packaging\windows\requirements-web-sign.lock`，`-WithOpcUa` 時用 `requirements-web-sign-opcua.lock`：每個套件的確切版本與 wheel 的 SHA-256，`pip --require-hashes`，任何不同的檔案或鎖定檔沒有列的依賴都會停止建置），再裝程式本身 → 寫入 **RELEASE.json** → 對建置結果跑 **IQ/OQ 自我測試**（失敗即停止）→ 打包安裝程式。輸出在 `dist\`：`SPC-Setup-<版本>.exe`、一份文字檔（安裝程式的 SHA-256 與發行清單摘要，給交貨單）、`build-qualification-<版本>\`（建置時的確認記錄）。
 
@@ -110,18 +110,38 @@ cd packaging\windows
 
 **Windows 自動測試（GitHub Actions，`.github/workflows/windows.yml`）**：每次推送在 GitHub 的 Windows Server 虛擬機上：跑完整測試；用 `build.ps1` 建置安裝程式（含建置時的 IQ/OQ）；無人值守安裝；檢查伺服器回應、管理員登入、IQ/OQ 記錄通過且未被更改；伺服器運行中還原被拒、同一資料庫無法啟動第二個伺服器、停止後可還原；再安裝一次（升級路徑：先備份、資料保留、開始功能表仍指向原連接埠）；解除安裝後資料仍在、工作已移除；缺少管理員密碼的安裝以結束代碼 11 結束且不啟動伺服器。安裝檔、安裝記錄與確認記錄保存為該次執行的 artifact。上面第 3 項（重開機）、第 6 項（https 與防火牆）與實際操作畫面仍需人工在實機確認。內嵌 Python 的 SHA-256 請設為 repository variable `PYTHON_EMBED_SHA256`（取 python.org 公布的值）；未設定時測試流程採用下載當下的值並發出警告，該次產物不可作為正式版。
 
-## 9. Linux
+## 9. Linux 伺服器
 
-沒有安裝程式；用 pip 安裝後同一組指令：
+**發行套件**：`spc-<版本>-linux-x86_64.tar.gz`（x86-64，glibc 2.28 以上：RHEL／Rocky／Alma 8 以上、Ubuntu 20.04 以上、Debian 11 以上，需要 systemd）。套件內含 Python 與鎖定版本的套件，**伺服器不需要另外安裝 Python，安裝時不需要連網**。
+
+> 注意：SPC 沒有發佈到 PyPI。**不要**用 `pip install spc`，那會裝到別人的同名套件。
+
+安裝（root）：
 
 ```
-python3 -m venv /opt/spc && /opt/spc/bin/pip install "spc[web,sign]"
-/opt/spc/bin/spc-setup --data-dir /var/lib/spc --admin admin --tls self-signed --host 0.0.0.0 --port 8443
-/opt/spc/bin/spc-qualify all --out /var/lib/spc/qualification --db /var/lib/spc/spc.sqlite3
-/opt/spc/bin/spc-serve --config /var/lib/spc/spc.json
+tar -xzf spc-<版本>-linux-x86_64.tar.gz
+cd spc-<版本>-linux-x86_64
+sudo ./install.sh --password-file pw.txt --host 0.0.0.0 --port 8443 --timezone Asia/Taipei
 ```
 
-以 systemd 常駐時，`ExecStart` 用最後一行，`Restart=always`。（Linux 的步驟已在開發環境測過指令本身，未做完整的 systemd 部署測試。）
+- 選項：`--admin`（預設 admin）、`--data-dir`（預設 `/var/lib/spc`）、`--prefix`（預設 `/opt/spc`）、`--host`、`--port`（預設 8443）、`--tls self-signed|none`（預設 self-signed）、`--timezone`、`--no-oq`、`--no-service`（容器或手動啟動）。
+- 步驟與 Windows 相同：（升級時先停止服務並做有檢查的備份）→ 複製程式到 `--prefix` → 建立服務帳號 `spc`（不能登入）→ 首次設定 → **IQ**、**OQ** → systemd 服務 `spc`（開機啟動、停止 10 秒後自動重啟、以 `spc` 帳號執行、只能寫入資料資料夾）。
+- 資料資料夾屬於 `spc` 帳號，權限 750。以 root 執行 `/opt/spc/bin/` 的指令時，會自動以 `spc` 帳號執行，備份與記錄檔的擁有者因此不會變成 root。
+- 結束代碼：0 = 已安裝、確認通過並啟動；2 = 呼叫錯誤；11 = 沒有第一位管理員的密碼；12 = 首次設定失敗；13 = IQ/OQ 未通過；14 = 服務無法啟動；15 = 升級前的備份失敗。每一步的輸出寫在 `<資料資料夾>/logs/install.log`，最後一行是 `SPC: result ok` 或 `SPC: result failed …`。
+- 防火牆：安裝程式不改防火牆。需要時：`sudo firewall-cmd --permanent --add-port=8443/tcp && sudo firewall-cmd --reload`（RHEL 系），或 `sudo ufw allow 8443/tcp`（Ubuntu）。
+- 日常指令：`systemctl status spc`、`journalctl -u spc`、`sudo /opt/spc/bin/spc-admin --db /var/lib/spc/spc.sqlite3 backup --to /var/lib/spc/backup`。還原前先 `sudo systemctl stop spc`（伺服器運行時還原會被拒絕）。
+- 升級：在新版本的資料夾執行 `sudo ./install.sh`（不需要密碼）；帳號、設定、連接埠與時區保留。
+- 解除安裝：`sudo /opt/spc/uninstall.sh`。移除程式與服務，**保留資料資料夾與 `spc` 帳號**。
+
+**建置**（供應商，在 x86-64 Linux 上，需要 curl 並可連到 github.com 與 PyPI）：
+
+```
+packaging/linux/build.sh              # 或 WITH_OPCUA=1 packaging/linux/build.sh
+```
+
+步驟：下載 python-build-standalone 的 CPython 3.11.9 並**核對 SHA-256**（取該版本 SHA256SUMS 公布的值，寫在 `build.sh`；不符即停止）→ 從鎖定檔 `packaging/linux/requirements-*.lock` 安裝套件（`pip --require-hashes`）→ 安裝程式本身 → 寫入 **RELEASE.json** → **IQ/OQ 自我測試** → 打包。輸出在 `dist/`：發行壓縮檔、一份文字檔（壓縮檔的 SHA-256 與發行清單摘要）、`build-qualification-<版本>-linux/`。Linux 鎖定檔的套件版本取自 Windows 鎖定檔（`tools/lock_packages.py --os linux`），兩個平台用相同版本。
+
+**Linux 自動測試（GitHub Actions，`.github/workflows/linux.yml`）**：每次推送在 GitHub 的 Ubuntu 虛擬機上：用 Linux 鎖定檔跑完整測試；建置發行套件（含建置時的 IQ/OQ）；安裝並檢查服務在執行且以 `spc` 帳號執行、資料資料夾權限、https 回應、時區、管理員登入、IQ/OQ 記錄通過且未被更改；**強制結束伺服器程序後服務自動重啟**；伺服器運行中還原被拒、同一資料庫無法啟動第二個伺服器、停止後可還原；再安裝一次（升級：先備份、設定保留、原密碼可登入）；解除安裝後資料仍在、服務已移除；缺少管理員密碼的安裝以結束代碼 11 結束且不啟動伺服器。重開機後自動啟動、RHEL 系統與防火牆仍需在實機確認。
 
 ## 10. 已知限制
 

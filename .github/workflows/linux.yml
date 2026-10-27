@@ -1,0 +1,163 @@
+# Linux test of SPC on a GitHub-hosted Ubuntu machine (systemd runs there, so the service is tested as on a customer server).
+#   tests:   the whole test suite with the locked packages of the Linux release.
+#   package: build the release with packaging/linux/build.sh (standalone Python, locked packages, release manifest, IQ/OQ of the build),
+#            install it with install.sh, check the running service, the qualification record, the service account, the restart after a
+#            crash, the server lock, backup and restore, install it again over the data (the upgrade path), an installation without a
+#            password (exit code 11), and uninstall it (the data stay).
+# The release archive, the install logs and the qualification records are kept as artifacts of the run.
+name: Linux
+
+on:
+  push:
+    branches: [main, master, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the program and the test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r packaging/linux/requirements-web-sign-opcua.lock
+          python -m pip install --no-deps -e .
+          python -m pip install pytest httpx formulas playwright
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y poppler-utils
+      - name: Test suite
+        run: python -m pytest -q -p no:cacheprovider --junitxml=test-results.xml
+      - name: Keep the test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-results
+          path: test-results.xml
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PREFIX: /opt/spc
+      DATA: /var/lib/spc
+      PORT: "8123"   # not the default, so that the upgrade shows whether the settings are kept
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the release (includes IQ/OQ of the build)
+        run: packaging/linux/build.sh
+
+      - name: Install
+        run: |
+          mkdir -p "$RUNNER_TEMP/rel"
+          tar -xzf dist/spc-*-linux-x86_64.tar.gz -C "$RUNNER_TEMP/rel"
+          echo "REL=$(ls -d "$RUNNER_TEMP"/rel/spc-*)" >> "$GITHUB_ENV"
+          pw="$RUNNER_TEMP/pw.txt"
+          echo "Ci-$(openssl rand -hex 16)" > "$pw"
+          echo "PW_FILE=$pw" >> "$GITHUB_ENV"
+          rel="$(ls -d "$RUNNER_TEMP"/rel/spc-*)"
+          sudo "$rel/install.sh" --password-file "$pw" --port "$PORT" --timezone Asia/Taipei
+          sudo grep -q "SPC: result ok" "$DATA/logs/install.log"
+          if sudo ls "$DATA"/.first-password.* 2>/dev/null; then echo "a password file was left behind"; exit 1; fi
+
+      - name: Check the installed program
+        run: |
+          systemctl is-active spc
+          [ "$(systemctl show -p User --value spc)" = "spc" ]
+          [ "$(stat -c %U "$DATA")" = "spc" ] && [ "$(stat -c %a "$DATA")" = "750" ]
+          for i in $(seq 60); do curl -sfk "https://127.0.0.1:$PORT/api/meta" -o meta.json && break; sleep 2; done
+          python3 -c "import json; m = json.load(open('meta.json')); print(m['version'], m['display_timezone']); assert m['display_timezone'] == 'Asia/Taipei'"
+          pw="$(head -n 1 "$PW_FILE")"
+          code=$(curl -sk -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -d "{\"username\":\"admin\",\"password\":\"$pw\"}" "https://127.0.0.1:$PORT/api/auth/login")
+          [ "$code" = "200" ] || { echo "login failed: $code"; exit 1; }
+          rec=$(sudo ls "$DATA"/qualification/IQOQ-*.json | head -n 1)
+          sudo python3 -c "import json, sys; v = json.load(open(sys.argv[1]))['verdict']; print('IQ/OQ', v); assert v != 'fail'" "$rec"
+          sudo "$PREFIX/bin/spc-qualify" verify "$rec"
+
+      - name: The service restarts after a crash
+        run: |
+          pid=$(systemctl show -p MainPID --value spc)
+          sudo kill -9 "$pid"
+          for i in $(seq 40); do
+            new=$(systemctl show -p MainPID --value spc)
+            if [ "$new" != "0" ] && [ "$new" != "$pid" ] && curl -sfk "https://127.0.0.1:$PORT/api/meta" -o /dev/null; then echo "restarted as $new"; exit 0; fi
+            sleep 2
+          done
+          echo "the service did not come back"; exit 1
+
+      - name: Server lock, backup and restore
+        run: |
+          bk="$DATA/backup"
+          sudo "$PREFIX/bin/spc-admin" --db "$DATA/spc.sqlite3" backup --to "$bk"
+          file=$(sudo ls "$bk"/*.sqlite3 | tail -n 1)
+          [ "$(sudo stat -c %U "$file")" = "spc" ]   # a command started by root writes as the service account
+          if sudo "$PREFIX/bin/spc-admin" --db "$DATA/spc.sqlite3" restore "$file" --yes; then echo "restore was not refused while the server runs"; exit 1; fi
+          set +e
+          sudo timeout 60 "$PREFIX/bin/spc-serve" --config "$DATA/spc.json" --port 8124
+          code=$?
+          set -e
+          echo "second server: exit code $code"
+          if [ "$code" = "0" ] || [ "$code" = "124" ]; then echo "a second server started on the same database"; exit 1; fi  # 124: still running at the time limit
+          sudo systemctl stop spc
+          sudo "$PREFIX/bin/spc-admin" --db "$DATA/spc.sqlite3" restore "$file" --yes
+          sudo systemctl start spc
+
+      - name: Install again over the data (upgrade path)
+        run: |
+          sudo "$REL/install.sh"
+          sudo grep -q "SPC: backup before the upgrade, code 0" "$DATA/logs/install.log"
+          [ "$(sudo tail -n 1 "$DATA/logs/install.log")" = "SPC: result ok" ]
+          sudo python3 -c "import json; c = json.load(open('$DATA/spc.json')); assert c['port'] == $PORT and c['display_timezone'] == 'Asia/Taipei', c"
+          for i in $(seq 60); do curl -sfk "https://127.0.0.1:$PORT/api/meta" -o /dev/null && break; sleep 2; done
+          pw="$(head -n 1 "$PW_FILE")"
+          code=$(curl -sk -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -d "{\"username\":\"admin\",\"password\":\"$pw\"}" "https://127.0.0.1:$PORT/api/auth/login")
+          [ "$code" = "200" ]
+
+      - name: Uninstall; the data stay
+        run: |
+          sudo "$PREFIX/uninstall.sh"
+          if systemctl list-unit-files spc.service | grep -q spc.service; then echo "the service was not removed"; exit 1; fi
+          [ ! -e "$PREFIX" ]
+          sudo test -f "$DATA/spc.sqlite3"
+
+      - name: A failed step gives an exit code (no administrator password)
+        run: |
+          set +e
+          sudo "$REL/install.sh" --data-dir /var/lib/spc-2 --port 8125 --no-oq
+          code=$?
+          set -e
+          echo "exit code $code"
+          [ "$code" = "11" ]
+          sudo grep -q "SPC: result failed: no password" /var/lib/spc-2/logs/install.log
+          if systemctl is-active --quiet spc; then echo "a server was started although the setup failed"; exit 1; fi
+          sudo "$PREFIX/uninstall.sh"
+
+      - name: Collect the records
+        if: always()
+        run: |
+          mkdir -p records
+          sudo cp "$DATA/logs/install.log" records/ 2>/dev/null || true
+          sudo cp -r "$DATA/qualification" records/site-qualification 2>/dev/null || true
+          sudo chown -R "$(id -u)" records
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-release
+          path: |
+            dist/
+            records/

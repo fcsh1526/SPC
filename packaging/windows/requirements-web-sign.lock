@@ -1,5 +1,5 @@
 # Packages of the Windows installer (extras web,sign), 64-bit Windows, CPython 3.11.
-# Written by tools/lock_windows.py on 2026-10-16; build.ps1 installs them with pip --require-hashes.
+# Written by tools/lock_windows.py (now tools/lock_packages.py --os windows) on 2026-10-16; tzdata added on 2026-10-19; build.ps1 installs them with pip --require-hashes.
 # Do not edit by hand: run the script again, test, and commit the result.
 annotated-doc==0.0.5 \
     --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101

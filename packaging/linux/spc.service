@@ -1,0 +1,26 @@
+# systemd unit of the SPC server. install.sh fills in @PREFIX@, @DATA@ and @USER@ and writes it to /etc/systemd/system/spc.service.
+[Unit]
+Description=SPC server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@DATA@
+ExecStart=@PREFIX@/python/bin/python3 -m spc.api --config @DATA@/spc.json
+Restart=always
+RestartSec=10
+UMask=0027
+# the server reads the program and writes only into its data folder
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=@DATA@
+# a port below 1024 (for example 443) needs this line; install.sh switches it on for such a port
+#AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

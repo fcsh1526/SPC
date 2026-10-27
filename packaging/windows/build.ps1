@@ -46,7 +46,7 @@ Add-Content -Path $pth.FullName -Value "..\site-packages"
 $extras = if ($WithOpcUa) { "web,sign,opcua" } else { "web,sign" }
 # the packages come from the lock file: exact versions and the SHA-256 of every wheel (pip --require-hashes stops at any other file,
 # and at a dependency that the lock file does not hold);
-# the lock files are written by tools/lock_windows.py and change only on purpose. Wheels only: nothing is compiled on the build machine.
+# the lock files are written by tools/lock_packages.py --os windows and change only on purpose. Wheels only: nothing is compiled on the build machine.
 $lock = Join-Path $PSScriptRoot ("requirements-" + ($extras -replace ",", "-") + ".lock")
 if (-not (Test-Path $lock)) { throw "lock file not found: $lock" }
 $site = Join-Path $app "site-packages"

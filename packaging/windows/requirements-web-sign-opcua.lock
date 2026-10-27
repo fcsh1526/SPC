@@ -1,5 +1,5 @@
 # Packages of the Windows installer (extras web,sign,opcua), 64-bit Windows, CPython 3.11.
-# Written by tools/lock_windows.py on 2026-10-16; build.ps1 installs them with pip --require-hashes.
+# Written by tools/lock_windows.py (now tools/lock_packages.py --os windows) on 2026-10-16; tzdata added on 2026-10-19; build.ps1 installs them with pip --require-hashes.
 # Do not edit by hand: run the script again, test, and commit the result.
 aiosqlite==0.22.1 \
     --hash=sha256:21c002eb13823fad740196c5a2e9d8e62f6243bd9e7e4a1f87fb5e44ecb4fceb
