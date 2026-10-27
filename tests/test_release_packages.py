@@ -3,8 +3,8 @@ pin every package with the SHA-256 of its wheel, the pinned versions satisfy wha
 versions, and the build and install scripts keep the rules that the qualification relies on."""
 
 import re
-import stat
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -62,10 +62,16 @@ def test_the_builds_install_from_the_lock_with_hashes():
 
 def test_the_linux_scripts_are_valid_and_executable():
     scripts = [LINUX / "build.sh", LINUX / "install.sh", LINUX / "uninstall.sh", *sorted((LINUX / "bin").iterdir())]
+    # the executable bit as git stores it (a Windows checkout has no such bit on disk)
+    index = subprocess.run(["git", "ls-files", "-s", "--", *map(str, scripts)], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    modes = {Path(line.split("\t", 1)[1]).name: line.split()[0] for line in index.splitlines()}
     for s in scripts:
-        assert s.stat().st_mode & stat.S_IXUSR, f"{s.name} is not executable"
-        shell = "bash" if s.read_text(encoding="utf-8").startswith("#!/usr/bin/env bash") else "sh"
-        subprocess.run([shell, "-n", str(s)], check=True)
+        assert modes.get(s.name) == "100755", f"{s.name} is not executable in git"
+        text = s.read_bytes()
+        assert b"\r\n" not in text, f"{s.name} has CRLF line ends"
+        if sys.platform != "win32":
+            shell = "bash" if text.startswith(b"#!/usr/bin/env bash") else "sh"
+            subprocess.run([shell, "-n", str(s)], check=True)
     commands = {p.name for p in (LINUX / "bin").iterdir()}
     windows = {p.stem for p in (ROOT / "packaging" / "windows" / "bin").iterdir()}
     assert windows <= commands  # the same commands on both systems

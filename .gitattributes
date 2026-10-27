@@ -1,0 +1,2 @@
+# The Linux scripts keep LF line ends also in a checkout on Windows (bash cannot run CRLF scripts).
+packaging/linux/** text eol=lf

@@ -73,7 +73,7 @@ jobs:
           rel="$(ls -d "$RUNNER_TEMP"/rel/spc-*)"
           sudo "$rel/install.sh" --password-file "$pw" --port "$PORT" --timezone Asia/Taipei
           sudo grep -q "SPC: result ok" "$DATA/logs/install.log"
-          if sudo ls "$DATA"/.first-password.* 2>/dev/null; then echo "a password file was left behind"; exit 1; fi
+          if sudo bash -c 'ls "$1"/.first-password.* 2>/dev/null' _ "$DATA"; then echo "a password file was left behind"; exit 1; fi
 
       - name: Check the installed program
         run: |
@@ -85,7 +85,7 @@ jobs:
           pw="$(head -n 1 "$PW_FILE")"
           code=$(curl -sk -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -d "{\"username\":\"admin\",\"password\":\"$pw\"}" "https://127.0.0.1:$PORT/api/auth/login")
           [ "$code" = "200" ] || { echo "login failed: $code"; exit 1; }
-          rec=$(sudo ls "$DATA"/qualification/IQOQ-*.json | head -n 1)
+          rec=$(sudo bash -c 'ls "$1"/qualification/IQOQ-*.json' _ "$DATA" | head -n 1)   # the glob runs as root: the data folder is closed to others
           sudo python3 -c "import json, sys; v = json.load(open(sys.argv[1]))['verdict']; print('IQ/OQ', v); assert v != 'fail'" "$rec"
           sudo "$PREFIX/bin/spc-qualify" verify "$rec"
 
@@ -104,7 +104,7 @@ jobs:
         run: |
           bk="$DATA/backup"
           sudo "$PREFIX/bin/spc-admin" --db "$DATA/spc.sqlite3" backup --to "$bk"
-          file=$(sudo ls "$bk"/*.sqlite3 | tail -n 1)
+          file=$(sudo bash -c 'ls "$1"/*.sqlite3' _ "$bk" | tail -n 1)
           [ "$(sudo stat -c %U "$file")" = "spc" ]   # a command started by root writes as the service account
           if sudo "$PREFIX/bin/spc-admin" --db "$DATA/spc.sqlite3" restore "$file" --yes; then echo "restore was not refused while the server runs"; exit 1; fi
           set +e
