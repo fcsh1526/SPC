@@ -5,6 +5,8 @@ SPC statistics engine following the AIAG-VDA SPC Manual (2026), ISO 7870 and ISO
 
 Status: phase 1 core library, CSV import, web API with database storage and login, and a bilingual (繁體中文 / English) web interface. See `docs/ARCHITECTURE.md` for the plan, sources and open questions.
 
+For all manufacturing industries: SPC is needed wherever things are made. User manual (繁體中文): `docs/USER_MANUAL.md`. Comparison with other SPC software: `docs/COMPETITORS.md`.
+
 ## Install, test, run
 
 ```
