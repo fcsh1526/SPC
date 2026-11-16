@@ -47,6 +47,7 @@ spc-admin = "spc.admin:main"
 spc-sign = "spc.signing.__main__:main"
 spc-setup = "spc.setup:main"
 spc-qualify = "spc.qualification.__main__:main"
+spc-check = "spc.healthcheck.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
