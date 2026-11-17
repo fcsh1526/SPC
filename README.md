@@ -61,6 +61,24 @@ The server listens on 127.0.0.1 only. To serve a team, put it behind an https pr
 | `spc.db` | SQLite database, dataset and report stores (read-change-write in one transaction) |
 | `spc.auth` | Password hashing, sessions, roles, login throttling, audit hash chain |
 | `spc.api` | FastAPI app (`/api/...`) and the web interface (`spc/web/static`) |
+| `spc.healthcheck` | SPC health check (`spc-check`): reads the export of another SPC system or a spreadsheet and reports what keeps its control charts from working. Offline, one file in, one HTML report out |
+
+## SPC health check (`spc-check`)
+
+For someone who already has SPC data elsewhere (another SPC system, a spreadsheet) and wants to know whether the control charts do their work. It runs on one computer, reads one file, writes one report next to it and sends nothing anywhere. It needs no database, no login and no server.
+
+```
+spc-check export.csv --columns                                  # the column names of the file
+spc-check export.csv --value 量測值 --characteristic 特性 --subgroup 子組 --time 時間 \
+          --lsl-col LSL --usl-col USL --lcl-col LCL --ucl-col UCL --action 處置       # -> export.csv.spc-check.html
+spc-check sheet.xlsx --sheet 金厚 --value X1 --value X2 --value X3 --value X4 --value X5 --lsl 0.03 --usl 0.1 --lang en
+```
+
+- The user names the columns; nothing is guessed. One `--value` column: one row per value. Several: one row per subgroup. CSV in UTF-8 or Big5, or a sheet of an *.xlsx workbook. All problems of the file are reported together with their line numbers (exit code 2).
+- What it checks: control limits that are the specification limits, far too wide, too narrow or off the centre of the process; more variation between the subgroups than within them (nested sampling: X-bar limits too narrow); individual values that are not independent; a level shift of the process (reported as a change of the process, not as a fault of the chart); too many alarms; alarms without a recorded action; an index from an unstable process; a capability below the target; a resolution too coarse for the tolerance or the variation; the same value many times in a row.
+- One cause gives one finding. Each finding says what was found (with the numbers), what to do, and the clause of the draft the program follows for it. The first page is a summary for management.
+- Every threshold is a field of `spc.healthcheck.checks.Settings` and is printed in the annex of the report. The report is in Traditional Chinese or English (`--lang`), one self-contained HTML file with inline SVG; `--json` also writes the result as data.
+- Limits: variable data only (no attribute data yet). The control limits of the file are taken as the limits of the plotted value (the subgroup mean, or the individual value). On data without any fault, about 2 to 5 % of the characteristics still get a finding (tested); the report is a help to look, not a verdict.
 
 ## Web interface
 
